@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>StudyAI — Learn Anything, Instantly</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <div class="logo">Study<span>AI</span></div>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#pricing">Pricing</a>
+      <button class="btn-outline" onclick="openModal('login')">Log In</button>
+      <button class="btn-primary" onclick="openModal('signup')">Get Started</button>
+    </div>
+    <button class="hamburger" onclick="toggleMenu()">☰</button>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-badge">✦ AI-Powered Study Assistant</div>
+    <h1>Learn <em>anything</em><br/>in seconds.</h1>
+    <p class="hero-sub">Paste any lesson, textbook passage, or question — StudyAI gives you a crystal-clear summary, simplified explanation, and direct answers.</p>
+    <div class="hero-cta">
+      <button class="btn-primary large" onclick="scrollToTool()">Try It Free →</button>
+      <span class="hero-note">No credit card · 3 free requests/day</span>
+    </div>
+    <div class="hero-visual">
+      <div class="floating-card card-1">📚 Summarized in 2s</div>
+      <div class="floating-card card-2">🧠 Simplified explanation</div>
+      <div class="floating-card card-3">✅ Homework answered</div>
+    </div>
+  </section>
+
+  <!-- TOOL -->
+  <section class="tool-section" id="tool">
+    <div class="tool-container">
+      <div class="tool-header">
+        <h2>Try StudyAI</h2>
+        <div class="usage-badge" id="usageBadge">
+          <span id="usageText">3 free requests remaining today</span>
+        </div>
+      </div>
+
+      <div class="mode-tabs">
+        <button class="mode-tab active" data-mode="study" onclick="setMode('study', this)">📖 Study Helper</button>
+        <button class="mode-tab" data-mode="homework" onclick="setMode('homework', this)">✏️ Homework</button>
+        <button class="mode-tab" data-mode="summarize" onclick="setMode('summarize', this)">📝 Summarize</button>
+      </div>
+
+      <div class="input-area">
+        <textarea id="userInput" placeholder="Paste your lesson, question, or text here…" maxlength="3001"></textarea>
+        <div class="input-footer">
+          <span id="charCount">0 / 3001</span>
+          <button class="btn-generate" id="generateBtn" onclick="generate()">
+            <span id="btnText">Generate ✦</span>
+            <div class="spinner" id="spinner"></div>
+          </button>
+        </div>
+      </div>
+
+      <!-- RESPONSE -->
+      <div class="response-area" id="responseArea" style="display:none">
+        <div class="response-tabs">
+          <button class="resp-tab active" onclick="showTab('summary', this)">Summary</button>
+          <button class="resp-tab" onclick="showTab('explanation', this)">Explanation</button>
+          <button class="resp-tab" onclick="showTab('answer', this)">Answer</button>
+        </div>
+        <div class="response-content" id="responseContent"></div>
+        <div class="response-actions">
+          <button onclick="copyResponse()">📋 Copy</button>
+          <button onclick="resetTool()">↺ New</button>
+        </div>
+      </div>
+
+      <div class="upgrade-banner" id="upgradeBanner" style="display:none">
+        <div>
+          <strong>You've used all 3 free requests today.</strong>
+          <p>Upgrade to unlimited for just $5/month.</p>
+        </div>
+        <button class="btn-primary" onclick="openModal('signup')">Upgrade Now</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="features" id="features">
+    <h2>Everything you need to study smarter</h2>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>Instant Summaries</h3>
+        <p>Condense long chapters and dense texts into crisp, clear bullet points in seconds.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔬</div>
+        <h3>Simplified Explanations</h3>
+        <p>Complex concepts broken down like a great teacher would — no jargon, just clarity.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📐</div>
+        <h3>Homework Helper</h3>
+        <p>Paste any question and get a step-by-step solution with full reasoning shown.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🌍</div>
+        <h3>Multi-Language</h3>
+        <p>Ask in any language — StudyAI understands and responds in the same language.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📄</div>
+        <h3>PDF Summarizer</h3>
+        <p>Upload any PDF and get a structured summary of its key ideas. <span class="badge-pro">Pro</span></p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📋</div>
+        <h3>CV Generator</h3>
+        <p>Describe your experience and let AI draft a polished CV for you. <span class="badge-pro">Pro</span></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRICING -->
+  <section class="pricing" id="pricing">
+    <h2>Simple, honest pricing</h2>
+    <p class="pricing-sub">Start free. Upgrade when you need more.</p>
+    <div class="pricing-grid">
+      <div class="pricing-card">
+        <div class="plan-name">Free</div>
+        <div class="plan-price">$0<span>/month</span></div>
+        <ul class="plan-features">
+          <li>✓ 3 AI requests per day</li>
+          <li>✓ Study helper & summarizer</li>
+          <li>✓ Homework answers</li>
+          <li>✓ All subjects supported</li>
+          <li class="dim">✗ PDF upload</li>
+          <li class="dim">✗ CV generator</li>
+        </ul>
+        <button class="btn-outline full" onclick="openModal('signup')">Get Started Free</button>
+      </div>
+      <div class="pricing-card featured">
+        <div class="plan-badge">Most Popular</div>
+        <div class="plan-name">Pro</div>
+        <div class="plan-price">$7<span>/month</span></div>
+        <ul class="plan-features">
+          <li>✓ Unlimited AI requests</li>
+          <li>✓ Everything in Free</li>
+          <li>✓ PDF summarizer</li>
+          <li>✓ CV generator</li>
+          <li>✓ Priority speed</li>
+          <li>✓ Email support</li>
+        </ul>
+        <button class="btn-primary full" onclick="openModal('signup')">Start Pro — $7/mo</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="footer-inner">
+      <div class="logo">Study<span>AI</span></div>
+      <p>Built to help every student learn faster.</p>
+      <div class="footer-links">
+        <a href="#">Privacy</a>
+        <a href="#">Terms</a>
+        <a href="#">Contact</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- AUTH MODAL -->
+  <div class="modal-overlay" id="modalOverlay" onclick="closeModal()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <button class="modal-close" onclick="closeModal()">✕</button>
+      <div id="modalContent"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
+<!DOCTYPE html>
+<html>
+<head>
+  <title>StudyAI Chat</title>
+</head>
+<body>
+
+  <h2>🤖 StudyAI Chat</h2>
+
+  <input id="msg" placeholder="Ask something..." />
+  <button onclick="send()">Send</button>
+
+  <p id="res"></p>
+
+  <script>
+    async function send() {
+      const message = document.getElementById("msg").value;
+
+      const res = await fetch("http://localhost:3001/ai", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ message })
+      });
+
+      const data = await res.json();
+      document.getElementById("res").innerText = data.reply;
+    }
+  </script>
+
+</body>
+</html>
