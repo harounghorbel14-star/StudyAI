@@ -77,6 +77,26 @@ app.get('/api/auth/google/callback',
 );
 
 // ---- AUTH ROUTES ----
+app.post('/api/generate', async (req, res) => {
+  try {
+    const userInput = req.body.input;
+
+    const response = await openai.responses.create({
+      prompt: {
+        id: "pmpt_69f0fa7b69f48194b16f3be013ee67c10761b3ff1e21bd62", 
+        version: "1"
+      },
+      input: userInput
+    });
+
+    res.json({ result: response.output[0].content[0].text });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong" });
+  }
+});
+
 app.post('/api/auth/signup', async (req, res) => {
   const { name, email, password } = req.body;
   if (!name || !email || !password) return res.status(400).json({ error: 'All fields required' });
