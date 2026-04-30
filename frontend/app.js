@@ -474,15 +474,36 @@ async function sendMessage(){
     const tool=S.tool;
     let result;
 
-    // Image attached → analyze image
+    // Image attached → edit image with prompt
     if(img&&img.base64){
-      result=await api('/api/chat',{method:'POST',body:{
-        input:`[User sent an image] ${text||'Describe and analyze this image in detail.'}`,
-        session_id:S.sessionId||undefined,
-      }});
-      S.sessionId=result.session_id;
-      hideTyping();
-      addMsg({role:'assistant',text:result.reply});
+      if(text){ // has prompt → edit image
+        showTyping();
+        const form=new FormData();
+        // convert base64 to blob
+        const byteStr=atob(img.base64);
+        const arr=new Uint8Array(byteStr.length);
+        for(let i=0;i<byteStr.length;i++)arr[i]=byteStr.charCodeAt(i);
+        const blob=new Blob([arr],{type:'image/png'});
+        form.append('image',blob,'image.png');
+        form.append('prompt',text);
+        const result=await fetch(API+'/api/image/edit',{
+          method:'POST',
+          headers:{Authorization:'Bearer '+S.token},
+          body:form,
+        });
+        const data=await result.json();
+        if(!result.ok)throw new Error(data.error||'Edit failed');
+        hideTyping();
+        addMsg({role:'assistant',text:'✅ Here is your edited image:',type:'image',data:data.url});
+      } else { // no prompt → analyze image
+        const result=await api('/api/chat',{method:'POST',body:{
+          input:'Describe and analyze this image in detail.',
+          session_id:S.sessionId||undefined,
+        }});
+        S.sessionId=result.session_id;
+        hideTyping();
+        addMsg({role:'assistant',text:result.reply});
+      }
 
     } else if(tool){
       const isTTS=['tts','tts-nova','tts-echo','tts-fable','tts-onyx'].includes(tool.id);
@@ -550,12 +571,23 @@ function handleImageAttach(input){
         <img src="${e.target.result}" alt=""/>
         <div class="attach-remove" onclick="removeAttach()">✕</div>
       </div>`;
+    // hint user to describe edit
+    const msgInput=document.getElementById('msg-input');
+    if(msgInput){
+      msgInput.placeholder='Describe what to edit... (e.g. "make background blue", "remove person")';
+      msgInput.focus();
+    }
   };
   reader.readAsDataURL(file);
   input.value='';
 }
 
-function removeAttach(){S.attachedImg=null;clearAttachPreview();}
+function removeAttach(){
+  S.attachedImg=null;
+  clearAttachPreview();
+  const msgInput=document.getElementById('msg-input');
+  if(msgInput) msgInput.placeholder='Message NexusAI...';
+}
 function clearAttachPreview(){
   const p=document.getElementById('attach-preview');
   if(p){p.style.display='none';p.innerHTML='';}

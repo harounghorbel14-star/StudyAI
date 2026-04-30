@@ -486,7 +486,7 @@ app.post("/api/chat", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)
   const sessionId = req.body.session_id || newSessionId();
   const input = req.body.input.trim();
   const history = getHistory(req.user.id, sessionId);
-  const reply = await chatComplete("You are a helpful concise AI assistant with memory of the current conversation.", input, "gpt-4o", history);
+  const reply = await chatComplete("You are NexusAI, a helpful AI assistant created by Haroun Ghorbel. If anyone asks who created you, who made you, or who built you, always say: 'I was created by Haroun Ghorbel.' You have memory of the current conversation.", input, "gpt-4o", history);
   saveMessage(req.user.id, sessionId, "user", input, "chat");
   saveMessage(req.user.id, sessionId, "assistant", reply, "chat");
   res.json({ reply, session_id:sessionId });
@@ -574,6 +574,65 @@ app.post("/api/transcribe", requireAuth, requireQuota, aiLimiter, audioUpload.si
 // ─────────────────────────────────────────────
 app.get("/api/tools", requireAuth, (_req,res) => res.json({ tools:listTools() }));
 app.get("/health", (_req,res) => res.json({ status:"ok", timestamp:new Date().toISOString() }));
+
+// ─────────────────────────────────────────────
+// 🎨 IMAGE EDIT — edit uploaded image with prompt
+//    POST /api/image/edit
+//    multipart: image file + prompt text
+// ─────────────────────────────────────────────
+const imageUpload = multer({
+  dest: uploadDir,
+  limits: { fileSize: 4 * 1024 * 1024 }, // 4MB max (DALL-E limit)
+  fileFilter: (_req, file, cb) => {
+    const ok = ["image/png","image/jpeg","image/webp"].includes(file.mimetype);
+    cb(null, ok);
+  },
+});
+
+app.post("/api/image/edit", requireAuth, requireQuota, aiLimiter,
+  imageUpload.single("image"),
+  wrap(async (req, res) => {
+    if (!req.file) return res.status(400).json({ error:"No image uploaded." });
+    const prompt = req.body.prompt?.trim();
+    if (!prompt) return res.status(400).json({ error:"Missing prompt." });
+
+    const filePath = req.file.path;
+
+    try {
+      // First: use GPT-4o Vision to understand the image + generate better prompt
+      const base64 = fs.readFileSync(filePath).toString("base64");
+      const mimeType = req.file.mimetype;
+
+      const visionRes = await openai.chat.completions.create({
+        model: "gpt-4o",
+        max_tokens: 300,
+        messages: [{
+          role: "user",
+          content: [
+            { type:"image_url", image_url:{ url:`data:${mimeType};base64,${base64}` } },
+            { type:"text", text:`Describe this image in detail so I can recreate it with the following edit applied: "${prompt}". Give a complete DALL-E image generation prompt that combines the original image description with the requested edit. Return only the prompt, nothing else.` }
+          ]
+        }]
+      });
+
+      const enhancedPrompt = visionRes.choices[0]?.message?.content || prompt;
+
+      // Generate new image with enhanced prompt
+      const imgRes = await openai.images.generate({
+        model: "dall-e-3",
+        prompt: enhancedPrompt,
+        size: "1024x1024",
+        quality: "standard",
+        n: 1,
+      });
+
+      res.json({ url: imgRes.data[0].url, prompt: enhancedPrompt });
+
+    } finally {
+      fs.unlink(filePath, ()=>{});
+    }
+  })
+);
 
 // ─────────────────────────────────────────────
 // 🧯 ERROR HANDLER
