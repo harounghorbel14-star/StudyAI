@@ -224,6 +224,16 @@ db.prepare(`CREATE TABLE IF NOT EXISTS pdf_documents (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`).run();
 
+// ── Long-term Memory ──────────────────────────
+db.prepare(`CREATE TABLE IF NOT EXISTS user_memories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(user_id, key)
+)`).run();
+
 // ─────────────────────────────────────────────
 // 📁 UPLOAD CONFIG
 // ─────────────────────────────────────────────
@@ -478,6 +488,66 @@ app.delete("/api/pdf/:id", requireAuth, wrap(async (req,res) => {
 }));
 
 // ─────────────────────────────────────────────
+// 🧠 LONG-TERM MEMORY HELPERS
+// ─────────────────────────────────────────────
+function getUserMemories(userId) {
+  return db.prepare(`SELECT key, value FROM user_memories WHERE user_id=? ORDER BY updated_at DESC LIMIT 20`).all(userId);
+}
+
+function setMemory(userId, key, value) {
+  db.prepare(`INSERT INTO user_memories (user_id,key,value,updated_at) VALUES (?,?,?,datetime('now'))
+    ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`
+  ).run(userId, key.slice(0,100), value.slice(0,500));
+}
+
+function deleteMemory(userId, key) {
+  db.prepare(`DELETE FROM user_memories WHERE user_id=? AND key=?`).run(userId, key);
+}
+
+function memoriesAsContext(memories) {
+  if (!memories.length) return '';
+  return '\n\n[User memories — things you remember about this user:\n' +
+    memories.map(m => `- ${m.key}: ${m.value}`).join('\n') + ']';
+}
+
+async function extractAndSaveMemories(userId, userInput, aiResponse) {
+  // Ask AI to extract memorable facts from this conversation turn
+  try {
+    const extraction = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      max_tokens: 200,
+      messages: [{
+        role: "user",
+        content: `Extract any personal facts about the USER from this conversation turn. Only extract clear facts (name, job, location, interests, goals, etc). Return JSON array like: [{"key":"name","value":"John"},{"key":"job","value":"developer"}]. If nothing memorable, return [].
+
+User said: "${userInput.slice(0,300)}"
+AI responded: "${aiResponse.slice(0,200)}"
+
+JSON only, no explanation:`
+      }]
+    });
+    const text = extraction.choices[0]?.message?.content?.trim() || '[]';
+    const facts = JSON.parse(text.replace(/```json|```/g,'').trim());
+    if (Array.isArray(facts)) {
+      for (const f of facts) {
+        if (f.key && f.value) setMemory(userId, f.key, f.value);
+      }
+    }
+  } catch(_) {} // non-fatal
+}
+
+// ── Memory API routes ─────────────────────────
+app.get("/api/memory", requireAuth, wrap(async (req, res) => {
+  const memories = getUserMemories(req.user.id);
+  res.json({ memories });
+}));
+
+app.delete("/api/memory/:key", requireAuth, wrap(async (req, res) => {
+  deleteMemory(req.user.id, req.params.key);
+  res.json({ ok: true });
+}));
+
+// ─────────────────────────────────────────────
 // 💬 CHAT + AGENT
 // ─────────────────────────────────────────────
 app.post("/api/chat", requireAuth, requireQuota, aiLimiter, wrap(async (req,res) => {
@@ -486,9 +556,20 @@ app.post("/api/chat", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)
   const sessionId = req.body.session_id || newSessionId();
   const input = req.body.input.trim();
   const history = getHistory(req.user.id, sessionId);
-  const reply = await chatComplete("You are NexusAI, a helpful AI assistant created by Haroun Ghorbel. If anyone asks who created you, who made you, or who built you, always say: 'I was created by Haroun Ghorbel.' You have memory of the current conversation.", input, "gpt-4o", history);
+
+  // Load long-term memories
+  const memories = getUserMemories(req.user.id);
+  const memContext = memoriesAsContext(memories);
+
+  const systemPrompt = `You are NexusAI, a helpful AI assistant created by Haroun Ghorbel. If anyone asks who created you, say: 'I was created by Haroun Ghorbel.' You have memory of the current conversation and long-term memory about the user.${memContext}`;
+
+  const reply = await chatComplete(systemPrompt, input, "gpt-4o", history);
   saveMessage(req.user.id, sessionId, "user", input, "chat");
   saveMessage(req.user.id, sessionId, "assistant", reply, "chat");
+
+  // Extract and save new memories in background
+  extractAndSaveMemories(req.user.id, input, reply);
+
   res.json({ reply, session_id:sessionId });
 }));
 
