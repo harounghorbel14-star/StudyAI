@@ -118,18 +118,39 @@ const TOOLS = [
 const S = {
   token: localStorage.getItem('nx_t')||'',
   user: null,
-  tool: null,       // active tool
+  tool: null,
   sessionId: null,
-  msgs: [],         // [{role,text,type,data}]
-  attachedImg: null,// {file, base64, url}
+  msgs: [],
+  attachedImg: null,
   recording: false,
   mediaRec: null,
   recChunks: [],
   currentCat: '',
   authMode: 'login',
-  page: 'chat',     // chat | projects | pdf | pricing
-  webSearch: false, // web search toggle
+  page: 'chat',
+  webSearch: false,
+  persona: 'default',
+  personaPrompt: 'You are NexusAI, a helpful AI assistant created by Haroun Ghorbel.',
+  tone: 50, // 0=very formal, 100=very casual
 };
+
+// ── PERSONAS ──────────────────────────────────
+const PERSONAS = {
+  default:   {label:'🤖 Default',   prompt:'You are NexusAI, a helpful AI assistant created by Haroun Ghorbel. If asked who created you, say Haroun Ghorbel.'},
+  professor: {label:'🧑‍🏫 Professor', prompt:'You are a brilliant professor. Explain everything with clarity, depth, and real-world examples. Be academic but accessible.'},
+  friend:    {label:'😎 Friend',     prompt:'You are a cool friendly buddy. Talk casually, use humor, be relatable. Keep it chill and fun.'},
+  coach:     {label:'💼 Coach',      prompt:'You are a results-driven business coach. Be direct, actionable, and focused on ROI and execution.'},
+  creative:  {label:'🎭 Creative',   prompt:'You are a wildly creative AI. Think outside the box, use vivid language, and inspire with imaginative ideas.'},
+};
+
+function setPersona(btn, id){
+  S.persona = id;
+  S.personaPrompt = PERSONAS[id]?.prompt || PERSONAS.default.prompt;
+  document.querySelectorAll('.persona-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  toast(`${PERSONAS[id]?.label || id} activated`, 'success');
+  closeSidebar();
+}
 
 // ── WEB SEARCH TOGGLE ─────────────────────────
 function toggleSearch(){
@@ -137,8 +158,150 @@ function toggleSearch(){
   const dot = document.getElementById('search-dot');
   const btn  = document.getElementById('search-btn');
   if(dot) dot.style.display = S.webSearch ? 'block' : 'none';
-  if(btn) btn.style.color  = S.webSearch ? 'var(--a1)' : '';
+  if(btn) btn.style.color   = S.webSearch ? 'var(--a1)' : '';
   toast(S.webSearch ? '🔍 Web Search ON' : 'Web Search OFF', 'success');
+}
+
+// ── PROMPT TEMPLATES ──────────────────────────
+const TEMPLATES = [
+  {label:'📊 Business plan', text:'Write a business plan for: '},
+  {label:'👶 Explain like I\'m 5', text:'Explain like I\'m 5: '},
+  {label:'🔧 Fix my code', text:'Fix this code: '},
+  {label:'📝 Summarize', text:'Summarize this: '},
+  {label:'🌍 Translate to Arabic', text:'Translate to Arabic: '},
+  {label:'🎵 TikTok script', text:'Write a TikTok script about: '},
+  {label:'✉️ Write email', text:'Write a professional email for: '},
+  {label:'💡 Startup idea', text:'Give me startup ideas for: '},
+];
+
+function renderTemplates(){
+  const existing = document.getElementById('templates-row');
+  if(existing) existing.remove();
+  const wrap = document.createElement('div');
+  wrap.id = 'templates-row';
+  wrap.className = 'templates-row';
+  wrap.innerHTML = TEMPLATES.map(t=>
+    `<button class="tpl-btn" onclick="useTemplate('${t.text.replace(/'/g,"\\'")}')">
+      ${t.label}
+    </button>`
+  ).join('');
+  document.getElementById('input-wrap').insertBefore(wrap, document.getElementById('input-bar'));
+}
+
+function useTemplate(text){
+  const input = document.getElementById('msg-input');
+  if(!input) return;
+  input.value = text;
+  input.focus();
+  input.setSelectionRange(text.length, text.length);
+  autoGrow(input);
+}
+
+// ── CHAT EXPORT ───────────────────────────────
+function exportChat(){
+  if(!S.msgs.length){ toast('No messages to export', 'error'); return; }
+  const lines = S.msgs.map(m =>
+    `${m.role === 'user' ? '👤 You' : '🤖 NexusAI'}:\n${m.text||''}\n`
+  ).join('\n---\n\n');
+  const content = `NexusAI Chat Export\n${'='.repeat(40)}\nDate: ${new Date().toLocaleString()}\nTool: ${S.tool?.name||'General Chat'}\n${'='.repeat(40)}\n\n${lines}`;
+  const blob = new Blob([content], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `nexusai-chat-${Date.now()}.txt`;
+  a.click(); URL.revokeObjectURL(url);
+  toast('Chat exported ✅', 'success');
+}
+
+// ── FAVORITES ─────────────────────────────────
+async function saveToFavorites(text, tool){
+  if(!text){ toast('Nothing to save', 'error'); return; }
+  const title = text.slice(0,60) + (text.length>60?'...':'');
+  try{
+    await api('/api/favorites',{method:'POST',body:{title, content:text, tool: tool||S.tool?.name||'chat'}});
+    toast('⭐ Saved to favorites!', 'success');
+  }catch(e){ toast(e.message, 'error'); }
+}
+
+async function navigate(page){
+  S.page = page;
+  closeSidebar();
+  if(page==='projects') renderProjects();
+  else if(page==='pdf') renderPDF();
+  else if(page==='pricing') renderPricing();
+  else if(page==='favorites') renderFavorites();
+  else if(page==='dashboard') renderDashboard();
+}
+
+async function renderFavorites(){
+  document.getElementById('messages').innerHTML = '<div class="page-wrap"><div class="page-title">⭐ Favorites</div><div style="color:var(--t2)">Loading...</div></div>';
+  try{
+    const {favorites=[]} = await api('/api/favorites');
+    document.getElementById('messages').innerHTML = `<div class="page-wrap">
+      <div class="page-title">⭐ Favorites (${favorites.length})</div>
+      ${favorites.length ? `<div class="favs-list">
+        ${favorites.map(f=>`
+        <div class="fav-card">
+          <div class="fav-content">
+            <div class="fav-title">${esc(f.title)}</div>
+            <div class="fav-preview">${esc(f.content)}</div>
+            <div class="fav-meta">${f.tool||'chat'} · ${new Date(f.created_at).toLocaleDateString()}</div>
+          </div>
+          <button class="fav-del" onclick="deleteFav(${f.id})">✕</button>
+        </div>`).join('')}
+      </div>` : '<div style="color:var(--t2);padding:40px;text-align:center">No favorites yet.<br/>Save AI responses using the ⭐ button.</div>'}
+    </div>`;
+  }catch(e){ toast(e.message,'error'); }
+}
+
+async function deleteFav(id){
+  try{
+    await api('/api/favorites/'+id,{method:'DELETE'});
+    toast('Deleted','success');
+    renderFavorites();
+  }catch(e){ toast(e.message,'error'); }
+}
+
+async function renderDashboard(){
+  document.getElementById('messages').innerHTML = '<div class="page-wrap"><div class="page-title">📊 My Dashboard</div><div style="color:var(--t2)">Loading...</div></div>';
+  try{
+    const d = await api('/api/usage/stats');
+    const maxDaily = Math.max(...(d.dailyUsage||[]).map(x=>x.count), 1);
+    document.getElementById('messages').innerHTML = `<div class="page-wrap">
+      <div class="page-title">📊 My Dashboard</div>
+
+      <div class="dash-stats">
+        <div class="dash-card"><div class="dash-num">${d.totalMessages||0}</div><div class="dash-lbl">Total messages</div></div>
+        <div class="dash-card"><div class="dash-num">${d.totalProjects||0}</div><div class="dash-lbl">Projects saved</div></div>
+        <div class="dash-card"><div class="dash-num">${d.totalFavorites||0}</div><div class="dash-lbl">Favorites</div></div>
+        <div class="dash-card"><div class="dash-num">${d.plan||'free'}</div><div class="dash-lbl">Current plan</div></div>
+      </div>
+
+      <div class="dash-section">
+        <div class="dash-section-title">Top Tools Used</div>
+        ${d.topTools?.length ? d.topTools.map(t=>`
+          <div class="top-tool-row">
+            <div class="top-tool-name">${t.feature}</div>
+            <div class="top-tool-count">${t.count}x</div>
+          </div>`).join('') : '<div style="color:var(--t2);font-size:13px">No tool usage yet.</div>'}
+      </div>
+
+      <div class="dash-section">
+        <div class="dash-section-title">Last 7 Days</div>
+        <div class="bar-rows">
+          ${(d.dailyUsage||[]).map(x=>`
+          <div class="bar-row">
+            <div class="bar-day">${x.day.slice(5)}</div>
+            <div class="bar-track"><div class="bar-fill" style="width:${Math.round(x.count/maxDaily*100)}%"></div></div>
+            <div style="font-size:11px;color:var(--t3);width:24px">${x.count}</div>
+          </div>`).join('')||'<div style="color:var(--t2);font-size:13px">No data yet.</div>'}
+        </div>
+      </div>
+
+      <div style="font-size:12px;color:var(--t3);margin-top:8px">
+        Member since ${new Date(d.memberSince||Date.now()).toLocaleDateString()}
+      </div>
+    </div>`;
+  }catch(e){ toast(e.message,'error'); }
 }
 
 // ── API ───────────────────────────────────────
@@ -212,6 +375,7 @@ async function init(){
   document.getElementById('usage-pill').textContent=`${used}/${limit===null?'∞':limit}`;
   renderToolList('');
   loadHistory();
+  renderTemplates();
   showEmpty();
 
   // Auto greeting
@@ -321,14 +485,6 @@ function newChat(){
   showEmpty();
 }
 
-function navigate(page){
-  S.page=page;
-  closeSidebar();
-  if(page==='projects')renderProjects();
-  else if(page==='pdf')renderPDF();
-  else if(page==='pricing')renderPricing();
-}
-
 // ── CHAT MESSAGES ─────────────────────────────
 function showEmpty(){
   const msgs=document.getElementById('messages');
@@ -398,6 +554,7 @@ function renderAllMsgs(){
           <div class="msg-bubble">${bubble}</div>
           <div class="msg-actions">
             <button class="msg-act-btn" onclick="copyMsg(${i})">Copy</button>
+            <button class="msg-act-btn star" onclick="saveToFavorites('${(m.text||'').replace(/'/g,"\\'")}','${S.tool?.name||''}')" title="Save to favorites">⭐ Save</button>
             ${m.data&&m.type==='audio'?`<a class="msg-act-btn" href="${m.data}" download>Download</a>`:''}
           </div>
         </div>

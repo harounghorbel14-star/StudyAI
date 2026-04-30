@@ -81,7 +81,24 @@
         <div id="tool-list"></div>
       </div>
 
-      <!-- History -->
+      <!-- Pages & Personas -->
+      <div class="sb-divider"></div>
+      <div class="sb-label">Pages</div>
+      <button class="sb-nav-btn" onclick="navigate('favorites')">⭐ Favorites</button>
+      <button class="sb-nav-btn" onclick="navigate('dashboard')">📊 Dashboard</button>
+      <button class="sb-nav-btn" onclick="navigate('projects')">📁 Projects</button>
+      <button class="sb-nav-btn" onclick="navigate('pdf')">📄 PDF Chat</button>
+
+      <div class="sb-divider"></div>
+      <div class="sb-label">AI Persona</div>
+      <div class="persona-grid">
+        <button class="persona-btn active" onclick="setPersona(this,'default')">🤖 Default</button>
+        <button class="persona-btn" onclick="setPersona(this,'professor')">🧑‍🏫 Professor</button>
+        <button class="persona-btn" onclick="setPersona(this,'friend')">😎 Friend</button>
+        <button class="persona-btn" onclick="setPersona(this,'coach')">💼 Coach</button>
+        <button class="persona-btn" onclick="setPersona(this,'creative')">🎭 Creative</button>
+      </div>
+
       <div class="sb-divider"></div>
       <div class="sb-label">Recent chats</div>
       <div id="history-list"></div>
@@ -116,6 +133,9 @@
       </div>
       <div class="topbar-right">
         <div class="usage-pill" id="usage-pill">0/10</div>
+        <button class="top-btn" onclick="exportChat()" title="Export chat">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
         <button class="top-btn" onclick="newChat()" title="New chat">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
         </button>

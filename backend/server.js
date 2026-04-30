@@ -234,6 +234,16 @@ db.prepare(`CREATE TABLE IF NOT EXISTS user_memories (
   UNIQUE(user_id, key)
 )`).run();
 
+// ── Favorites ─────────────────────────────────
+db.prepare(`CREATE TABLE IF NOT EXISTS favorites (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  content TEXT NOT NULL,
+  tool TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`).run();
+
 // ─────────────────────────────────────────────
 // 📁 UPLOAD CONFIG
 // ─────────────────────────────────────────────
@@ -700,6 +710,37 @@ app.post("/api/search", requireAuth, requireQuota, aiLimiter, wrap(async (req, r
 }));
 app.get("/api/tools", requireAuth, (_req,res) => res.json({ tools:listTools() }));
 app.get("/health", (_req,res) => res.json({ status:"ok", timestamp:new Date().toISOString() }));
+
+// ─────────────────────────────────────────────
+// ⭐ FAVORITES
+// ─────────────────────────────────────────────
+app.get("/api/favorites", requireAuth, wrap(async (req,res) => {
+  const favs = db.prepare(`SELECT * FROM favorites WHERE user_id=? ORDER BY created_at DESC LIMIT 50`).all(req.user.id);
+  res.json({ favorites: favs });
+}));
+app.post("/api/favorites", requireAuth, wrap(async (req,res) => {
+  const { title, content, tool } = req.body;
+  if (!content) return res.status(400).json({ error:"Missing content." });
+  const id = db.prepare(`INSERT INTO favorites (user_id,title,content,tool) VALUES (?,?,?,?)`).run(req.user.id, (title||'Saved response').slice(0,100), content, tool||null).lastInsertRowid;
+  res.json({ ok:true, id });
+}));
+app.delete("/api/favorites/:id", requireAuth, wrap(async (req,res) => {
+  db.prepare(`DELETE FROM favorites WHERE id=? AND user_id=?`).run(Number(req.params.id), req.user.id);
+  res.json({ ok:true });
+}));
+
+// ─────────────────────────────────────────────
+// 📊 USAGE DASHBOARD
+// ─────────────────────────────────────────────
+app.get("/api/usage/stats", requireAuth, wrap(async (req,res) => {
+  const total = db.prepare(`SELECT COUNT(*) as count FROM conversations WHERE user_id=? AND role='user'`).get(req.user.id);
+  const daily = db.prepare(`SELECT date(created_at) as day, COUNT(*) as count FROM conversations WHERE user_id=? AND role='user' AND created_at >= datetime('now','-7 days') GROUP BY day ORDER BY day`).all(req.user.id);
+  const topTools = db.prepare(`SELECT feature, COUNT(*) as count FROM conversations WHERE user_id=? AND role='user' AND feature != 'chat' GROUP BY feature ORDER BY count DESC LIMIT 5`).all(req.user.id);
+  const projects = db.prepare(`SELECT COUNT(*) as count FROM saved_projects WHERE user_id=?`).get(req.user.id);
+  const favCount = db.prepare(`SELECT COUNT(*) as count FROM favorites WHERE user_id=?`).get(req.user.id);
+  const user = db.prepare(`SELECT created_at, plan FROM users WHERE id=?`).get(req.user.id);
+  res.json({ totalMessages:total.count, dailyUsage:daily, topTools, totalProjects:projects.count, totalFavorites:favCount.count, memberSince:user?.created_at, plan:user?.plan });
+}));
 
 // ─────────────────────────────────────────────
 // 🎨 IMAGE EDIT — edit uploaded image with prompt
