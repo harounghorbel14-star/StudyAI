@@ -128,7 +128,18 @@ const S = {
   currentCat: '',
   authMode: 'login',
   page: 'chat',     // chat | projects | pdf | pricing
+  webSearch: false, // web search toggle
 };
+
+// ── WEB SEARCH TOGGLE ─────────────────────────
+function toggleSearch(){
+  S.webSearch = !S.webSearch;
+  const dot = document.getElementById('search-dot');
+  const btn  = document.getElementById('search-btn');
+  if(dot) dot.style.display = S.webSearch ? 'block' : 'none';
+  if(btn) btn.style.color  = S.webSearch ? 'var(--a1)' : '';
+  toast(S.webSearch ? '🔍 Web Search ON' : 'Web Search OFF', 'success');
+}
 
 // ── API ───────────────────────────────────────
 async function api(path, opts={}) {
@@ -457,6 +468,20 @@ async function sendMessage(){
   showTyping();
 
   try{
+    // 🔍 Web Search mode
+    if(S.webSearch && text && !img){
+      const result = await api('/api/search',{method:'POST',body:{query:text}});
+      hideTyping();
+      // Format answer with sources
+      let answer = result.answer || '';
+      if(result.sources?.length){
+        answer += '\n\n**Sources:**\n' + result.sources.map((s,i)=>`[${i+1}] [${s.title}](${s.url})`).join('\n');
+      }
+      addMsg({role:'assistant', text:answer});
+      try{S.user=await api('/api/me');updateUsage();}catch(_){}
+      return;
+    }
+
     // Auto-select tool if none selected based on keywords
     if(!S.tool){
       const lower=text.toLowerCase();

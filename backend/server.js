@@ -570,8 +570,51 @@ app.post("/api/transcribe", requireAuth, requireQuota, aiLimiter, audioUpload.si
 }));
 
 // ─────────────────────────────────────────────
-// 📋 TOOLS LIST + HEALTH
+// 🔍 WEB SEARCH — Tavily
+//    POST /api/search
+//    Body: { query }
 // ─────────────────────────────────────────────
+app.post("/api/search", requireAuth, requireQuota, aiLimiter, wrap(async (req, res) => {
+  const err = validateBody(req.body, ["query"]);
+  if (err) return res.status(400).json({ error: err });
+
+  const query = req.body.query.trim();
+
+  // 1. Search the web
+  const searchRes = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      api_key: process.env.TAVILY_API_KEY,
+      query,
+      search_depth: "basic",
+      max_results: 5,
+      include_answer: true,
+    }),
+  });
+
+  if (!searchRes.ok) throw new Error("Search failed. Check TAVILY_API_KEY.");
+  const searchData = await searchRes.json();
+
+  // 2. Build context from results
+  const results = searchData.results || [];
+  const context = results.map((r, i) =>
+    `[${i+1}] ${r.title}\n${r.content?.slice(0,300)}\nSource: ${r.url}`
+  ).join("\n\n");
+
+  // 3. AI summarizes results
+  const summary = await chatComplete(
+    "You are NexusAI, a helpful AI assistant created by Haroun Ghorbel. You have access to real-time web search results. Summarize the search results clearly and concisely. Always cite sources with [1], [2] etc. If the answer is in the results, give a direct answer first.",
+    `Query: "${query}"\n\nSearch Results:\n${context}\n\nProvide a clear, helpful answer based on these results.`,
+    "gpt-4o"
+  );
+
+  res.json({
+    answer: summary,
+    sources: results.map(r => ({ title: r.title, url: r.url })),
+    query,
+  });
+}));
 app.get("/api/tools", requireAuth, (_req,res) => res.json({ tools:listTools() }));
 app.get("/health", (_req,res) => res.json({ status:"ok", timestamp:new Date().toISOString() }));
 
