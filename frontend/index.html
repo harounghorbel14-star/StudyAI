@@ -1,169 +1,153 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-7017XLCQQW"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-
-  gtag('config', 'G-7017XLCQQW');
-</script>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>NexusAI — 150+ AI Tools</title>
+<title>NexusAI</title>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-7017XLCQQW"></script>
+<script>
+  window.dataLayer=window.dataLayer||[];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js',new Date());
+  gtag('config','G-7017XLCQQW');
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <link rel="icon" type="image/svg+xml" href="logo.svg"/>
 <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
 
-<!-- ── AUTH OVERLAY ──────────────────────────────────── -->
+<!-- AUTH -->
 <div id="auth-overlay">
-  <div class="auth-box">
-    <div class="auth-logo">Nexus<span>AI</span></div>
-    <div class="auth-sub">150+ AI tools. One platform.</div>
+  <div class="auth-card">
+    <div class="auth-brand">
+      <img src="logo.svg" width="40" height="40" alt="NexusAI"/>
+      <span class="auth-brand-name">NexusAI</span>
+    </div>
+    <h1 class="auth-title" id="auth-heading">Welcome back</h1>
+    <p class="auth-sub" id="auth-subtext">Sign in to continue</p>
     <div class="auth-tabs">
-      <div class="auth-tab active" onclick="switchTab('login')">Sign In</div>
-      <div class="auth-tab" onclick="switchTab('signup')">Create Account</div>
+      <button class="auth-tab active" id="tab-login" onclick="switchTab('login')">Sign in</button>
+      <button class="auth-tab" id="tab-signup" onclick="switchTab('signup')">Create account</button>
     </div>
-    <div class="field">
-      <label>Email</label>
-      <input type="email" id="auth-email" placeholder="you@example.com" autocomplete="email"/>
-    </div>
-    <div class="field">
-      <label>Password</label>
-      <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password"/>
-    </div>
-    <button class="btn-primary" id="auth-btn" onclick="handleAuth()">Sign In</button>
-    <div class="auth-error" id="auth-error"></div>
+    <input class="auth-input" type="email" id="auth-email" placeholder="Email address" autocomplete="email"/>
+    <input class="auth-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password"/>
+    <button class="auth-btn" id="auth-btn" onclick="handleAuth()">Continue</button>
+    <p class="auth-error" id="auth-error"></p>
   </div>
 </div>
 
-<!-- ── APP SHELL ─────────────────────────────────────── -->
+<!-- APP -->
 <div id="app">
 
+  <!-- Sidebar backdrop -->
+  <div id="sidebar-backdrop" onclick="closeSidebar()"></div>
+
   <!-- Sidebar -->
-  <nav id="sidebar">
-    <div class="sidebar-logo">Nexus<span>AI</span></div>
-
-    <div class="sidebar-plan">
-      <div>
-        <div class="plan-info"><strong id="sb-email">user@email.com</strong>Current plan</div>
+  <aside id="sidebar">
+    <div class="sb-top">
+      <div class="sb-brand">
+        <img src="logo.svg" width="22" height="22" alt=""/>
+        <span>NexusAI</span>
       </div>
-      <span class="plan-badge" id="sb-plan">FREE</span>
-    </div>
-
-    <div class="sidebar-nav">
-      <div class="nav-section">
-        <div class="nav-section-label">Main</div>
-        <div class="nav-item active" data-page="home" onclick="navigate('home')">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-          Dashboard
-        </div>
-        <div class="nav-item" data-page="tools" onclick="navigate('tools')">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-          All Tools
-          <span class="nav-count">150+</span>
-        </div>
-      </div>
-      <div class="nav-section">
-        <div class="nav-section-label">Categories</div>
-        <div class="nav-item" data-page="cat-ai" onclick="navigate('cat-ai')">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
-          AI Essentials <span class="nav-count">19</span>
-        </div>
-        <div class="nav-item" data-page="cat-code" onclick="navigate('cat-code')">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-          Code & Dev <span class="nav-count">17</span>
-        </div>
-        <div class="nav-item" data-page="cat-business" onclick="navigate('cat-business')">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-          Business <span class="nav-count">13</span>
-        </div>
-        <div class="nav-item" data-page="cat-content" onclick="navigate('cat-content')">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          Content <span class="nav-count">13</span>
-        </div>
-        <div class="nav-item" data-page="cat-media" onclick="navigate('cat-media')">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-          Image & Media <span class="nav-count">10</span>
-        </div>
-        <div class="nav-item" data-page="cat-video" onclick="navigate('cat-video')">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
-          Video & Film <span class="nav-count">8</span>
-        </div>
-        <div class="nav-item" data-page="cat-audio" onclick="navigate('cat-audio')">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-          Voice & Audio <span class="nav-count">11</span>
-        </div>
-        <div class="nav-item" data-page="cat-productivity" onclick="navigate('cat-productivity')">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-          Productivity <span class="nav-count">10</span>
-        </div>
-        <div class="nav-item" data-page="cat-students" onclick="navigate('cat-students')">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
-          Students <span class="nav-count">8</span>
-        </div>
-      </div>
-      <div class="nav-section">
-        <div class="nav-section-label">Library</div>
-        <div class="nav-item" data-page="projects" onclick="navigate('projects')">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-          Saved Projects
-        </div>
-        <div class="nav-item" data-page="history" onclick="navigate('history')">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          History
-        </div>
-        <div class="nav-item" data-page="pdf" onclick="navigate('pdf')">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          PDF Chat
-        </div>
-        <div class="nav-item" data-page="pricing" onclick="navigate('pricing')">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-          Upgrade Plan
-        </div>
+      <div class="sb-top-actions">
+        <button class="sb-icon-btn" onclick="startNewChat()" title="New chat">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <button class="sb-icon-btn" onclick="closeSidebar()" title="Close">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
       </div>
     </div>
 
-    <div class="sidebar-bottom">
-      <div class="user-row">
-        <div class="user-avatar" id="sb-avatar">U</div>
-        <div class="user-info">
-          <div class="user-email" id="sb-email2">user@email.com</div>
-          <div class="user-plan-text" id="sb-plan-text">Free Plan</div>
-        </div>
-        <button class="logout-btn" onclick="logout()">Out</button>
-      </div>
+    <div class="sb-search">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" placeholder="Search tools..." id="sb-search-input" oninput="handleToolSearch()"/>
     </div>
-  </nav>
 
-  <!-- Main -->
+    <nav class="sb-nav">
+      <button class="sb-nav-item active" data-page="home" onclick="navigate('home')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        Home
+      </button>
+      <button class="sb-nav-item" data-page="tools" onclick="navigate('tools')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        All Tools
+        <span class="sb-badge">150+</span>
+      </button>
+      <button class="sb-nav-item" data-page="pdf" onclick="navigate('pdf')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        PDF Chat
+      </button>
+      <button class="sb-nav-item" data-page="projects" onclick="navigate('projects')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        Projects
+      </button>
+      <button class="sb-nav-item" data-page="pricing" onclick="navigate('pricing')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        Upgrade
+      </button>
+
+      <div class="sb-divider"></div>
+      <div class="sb-section-label">Categories</div>
+
+      <button class="sb-nav-item" data-page="cat-ai" onclick="navigate('cat-ai')"><span class="sb-emoji">🧠</span>AI Essentials</button>
+      <button class="sb-nav-item" data-page="cat-code" onclick="navigate('cat-code')"><span class="sb-emoji">💻</span>Code & Dev</button>
+      <button class="sb-nav-item" data-page="cat-business" onclick="navigate('cat-business')"><span class="sb-emoji">📈</span>Business</button>
+      <button class="sb-nav-item" data-page="cat-content" onclick="navigate('cat-content')"><span class="sb-emoji">📱</span>Content</button>
+      <button class="sb-nav-item" data-page="cat-media" onclick="navigate('cat-media')"><span class="sb-emoji">🎨</span>Image & Media</button>
+      <button class="sb-nav-item" data-page="cat-video" onclick="navigate('cat-video')"><span class="sb-emoji">🎬</span>Video & Film</button>
+      <button class="sb-nav-item" data-page="cat-audio" onclick="navigate('cat-audio')"><span class="sb-emoji">🔊</span>Voice & Audio</button>
+      <button class="sb-nav-item" data-page="cat-productivity" onclick="navigate('cat-productivity')"><span class="sb-emoji">⚡</span>Productivity</button>
+      <button class="sb-nav-item" data-page="cat-students" onclick="navigate('cat-students')"><span class="sb-emoji">🎓</span>Students</button>
+
+      <div class="sb-divider"></div>
+      <div class="sb-section-label">Recent</div>
+      <div id="sb-history"></div>
+    </nav>
+
+    <div class="sb-footer">
+      <div class="sb-user">
+        <div class="sb-avatar" id="sb-avatar">H</div>
+        <div class="sb-user-info">
+          <div class="sb-user-email" id="sb-email">user@email.com</div>
+          <div class="sb-user-plan" id="sb-plan-label">Free Plan · 0/10</div>
+        </div>
+      </div>
+      <button class="sb-icon-btn" onclick="logout()" title="Sign out">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main content -->
   <div id="main">
-    <div id="topbar">
-      <button id="menu-btn" onclick="toggleSidebar()">☰</button>
-      <div class="topbar-title" id="topbar-title">Dashboard</div>
-      <div class="search-wrap">
-        <span class="search-icon">🔍</span>
-        <input type="text" placeholder="Search 150+ tools..." id="search-input" oninput="handleSearch()" onfocus="navigate('tools')"/>
-      </div>
-      <div class="usage-bar-wrap" id="usage-display">
-        <span id="usage-text">0/10</span>
-        <div class="usage-bar"><div class="usage-fill" id="usage-fill" style="width:0%"></div></div>
-      </div>
-      <button class="upgrade-btn" onclick="navigate('pricing')">⚡ Upgrade</button>
-    </div>
 
+    <!-- Topbar -->
+    <header id="topbar">
+      <button class="top-icon-btn" onclick="openSidebar()">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <div class="topbar-title" id="topbar-title">NexusAI</div>
+      <div class="topbar-actions">
+        <div class="usage-badge" id="usage-badge">
+          <span id="usage-label">0/10</span>
+        </div>
+        <button class="upgrade-btn" onclick="navigate('pricing')">Upgrade ✦</button>
+        <button class="top-icon-btn" onclick="startNewChat()" title="New chat">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Page content -->
     <div id="content"></div>
+
   </div>
 </div>
 
-<!-- Toast container -->
 <div id="toast-wrap"></div>
-
 <script src="app.js"></script>
 </body>
 </html>

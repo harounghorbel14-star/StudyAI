@@ -1,35 +1,30 @@
-// ============================================================
-// NexusAI — app.js
-// Frontend logic: Auth · Navigation · Tools · PDF · Projects
-// ============================================================
+// ═══════════════════════════════════════════════
+// NexusAI v2 — app.js
+// Claude/ChatGPT style interface
+// ═══════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════
-// CONFIG — غيّر هذا لرابط backend متاعك
-// ═══════════════════════════════════════════════
 const API = 'https://nexusai-production-6504.up.railway.app';
 
-// ═══════════════════════════════════════════════
-// TOOLS DATA
-// ═══════════════════════════════════════════════
+// ── TOOLS DATA ───────────────────────────────
 const TOOLS = [
   // AI
   {id:'summarize',cat:'ai',emoji:'📝',name:'AI Summary',desc:'Summarize any text'},
-  {id:'eli5',cat:'ai',emoji:'👶',name:"Explain Like I'm 5",desc:'Any topic, simple'},
-  {id:'translate',cat:'ai',emoji:'🌍',name:'Translate',desc:'Multi-language'},
+  {id:'eli5',cat:'ai',emoji:'👶',name:"Explain Like I'm 5",desc:'Simple explanations'},
+  {id:'translate',cat:'ai',emoji:'🌍',name:'Translate',desc:'Multi-language translation'},
   {id:'rewrite-formal',cat:'ai',emoji:'🎩',name:'Rewrite Formal',desc:'Professional tone'},
   {id:'rewrite-casual',cat:'ai',emoji:'😎',name:'Rewrite Casual',desc:'Friendly tone'},
-  {id:'grammar',cat:'ai',emoji:'✏️',name:'Grammar Fix',desc:'Spelling & punctuation'},
-  {id:'quiz-gen',cat:'ai',emoji:'❓',name:'Quiz Generator',desc:'MCQ from any text'},
+  {id:'grammar',cat:'ai',emoji:'✏️',name:'Grammar Fix',desc:'Correct errors'},
+  {id:'quiz-gen',cat:'ai',emoji:'❓',name:'Quiz Generator',desc:'Auto MCQ questions'},
   {id:'flashcards',cat:'ai',emoji:'🃏',name:'Flashcards',desc:'Study cards auto'},
   {id:'mindmap',cat:'ai',emoji:'🗺️',name:'Mind Map',desc:'Visual topic map'},
-  {id:'notes-to-summary',cat:'ai',emoji:'📋',name:'Notes → Summary',desc:'Organize raw notes'},
+  {id:'notes-to-summary',cat:'ai',emoji:'📋',name:'Notes → Summary',desc:'Organize notes'},
   {id:'decision-helper',cat:'ai',emoji:'⚖️',name:'Decision Helper',desc:'Best choice advisor'},
-  {id:'idea-to-plan',cat:'ai',emoji:'💡',name:'Idea → Action Plan',desc:'Turn ideas into steps'},
+  {id:'idea-to-plan',cat:'ai',emoji:'💡',name:'Idea → Plan',desc:'Action steps'},
   {id:'daily-plan',cat:'ai',emoji:'📅',name:'Daily Planner',desc:'Optimal schedule'},
   {id:'ai-coach',cat:'ai',emoji:'🎯',name:'AI Coach',desc:'Personal strategy'},
   {id:'youtube-summary',cat:'ai',emoji:'▶️',name:'YouTube Summary',desc:'Video to notes'},
-  {id:'study-schedule',cat:'ai',emoji:'📚',name:'Study Schedule',desc:'Exam-ready planner'},
-  {id:'exam-questions',cat:'ai',emoji:'📄',name:'Exam Questions',desc:'Auto-generated + answers'},
+  {id:'study-schedule',cat:'ai',emoji:'📚',name:'Study Schedule',desc:'Exam planner'},
+  {id:'exam-questions',cat:'ai',emoji:'📄',name:'Exam Questions',desc:'Auto questions + answers'},
   {id:'lesson-simplifier',cat:'ai',emoji:'🔆',name:'Lesson Simplifier',desc:'Complex → simple'},
   {id:'revision-generator',cat:'ai',emoji:'🔄',name:'Revision Sheet',desc:'Quick recall guide'},
   // CODE
@@ -131,470 +126,745 @@ const TOOLS = [
 ];
 
 const CAT_LABELS = {
-  ai:'AI Essentials', code:'Code & Dev', business:'Business',
-  content:'Content', media:'Media & Image', video:'Video & Film',
-  audio:'Voice & Audio', productivity:'Productivity', students:'Students',
+  ai:'AI Essentials',code:'Code & Dev',business:'Business',
+  content:'Content',media:'Image & Media',video:'Video & Film',
+  audio:'Voice & Audio',productivity:'Productivity',students:'Students',
 };
 
-// ═══════════════════════════════════════════════
-// STATE
-// ═══════════════════════════════════════════════
+// ── STATE ────────────────────────────────────
 const state = {
-  token: localStorage.getItem('nx_token') || '',
+  token: localStorage.getItem('nx_token')||'',
   user: null,
   currentPage: 'home',
   currentTool: null,
   sessionId: null,
-  sessionHistory: [],
+  messages: [],      // [{role,content,type?,data?}]
   authMode: 'login',
 };
 
-// ═══════════════════════════════════════════════
-// API HELPER
-// ═══════════════════════════════════════════════
-async function api(path, opts = {}) {
+// ── API ──────────────────────────────────────
+async function api(path, opts={}) {
   const isForm = opts.body instanceof FormData;
-  const res = await fetch(API + path, {
+  const res = await fetch(API+path, {
     ...opts,
-    headers: {
-      ...(state.token ? { Authorization: 'Bearer ' + state.token } : {}),
-      ...(!isForm ? { 'Content-Type': 'application/json' } : {}),
+    headers:{
+      ...(state.token?{Authorization:'Bearer '+state.token}:{}),
+      ...(!isForm?{'Content-Type':'application/json'}:{}),
       ...opts.headers,
     },
-    body: isForm ? opts.body : opts.body ? JSON.stringify(opts.body) : undefined,
+    body: isForm?opts.body:opts.body?JSON.stringify(opts.body):undefined,
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'Request failed');
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error||'Request failed');
   return data;
 }
 
-// ═══════════════════════════════════════════════
-// AUTH
-// ═══════════════════════════════════════════════
+// ── AUTH ─────────────────────────────────────
 function switchTab(mode) {
   state.authMode = mode;
-  document.querySelectorAll('.auth-tab').forEach((t, i) => {
-    t.classList.toggle('active', (i === 0) === (mode === 'login'));
-  });
-  document.getElementById('auth-btn').textContent = mode === 'login' ? 'Sign In' : 'Create Account';
+  document.getElementById('tab-login').classList.toggle('active', mode==='login');
+  document.getElementById('tab-signup').classList.toggle('active', mode==='signup');
+  document.getElementById('auth-btn').textContent = mode==='login'?'Continue':'Create account';
+  document.getElementById('auth-heading').textContent = mode==='login'?'Welcome back':'Create account';
+  document.getElementById('auth-subtext').textContent = mode==='login'?'Sign in to continue':'Start for free';
   document.getElementById('auth-error').textContent = '';
 }
 
 async function handleAuth() {
-  const email    = document.getElementById('auth-email').value.trim();
+  const email = document.getElementById('auth-email').value.trim();
   const password = document.getElementById('auth-password').value;
-  const errEl    = document.getElementById('auth-error');
-  errEl.textContent = '';
-  if (!email || !password) { errEl.textContent = 'Please fill all fields.'; return; }
-  const btn = document.getElementById('auth-btn');
-  btn.textContent = '...'; btn.disabled = true;
+  const errEl = document.getElementById('auth-error');
+  errEl.textContent='';
+  if(!email||!password){errEl.textContent='Please fill all fields.';return;}
+  const btn=document.getElementById('auth-btn');
+  btn.textContent='...';btn.disabled=true;
   try {
-    if (state.authMode === 'signup') {
-      await api('/api/signup', { method: 'POST', body: { email, password } });
-      toast('Account created! Signing in...', 'success');
+    if(state.authMode==='signup'){
+      await api('/api/signup',{method:'POST',body:{email,password}});
+      toast('Account created!','success');
     }
-    const data = await api('/api/login', { method: 'POST', body: { email, password } });
-    state.token = data.token;
-    localStorage.setItem('nx_token', data.token);
+    const data = await api('/api/login',{method:'POST',body:{email,password}});
+    state.token=data.token;
+    localStorage.setItem('nx_token',data.token);
     await initApp();
-  } catch (e) {
-    errEl.textContent = e.message;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = state.authMode === 'login' ? 'Sign In' : 'Create Account';
-  }
+  } catch(e){errEl.textContent=e.message;}
+  finally{btn.disabled=false;btn.textContent=state.authMode==='login'?'Continue':'Create account';}
 }
 
-function logout() {
-  state.token = ''; state.user = null;
+function logout(){
+  state.token='';state.user=null;
   localStorage.removeItem('nx_token');
-  document.getElementById('auth-overlay').style.display = 'flex';
-  document.getElementById('app').style.display = 'none';
+  document.getElementById('auth-overlay').style.display='flex';
+  document.getElementById('app').style.display='none';
+  closeSidebar();
 }
 
-// ═══════════════════════════════════════════════
-// INIT
-// ═══════════════════════════════════════════════
-async function initApp() {
-  try {
-    state.user = await api('/api/me');
-  } catch (e) {
-    logout(); return;
+// ── INIT ─────────────────────────────────────
+async function initApp(){
+  try{state.user=await api('/api/me');}catch(e){logout();return;}
+  document.getElementById('auth-overlay').style.display='none';
+  document.getElementById('app').style.display='block';
+  const email=state.user?.email||'';
+  const plan=state.user?.plan||'free';
+  document.getElementById('sb-avatar').textContent=email[0]?.toUpperCase()||'U';
+  document.getElementById('sb-email').textContent=email;
+  document.getElementById('sb-plan-label').textContent=`${plan.charAt(0).toUpperCase()+plan.slice(1)} Plan · ${state.user?.requests_today||0}/${state.user?.limit??10}`;
+  updateUsageBadge();
+  navigate('home');
+  loadSidebarHistory();
+}
+
+function updateUsageBadge(){
+  if(!state.user)return;
+  const used=state.user.requests_today||0;
+  const limit=state.user.limit??10;
+  document.getElementById('usage-label').textContent=limit===null?`${used}/∞`:`${used}/${limit}`;
+}
+
+// ── SIDEBAR ───────────────────────────────────
+function openSidebar(){
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('sidebar-backdrop').style.display='block';
+}
+function closeSidebar(){
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-backdrop').style.display='none';
+}
+
+function handleToolSearch(){
+  const q=document.getElementById('sb-search-input').value.toLowerCase();
+  if(q.length>0){
+    navigate('tools');
+    // update tools grid with search
+    setTimeout(()=>renderToolsGrid('',q),50);
   }
-  document.getElementById('auth-overlay').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
-  const email    = state.user?.email || 'user';
-  const plan     = state.user?.plan  || 'free';
-  const initials = email[0].toUpperCase();
-  document.getElementById('sb-email').textContent     = email;
-  document.getElementById('sb-email2').textContent    = email;
-  document.getElementById('sb-avatar').textContent    = initials;
-  document.getElementById('sb-plan').textContent      = plan.toUpperCase();
-  document.getElementById('sb-plan').className        = 'plan-badge' + (plan !== 'free' ? ' pro' : '');
-  document.getElementById('sb-plan-text').textContent = plan.charAt(0).toUpperCase() + plan.slice(1) + ' Plan';
-  updateUsage();
+}
+
+async function loadSidebarHistory(){
+  try{
+    const data=await api('/api/history?limit=8');
+    const history=data.history||[];
+    const container=document.getElementById('sb-history');
+    if(!history.length){container.innerHTML='';return;}
+    // group by session
+    const seen=new Set();
+    const items=[];
+    for(const h of history){
+      if(h.role==='user'&&!seen.has(h.session_id)){
+        seen.add(h.session_id);
+        items.push(h);
+      }
+    }
+    container.innerHTML=items.slice(0,6).map(h=>`
+      <button class="sb-history-item" onclick="closeSidebar()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        ${escHtml((h.content||'').slice(0,34))}
+      </button>
+    `).join('');
+  }catch(_){}
+}
+
+// ── NAVIGATION ────────────────────────────────
+function navigate(page){
+  state.currentPage=page;
+  closeSidebar();
+  document.querySelectorAll('.sb-nav-item').forEach(el=>{
+    el.classList.toggle('active',el.dataset.page===page);
+  });
+  const titles={
+    home:'NexusAI',tools:'All Tools',pdf:'PDF Chat',
+    projects:'Projects',pricing:'Upgrade',
+    'cat-ai':'AI Essentials','cat-code':'Code & Dev',
+    'cat-business':'Business','cat-content':'Content',
+    'cat-media':'Image & Media','cat-video':'Video & Film',
+    'cat-audio':'Voice & Audio','cat-productivity':'Productivity',
+    'cat-students':'Students',
+  };
+  document.getElementById('topbar-title').textContent=titles[page]||page;
+  const content=document.getElementById('content');
+  content.scrollTop=0;
+  if(page==='home') renderHome();
+  else if(page==='tools') renderTools('');
+  else if(page.startsWith('cat-')) renderTools(page.replace('cat-',''));
+  else if(page==='projects') renderProjects();
+  else if(page==='pdf') renderPDF();
+  else if(page==='pricing') renderPricing();
+}
+
+function startNewChat(){
+  state.currentTool=null;
+  state.sessionId=null;
+  state.messages=[];
+  closeSidebar();
   navigate('home');
 }
 
-function updateUsage() {
-  if (!state.user) return;
-  const used  = state.user.requests_today || 0;
-  const limit = state.user.limit || 10;
-  const pct   = limit === null ? 5 : Math.min(100, (used / limit) * 100);
-  document.getElementById('usage-text').textContent = limit === null ? used + '/∞' : used + '/' + limit;
-  const fill = document.getElementById('usage-fill');
-  fill.style.width      = pct + '%';
-  fill.style.background = pct > 80 ? 'var(--accent3)' : 'var(--accent)';
-}
+// ── HOME ──────────────────────────────────────
+function renderHome(){
+  const hour=new Date().getHours();
+  const greeting=hour<12?'Good morning':hour<18?'Good afternoon':'Good evening';
+  const name=(state.user?.email||'').split('@')[0];
 
-// ═══════════════════════════════════════════════
-// NAVIGATION
-// ═══════════════════════════════════════════════
-function navigate(page) {
-  state.currentPage = page;
-  document.querySelectorAll('.nav-item').forEach(el => {
-    el.classList.toggle('active', el.dataset.page === page);
-  });
-  const titles = {
-    home:'Dashboard', tools:'All Tools', projects:'Saved Projects',
-    history:'History', pdf:'PDF Chat', pricing:'Upgrade Plan',
-    'cat-ai':'AI Essentials','cat-code':'Code & Dev','cat-business':'Business',
-    'cat-content':'Content','cat-media':'Media & Image','cat-video':'Video & Film',
-    'cat-audio':'Voice & Audio','cat-productivity':'Productivity','cat-students':'Students',
-  };
-  document.getElementById('topbar-title').textContent = titles[page] || page;
-  if (page === 'home')              renderHome();
-  else if (page === 'tools')        renderTools('');
-  else if (page.startsWith('cat-')) renderTools(page.replace('cat-', ''));
-  else if (page === 'projects')     renderProjects();
-  else if (page === 'history')      renderHistory();
-  else if (page === 'pdf')          renderPDF();
-  else if (page === 'pricing')      renderPricing();
-  else if (page === 'runner')       renderRunner();
-}
+  const featured=[
+    {id:'summarize',emoji:'📝',name:'Summarize text',desc:'Paste any text'},
+    {id:'tiktok-script',emoji:'🎵',name:'TikTok script',desc:'Viral content'},
+    {id:'bug-detector',emoji:'🐛',name:'Debug code',desc:'Find & fix errors'},
+    {id:'business-plan',emoji:'📊',name:'Business plan',desc:'Full strategy'},
+  ];
 
-function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('open');
-}
+  const quickTools=[
+    {id:'translate',emoji:'🌍',name:'Translate'},
+    {id:'grammar',emoji:'✏️',name:'Grammar Fix'},
+    {id:'email-writer',emoji:'✉️',name:'Write Email'},
+    {id:'image-gen',emoji:'🖼️',name:'Generate Image'},
+    {id:'tts',emoji:'🔊',name:'Text to Speech'},
+    {id:'math-solver',emoji:'🔢',name:'Math Solver'},
+  ];
 
-// ═══════════════════════════════════════════════
-// HOME
-// ═══════════════════════════════════════════════
-function renderHome() {
-  const hour      = new Date().getHours();
-  const greeting  = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-  const name      = (state.user?.email || '').split('@')[0];
-  const used      = state.user?.requests_today || 0;
-  const remaining = state.user?.remaining ?? 10;
-  const featured  = TOOLS.filter(t => ['ai','code','business','content','media','audio'].includes(t.cat)).slice(0, 12);
-
-  document.getElementById('content').innerHTML = `
+  document.getElementById('content').innerHTML=`
 <div class="page">
-  <div class="home-header">
-    <div class="home-greeting">${greeting}, <span class="hi-name">${name}</span> 👋</div>
-    <div class="home-sub">You have ${remaining === null ? '∞' : remaining} requests left today.</div>
-  </div>
-  <div class="stats-grid">
-    <div class="stat-card">
-      <div class="stat-label">Tools Available</div>
-      <div class="stat-value stat-accent">150+</div>
-      <div class="stat-sub">Across 9 categories</div>
+  <div class="home-wrap">
+    <div class="home-greeting">${greeting}, <em>${name}</em> 👋</div>
+    <p class="home-sub">What would you like to create today?</p>
+
+    <div class="home-suggestions">
+      ${featured.map(t=>`
+      <button class="suggestion-card" onclick="openTool('${t.id}')">
+        <span class="suggestion-emoji">${t.emoji}</span>
+        <div class="suggestion-title">${t.name}</div>
+        <div class="suggestion-desc">${t.desc}</div>
+      </button>`).join('')}
     </div>
-    <div class="stat-card">
-      <div class="stat-label">Used Today</div>
-      <div class="stat-value">${used}</div>
-      <div class="stat-sub">Resets at midnight UTC</div>
+
+    <div class="quick-row">
+      ${quickTools.map(t=>`
+      <button class="quick-chip" onclick="openTool('${t.id}')">
+        <span>${t.emoji}</span>${t.name}
+      </button>`).join('')}
     </div>
-    <div class="stat-card">
-      <div class="stat-label">Current Plan</div>
-      <div class="stat-value stat-accent2">${(state.user?.plan || 'free').toUpperCase()}</div>
-      <div class="stat-sub"><a href="#" onclick="navigate('pricing')" style="color:var(--accent)">Upgrade →</a></div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Daily Limit</div>
-      <div class="stat-value stat-accent3">${state.user?.limit === null ? '∞' : state.user?.limit || 10}</div>
-      <div class="stat-sub">Requests per day</div>
-    </div>
-  </div>
-  <div class="section-header">
-    <div class="section-title">🔥 Featured Tools</div>
-    <button class="see-all" onclick="navigate('tools')">See all 150+ →</button>
-  </div>
-  <div class="tools-grid">${featured.map(toolCard).join('')}</div>
-  <div style="margin-top:32px">
-    <div class="section-header"><div class="section-title">⚡ Quick Actions</div></div>
-    <div style="display:flex;gap:12px;flex-wrap:wrap">
-      ${[
-        {icon:'🔊',label:'Text to Speech',id:'tts'},
-        {icon:'📝',label:'Summarize',id:'summarize'},
-        {icon:'🐛',label:'Debug Code',id:'bug-detector'},
-        {icon:'📱',label:'TikTok Script',id:'tiktok-script'},
-        {icon:'💼',label:'Business Plan',id:'business-plan'},
-        {icon:'✉️',label:'Write Email',id:'email-writer'},
-      ].map(q => `
-        <button onclick="openTool('${q.id}')"
-          style="background:var(--bg2);border:1px solid var(--border2);border-radius:12px;
-                 padding:12px 18px;color:var(--text);font-size:14px;cursor:pointer;
-                 transition:.15s;display:flex;align-items:center;gap:8px;"
-          onmouseover="this.style.borderColor='var(--accent)'"
-          onmouseout="this.style.borderColor='var(--border2)'">
-          <span>${q.icon}</span>${q.label}
-        </button>`).join('')}
+
+    <div class="stats-row">
+      <div class="stat-item"><div class="stat-num">150+</div><div class="stat-lbl">AI Tools</div></div>
+      <div class="stat-item"><div class="stat-num">${state.user?.limit===null?'∞':state.user?.limit??10}</div><div class="stat-lbl">Daily limit</div></div>
+      <div class="stat-item"><div class="stat-num">${(state.user?.requests_today||0)}</div><div class="stat-lbl">Used today</div></div>
     </div>
   </div>
 </div>`;
 }
 
-// ═══════════════════════════════════════════════
-// TOOLS GRID
-// ═══════════════════════════════════════════════
-function toolCard(t) {
-  return `
-<div class="tool-card cat-${t.cat}" onclick="openTool('${t.id}')">
-  <span class="tool-emoji">${t.emoji}</span>
-  <div class="tool-name">${t.name}</div>
-  <div class="tool-cat">${CAT_LABELS[t.cat] || t.cat}</div>
-</div>`;
-}
-
-function renderTools(cat) {
-  const query = document.getElementById('search-input')?.value.toLowerCase() || '';
-  const base  = cat ? TOOLS.filter(t => t.cat === cat) : TOOLS;
-  // When searching, always search across ALL tools
-  const shown = query
-    ? TOOLS.filter(t => t.name.toLowerCase().includes(query) || t.desc.toLowerCase().includes(query))
-    : base;
-
-  document.getElementById('content').innerHTML = `
+// ── TOOLS ─────────────────────────────────────
+function renderTools(cat){
+  document.getElementById('content').innerHTML=`
 <div class="page">
-  <div style="margin-bottom:20px">
-    ${cat ? `<button class="runner-back" onclick="navigate('tools')">← All Tools</button>` : ''}
-    <div class="section-title">${cat ? (CAT_LABELS[cat] || cat) + ' — ' : 'All Tools — '}${shown.length} tools</div>
-  </div>
-  <div class="tools-grid">
-    ${shown.length ? shown.map(toolCard).join('') : '<div style="color:var(--text2);padding:40px;text-align:center">No tools found.</div>'}
+  <div class="tools-page">
+    ${cat?`<button class="runner-back" onclick="navigate('tools')" style="margin-bottom:16px;font-size:13px;color:var(--text-2)">← All Tools</button>`:''}
+    <div class="tools-page-header">
+      <div class="tools-page-title">${cat?(CAT_LABELS[cat]||cat):'All Tools'}</div>
+      <div class="tools-count" id="tools-count"></div>
+    </div>
+    <div class="tools-grid" id="tools-grid"></div>
   </div>
 </div>`;
+  renderToolsGrid(cat,'');
 }
 
-function handleSearch() {
-  const q = document.getElementById('search-input')?.value?.toLowerCase() || '';
-  // If not already on tools page, navigate there first
-  if (state.currentPage !== 'tools' && !state.currentPage.startsWith('cat-')) {
-    state.currentPage = 'tools';
-    document.querySelectorAll('.nav-item').forEach(el => {
-      el.classList.toggle('active', el.dataset.page === 'tools');
-    });
-    document.getElementById('topbar-title').textContent = 'All Tools';
-  }
-  renderTools('');
+function renderToolsGrid(cat,query){
+  const base=cat?TOOLS.filter(t=>t.cat===cat):TOOLS;
+  const shown=query?TOOLS.filter(t=>t.name.toLowerCase().includes(query)||t.desc.toLowerCase().includes(query)):base;
+  const grid=document.getElementById('tools-grid');
+  const count=document.getElementById('tools-count');
+  if(grid) grid.innerHTML=shown.length?shown.map(t=>`
+    <button class="tool-card" onclick="openTool('${t.id}')">
+      <span class="tool-emoji">${t.emoji}</span>
+      <div class="tool-name">${t.name}</div>
+      <div class="tool-desc">${t.desc}</div>
+    </button>`).join(''):`<div class="empty-state"><p>No tools found.</p></div>`;
+  if(count) count.textContent=`${shown.length} tools`;
 }
 
-// ═══════════════════════════════════════════════
-// TOOL RUNNER
-// ═══════════════════════════════════════════════
-function openTool(id) {
-  const tool = TOOLS.find(t => t.id === id);
-  if (!tool) return;
-  state.currentTool    = tool;
-  state.sessionId      = null;
-  state.sessionHistory = [];
-  state.currentPage    = 'runner';
-  document.getElementById('topbar-title').textContent = tool.name;
-  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+// ── TOOL RUNNER ───────────────────────────────
+function openTool(id){
+  const tool=TOOLS.find(t=>t.id===id);
+  if(!tool)return;
+  state.currentTool=tool;
+  state.sessionId=null;
+  state.messages=[];
+  state.currentPage='runner';
+  document.getElementById('topbar-title').textContent=tool.name;
+  document.querySelectorAll('.sb-nav-item').forEach(el=>el.classList.remove('active'));
+  closeSidebar();
   renderRunner();
 }
 
-function renderRunner() {
-  const t = state.currentTool;
-  if (!t) { navigate('tools'); return; }
-  const hasHistory = state.sessionHistory.length > 0;
+function renderRunner(){
+  const t=state.currentTool;
+  if(!t){navigate('home');return;}
+  const isTTS=['tts','tts-nova','tts-echo','tts-fable','tts-onyx'].includes(t.id);
+  const isSTT=t.id==='stt';
+  const isImage=['image-gen','poster-gen','avatar-creator'].includes(t.id);
 
-  document.getElementById('content').innerHTML = `
-<div class="page tool-runner">
-  <div class="runner-back" onclick="navigate('tools')">← Back to Tools</div>
+  document.getElementById('content').innerHTML=`
+<div class="runner-wrap">
   <div class="runner-header">
-    <div class="runner-title">${t.emoji} ${t.name}</div>
-    <div class="runner-desc">${t.desc}</div>
-  </div>
-  ${hasHistory ? `
-  <div class="session-thread" id="session-thread">
-    ${state.sessionHistory.map(m => `
-    <div class="msg ${m.role}">
-      <div class="msg-role">${m.role === 'user' ? '👤 You' : '🤖 AI'}</div>
-      <div class="msg-bubble">${escapeHtml(m.content)}</div>
-    </div>`).join('')}
-  </div>` : ''}
-  <div class="runner-form">
-    <label class="input-label">${getInputLabel(t)}</label>
-    ${t.id === 'stt'
-      ? `<input type="file" id="audio-file" accept="audio/*"
-           style="width:100%;background:var(--bg3);border:1px solid var(--border2);
-                  border-radius:12px;padding:14px;color:var(--text);font-size:14px"/>`
-      : `<textarea class="runner-textarea" id="tool-input"
-           placeholder="${getPlaceholder(t)}" rows="6"></textarea>`}
-    <div class="runner-actions">
-      <button class="run-btn" id="run-btn" onclick="runTool()"><span>▶</span> Run Tool</button>
-      ${state.sessionId ? `<div class="session-badge"><span class="session-dot"></span>Session active — memory ON</div>` : ''}
-      <button onclick="newSession()" style="font-size:13px;color:var(--text3);margin-left:auto;cursor:pointer">↺ New Session</button>
+    <div class="runner-back" onclick="navigate('tools')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      Back
+    </div>
+    <div>
+      <div class="runner-tool-name">${t.emoji} ${t.name}</div>
+      <div class="runner-tool-desc">${t.desc}</div>
     </div>
   </div>
-  <div class="output-wrap" id="output-wrap" style="${hasHistory ? '' : 'display:none'}">
-    <div class="output-header">
-      <span class="output-title">Output</span>
-      <div class="output-actions">
-        <button class="icon-btn" onclick="copyOutput()">📋 Copy</button>
-        <button class="icon-btn" onclick="saveProject()">💾 Save</button>
+
+  <div class="runner-thread" id="runner-thread">
+    ${renderMessages()}
+    ${state.messages.length===0?`
+    <div style="text-align:center;padding:40px 20px;color:var(--text-2)">
+      <div style="font-size:36px;margin-bottom:12px">${t.emoji}</div>
+      <div style="font-size:15px;font-weight:500;margin-bottom:6px">${t.name}</div>
+      <div style="font-size:13px">${t.desc}</div>
+    </div>`:''}
+  </div>
+
+  <div class="runner-input-area">
+    <div class="runner-input-box">
+      ${isSTT?`
+        <input type="file" id="audio-file" accept="audio/*" style="flex:1;background:none;border:none;outline:none;color:var(--text);font-size:13px"/>
+      `:`
+        <textarea class="runner-textarea" id="tool-input"
+          placeholder="${getPlaceholder(t)}"
+          rows="1"
+          oninput="autoResize(this)"
+          onkeydown="handleInputKey(event)"></textarea>
+      `}
+      <div class="runner-actions-row">
+        <button class="send-btn" id="send-btn" onclick="runTool()" title="Send">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
       </div>
     </div>
-    <div class="output-body" id="output-body"></div>
+    ${state.sessionId?`<div style="text-align:center;font-size:11px;color:var(--text-3);margin-top:6px">Session active · <button onclick="clearSession()" style="color:var(--text-2);font-size:11px;text-decoration:underline">New session</button></div>`:''}
   </div>
 </div>`;
-  if (hasHistory) scrollThread();
+
+  // Focus textarea
+  setTimeout(()=>{
+    const ta=document.getElementById('tool-input');
+    if(ta)ta.focus();
+    const thread=document.getElementById('runner-thread');
+    if(thread)thread.scrollTop=thread.scrollHeight;
+  },50);
 }
 
-function getInputLabel(t) {
-  const map = {
-    stt:'Upload audio file','image-gen':'Describe your image',
-    'poster-gen':'Describe your poster','avatar-creator':'Describe your avatar',
-    tts:'Text to convert','tts-nova':'Text to convert',
-    'tts-echo':'Text to convert','tts-fable':'Text to convert','tts-onyx':'Text to convert',
-  };
-  return map[t.id] || 'Your input';
+function renderMessages(){
+  return state.messages.map(m=>{
+    if(m.role==='user'){
+      return `<div class="msg-row user">
+        <div class="msg-bubble">${escHtml(m.content)}</div>
+        <div class="msg-avatar user-av">${(state.user?.email||'U')[0].toUpperCase()}</div>
+      </div>`;
+    } else {
+      let content='';
+      if(m.type==='image'){
+        content=`<img src="${m.content}" alt="Generated image" loading="lazy"/>`;
+      } else if(m.type==='audio'){
+        content=`<audio controls src="${m.content}"></audio>`;
+      } else {
+        content=formatOutput(m.content);
+      }
+      return `<div class="msg-row assistant">
+        <div class="msg-avatar ai">N</div>
+        <div class="msg-bubble">${content}</div>
+      </div>`;
+    }
+  }).join('');
 }
 
-function getPlaceholder(t) {
-  const map = {
+function addTypingIndicator(){
+  const thread=document.getElementById('runner-thread');
+  if(!thread)return;
+  const el=document.createElement('div');
+  el.className='msg-row assistant';
+  el.id='typing-indicator';
+  el.innerHTML=`<div class="msg-avatar ai">N</div><div class="msg-bubble"><div class="typing-dots"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>`;
+  thread.appendChild(el);
+  thread.scrollTop=thread.scrollHeight;
+}
+
+function removeTypingIndicator(){
+  document.getElementById('typing-indicator')?.remove();
+}
+
+function handleInputKey(e){
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();runTool();}
+}
+
+function autoResize(el){
+  el.style.height='auto';
+  el.style.height=Math.min(el.scrollHeight,200)+'px';
+}
+
+function getPlaceholder(t){
+  const map={
     summarize:'Paste any text to summarize...',
-    translate:'Enter text + target language...',
+    translate:'Enter text (e.g. "Translate to Arabic: Hello")',
     'code-explain':'Paste your code here...',
     'bug-detector':'Paste your code here...',
-    'tiktok-script':'Your TikTok topic or idea...',
+    'tiktok-script':'Your topic or idea...',
     'business-plan':'Describe your business idea...',
-    'image-gen':'A futuristic city at sunset, cyberpunk style...',
+    'image-gen':'Describe the image you want...',
     tts:'Enter text to convert to speech...',
     'math-solver':'e.g. Solve: 2x² + 5x - 3 = 0',
   };
-  return map[t.id] || `Enter your ${t.id.replace(/-/g, ' ')} here...`;
+  return map[t.id]||`Type your ${t.name.toLowerCase()} here...`;
 }
 
-async function runTool() {
-  const t = state.currentTool;
-  if (!t) return;
+async function runTool(){
+  const t=state.currentTool;
+  if(!t)return;
+
   let input;
-  if (t.id === 'stt') {
-    const file = document.getElementById('audio-file')?.files?.[0];
-    if (!file) { toast('Please select an audio file', 'error'); return; }
-    input = file;
+  if(t.id==='stt'){
+    const file=document.getElementById('audio-file')?.files?.[0];
+    if(!file){toast('Please select an audio file','error');return;}
+    input=file;
   } else {
-    input = document.getElementById('tool-input')?.value?.trim();
-    if (!input) { toast('Please enter some input', 'error'); return; }
+    input=document.getElementById('tool-input')?.value?.trim();
+    if(!input){return;}
   }
-  const btn = document.getElementById('run-btn');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="loader-dots"><span class="loader-dot"></span><span class="loader-dot"></span><span class="loader-dot"></span></span> Running...';
-  showOutputLoading();
-  try {
-    if (t.id === 'stt') {
-      const form = new FormData();
-      form.append('audio', input);
-      const result = await api('/api/transcribe', { method:'POST', body: form });
-      addToSession('user', '[audio file]');
-      addToSession('assistant', result.text);
-      showOutput('📝 Transcription:\n\n' + result.text);
 
-    } else if (['tts','tts-nova','tts-echo','tts-fable','tts-onyx'].includes(t.id)) {
-      const voices = { tts:'alloy','tts-nova':'nova','tts-echo':'echo','tts-fable':'fable','tts-onyx':'onyx' };
-      const result = await api('/api/tts', {
-        method:'POST',
-        body:{ text: input, voice: voices[t.id] },
-      });
-      // backend returns base64
-      const audioUrl = `data:audio/mp3;base64,${result.audio}`;
-      showAudioOutput(audioUrl);
+  // Add user message
+  if(t.id!=='stt'){
+    state.messages.push({role:'user',content:input});
+  }
+  // Clear input
+  const ta=document.getElementById('tool-input');
+  if(ta){ta.value='';ta.style.height='auto';}
 
-    } else if (['image-gen','poster-gen','avatar-creator'].includes(t.id)) {
-      const result = await api('/api/agent', { method:'POST', body:{ input:'image: '+input } });
-      showImageOutput(result.data);
+  // Disable send button
+  const btn=document.getElementById('send-btn');
+  if(btn)btn.disabled=true;
+
+  addTypingIndicator();
+
+  try{
+    if(t.id==='stt'){
+      const form=new FormData();
+      form.append('audio',input);
+      const result=await api('/api/transcribe',{method:'POST',body:form});
+      state.messages.push({role:'user',content:'[Audio file]'});
+      state.messages.push({role:'assistant',content:'📝 Transcription:\n\n'+result.text});
+
+    } else if(['tts','tts-nova','tts-echo','tts-fable','tts-onyx'].includes(t.id)){
+      const voices={tts:'alloy','tts-nova':'nova','tts-echo':'echo','tts-fable':'fable','tts-onyx':'onyx'};
+      const result=await api('/api/tts',{method:'POST',body:{text:input,voice:voices[t.id]}});
+      const audioUrl=`data:audio/mp3;base64,${result.audio}`;
+      state.messages.push({role:'assistant',content:audioUrl,type:'audio'});
+
+    } else if(['image-gen','poster-gen','avatar-creator'].includes(t.id)){
+      const result=await api('/api/tool',{method:'POST',body:{tool_id:t.id,input,session_id:state.sessionId||undefined}});
+      if(result.session_id)state.sessionId=result.session_id;
+      state.messages.push({role:'assistant',content:result.output,type:'image'});
 
     } else {
-      const result = await api('/api/tool', {
-        method:'POST',
-        body:{ tool_id: t.id, input, session_id: state.sessionId || undefined },
-      });
-      if (result.session_id) state.sessionId = result.session_id;
-      // Handle different response types
-      if (result.type === 'audio' && result.audio) {
-        const audioUrl = `data:audio/mp3;base64,${result.audio}`;
-        showAudioOutput(audioUrl);
-      } else if (result.type === 'image' && result.output) {
-        showImageOutput(result.output);
+      const result=await api('/api/tool',{method:'POST',body:{tool_id:t.id,input,session_id:state.sessionId||undefined}});
+      if(result.session_id)state.sessionId=result.session_id;
+      const output=result.output||result.result||result.reply||'';
+      if(result.type==='audio'&&result.audio){
+        const audioUrl=`data:audio/mp3;base64,${result.audio}`;
+        state.messages.push({role:'assistant',content:audioUrl,type:'audio'});
       } else {
-        const output = result.output || result.result || result.reply || JSON.stringify(result, null, 2);
-        addToSession('user', input);
-        addToSession('assistant', output);
-        showOutput(output);
+        state.messages.push({role:'assistant',content:output});
       }
     }
-    try { state.user = await api('/api/me'); updateUsage(); } catch (_) {}
-  } catch (e) {
-    showOutput('❌ Error: ' + e.message);
-    toast(e.message, 'error');
+
+    // Refresh user stats
+    try{state.user=await api('/api/me');updateUsageBadge();}catch(_){}
+    loadSidebarHistory();
+
+  } catch(e){
+    state.messages.push({role:'assistant',content:'❌ '+e.message});
+    toast(e.message,'error');
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<span>▶</span> Run Tool';
+    removeTypingIndicator();
+    if(btn)btn.disabled=false;
   }
-}
 
-function showOutputLoading() {
-  const wrap = document.getElementById('output-wrap');
-  const body = document.getElementById('output-body');
-  if (wrap) wrap.style.display = '';
-  if (body) {
-    body.className = 'output-body loading';
-    body.innerHTML = `<div class="loader-dots">
-      <div class="loader-dot"></div><div class="loader-dot"></div><div class="loader-dot"></div>
-    </div> Generating...`;
-  }
-}
-
-function showOutput(text) {
   renderRunner();
-  setTimeout(() => {
-    const body = document.getElementById('output-body');
-    const wrap = document.getElementById('output-wrap');
-    if (body) { body.className = 'output-body'; body.innerHTML = formatOutput(text); }
-    if (wrap) wrap.style.display = '';
-    scrollThread();
-  }, 50);
 }
 
-function showImageOutput(url) {
-  const wrap = document.getElementById('output-wrap');
-  const body = document.getElementById('output-body');
-  if (wrap) wrap.style.display = '';
-  if (body) {
-    body.className = 'output-body';
-    body.innerHTML = `<img class="output-image" src="${url}" alt="Generated" loading="lazy"/>`;
+function clearSession(){
+  state.sessionId=null;
+  state.messages=[];
+  renderRunner();
+  toast('New session started','success');
+}
+
+// ── PROJECTS ──────────────────────────────────
+async function renderProjects(){
+  document.getElementById('content').innerHTML=`<div class="page"><div class="projects-wrap"><div class="tools-page-title" style="margin-bottom:16px">Projects</div><div style="color:var(--text-2);font-size:14px">Loading...</div></div></div>`;
+  try{
+    const {projects=[]}=await api('/api/projects');
+    document.getElementById('content').innerHTML=`
+<div class="page">
+  <div class="projects-wrap">
+    <div class="tools-page-title" style="margin-bottom:16px">Saved Projects (${projects.length})</div>
+    ${projects.length?`<div class="projects-grid">
+      ${projects.map(p=>`
+      <button class="project-card" onclick="viewProject(${p.id})">
+        <div class="project-tag">${p.feature}</div>
+        <div class="project-title">${escHtml(p.title)}</div>
+        <div class="project-date">${new Date(p.created_at).toLocaleDateString()}</div>
+      </button>`).join('')}
+    </div>`:`<div class="empty-state"><div class="empty-icon">📁</div><p>No saved projects yet.<br/>Run a tool and save the output.</p></div>`}
+  </div>
+</div>`;
+  }catch(e){toast(e.message,'error');}
+}
+
+async function viewProject(id){
+  try{
+    const {project:p}=await api('/api/projects/'+id);
+    document.getElementById('content').innerHTML=`
+<div class="page">
+  <div class="projects-wrap">
+    <button class="runner-back" onclick="renderProjects()" style="margin-bottom:16px;font-size:13px;color:var(--text-2);display:flex;align-items:center;gap:6px">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      Back
+    </button>
+    <div class="tools-page-title" style="margin-bottom:4px">${escHtml(p.title)}</div>
+    <div style="font-size:12px;color:var(--text-3);margin-bottom:20px">${p.feature} · ${new Date(p.created_at).toLocaleString()}</div>
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <button class="small-btn" onclick="navigator.clipboard.writeText(document.getElementById('proj-output').innerText);toast('Copied!','success')">Copy</button>
+      <button class="small-btn danger" onclick="deleteProject(${p.id})">Delete</button>
+    </div>
+    <div id="proj-output" style="font-size:14px;line-height:1.8;white-space:pre-wrap;color:var(--text)">${formatOutput(p.output)}</div>
+  </div>
+</div>`;
+  }catch(e){toast(e.message,'error');}
+}
+
+async function deleteProject(id){
+  if(!confirm('Delete this project?'))return;
+  try{await api('/api/projects/'+id,{method:'DELETE'});toast('Deleted','success');renderProjects();}
+  catch(e){toast(e.message,'error');}
+}
+
+// ── PDF ───────────────────────────────────────
+async function renderPDF(){
+  let docs=[];
+  try{const d=await api('/api/pdf/list');docs=d.documents||[];}catch(_){}
+  document.getElementById('content').innerHTML=`
+<div class="page">
+  <div class="pdf-wrap">
+    <div class="tools-page-title" style="margin-bottom:16px">PDF Chat</div>
+    <div class="upload-zone" id="upload-zone"
+      onclick="document.getElementById('pdf-input').click()"
+      ondragover="this.classList.add('dragover');event.preventDefault()"
+      ondragleave="this.classList.remove('dragover')"
+      ondrop="handlePDFDrop(event)">
+      <div class="upload-icon">📄</div>
+      <div class="upload-text"><strong>Click or drag a PDF here</strong><br/>Max 10 MB · AI reads and summarizes it</div>
+      <input type="file" id="pdf-input" accept="application/pdf" style="display:none" onchange="uploadPDF(this.files[0])"/>
+    </div>
+    <div id="upload-loading" style="display:none;text-align:center;padding:16px;color:var(--text-2);font-size:14px">
+      <div class="typing-dots" style="justify-content:center;margin-bottom:8px"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>
+      Extracting text...
+    </div>
+    ${docs.length?`
+    <div class="section-hd"><div class="section-title">Your Documents (${docs.length})</div></div>
+    <div class="pdf-list">
+      ${docs.map(d=>`
+      <div class="pdf-item">
+        <div class="pdf-icon">📄</div>
+        <div class="pdf-info">
+          <div class="pdf-name">${escHtml(d.filename)}</div>
+          <div class="pdf-summary">${escHtml((d.summary||'').slice(0,120))}</div>
+        </div>
+        <div class="pdf-actions">
+          <button class="small-btn" onclick="openPDFChat(${d.id},'${escHtml(d.filename)}')">Chat</button>
+          <button class="small-btn danger" onclick="deletePDF(${d.id})">✕</button>
+        </div>
+      </div>`).join('')}
+    </div>`:''}
+  </div>
+</div>`;
+}
+
+function handlePDFDrop(e){
+  e.preventDefault();
+  document.getElementById('upload-zone').classList.remove('dragover');
+  const file=e.dataTransfer.files[0];
+  if(file?.type==='application/pdf')uploadPDF(file);
+  else toast('Please drop a PDF file','error');
+}
+
+async function uploadPDF(file){
+  if(!file)return;
+  document.getElementById('upload-loading').style.display='block';
+  const form=new FormData();
+  form.append('pdf',file);
+  try{
+    const data=await api('/api/pdf/upload',{method:'POST',body:form});
+    toast('PDF uploaded!','success');
+    openPDFChat(data.id,data.filename,data.summary);
+  }catch(e){toast(e.message,'error');}
+  finally{const el=document.getElementById('upload-loading');if(el)el.style.display='none';}
+}
+
+function openPDFChat(id,filename,summary){
+  // Reuse runner-style chat for PDF
+  state.messages=[];
+  if(summary){
+    state.messages.push({role:'assistant',content:`📋 **Summary of "${filename}"**\n\n${summary}`});
   }
+  document.getElementById('topbar-title').textContent=filename;
+  document.getElementById('content').innerHTML=`
+<div class="runner-wrap">
+  <div class="runner-header">
+    <div class="runner-back" onclick="renderPDF()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      Back
+    </div>
+    <div>
+      <div class="runner-tool-name">📄 ${escHtml(filename)}</div>
+      <div class="runner-tool-desc">Ask anything about this document</div>
+    </div>
+  </div>
+  <div class="runner-thread" id="runner-thread">
+    ${renderPDFMessages(summary,filename)}
+  </div>
+  <div class="runner-input-area">
+    <div class="runner-input-box">
+      <textarea class="runner-textarea" id="pdf-question"
+        placeholder="Ask a question about this document..."
+        rows="1" oninput="autoResize(this)"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();askPDF(${id});}"></textarea>
+      <div class="runner-actions-row">
+        <button class="send-btn" id="pdf-send-btn" onclick="askPDF(${id})">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>`;
+  setTimeout(()=>{
+    const thread=document.getElementById('runner-thread');
+    if(thread)thread.scrollTop=thread.scrollHeight;
+    document.getElementById('pdf-question')?.focus();
+  },50);
 }
 
-function showAudioOutput(url) {
-  const wrap = document.getElementById('output-wrap');
-  const body = document.getElementById('output-body');
-  if (wrap) wrap.style.display = '';
-  if (body) {
-    body.className = 'output-body';
-    body.innerHTML = `
-      <audio class="output-audio" controls src="${url}"></audio>
-      <div style="margin-top:12px;font-size:13px;color:var(--text2)">
-        <a href="${url}" download style="color:var(--accent)">⬇ Download</a>
-      </div>`;
-  }
+function renderPDFMessages(summary,filename){
+  if(!summary)return'';
+  return`<div class="msg-row assistant">
+    <div class="msg-avatar ai">N</div>
+    <div class="msg-bubble">${formatOutput(`📋 **Summary of "${filename}"**\n\n${summary}`)}</div>
+  </div>`;
 }
 
-function formatOutput(text) {
-  if (!text) return '';
+const pdfMessages=[];
+async function askPDF(id){
+  const q=document.getElementById('pdf-question')?.value?.trim();
+  if(!q)return;
+  const thread=document.getElementById('runner-thread');
+  const btn=document.getElementById('pdf-send-btn');
+  if(btn)btn.disabled=true;
+  document.getElementById('pdf-question').value='';
+
+  thread.innerHTML+=`<div class="msg-row user">
+    <div class="msg-bubble">${escHtml(q)}</div>
+    <div class="msg-avatar user-av">${(state.user?.email||'U')[0].toUpperCase()}</div>
+  </div>`;
+
+  const typingEl=document.createElement('div');
+  typingEl.className='msg-row assistant';
+  typingEl.id='pdf-typing';
+  typingEl.innerHTML=`<div class="msg-avatar ai">N</div><div class="msg-bubble"><div class="typing-dots"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>`;
+  thread.appendChild(typingEl);
+  thread.scrollTop=thread.scrollHeight;
+
+  try{
+    const data=await api('/api/pdf/'+id+'/ask',{method:'POST',body:{question:q}});
+    typingEl.remove();
+    thread.innerHTML+=`<div class="msg-row assistant">
+      <div class="msg-avatar ai">N</div>
+      <div class="msg-bubble">${formatOutput(data.answer)}</div>
+    </div>`;
+    thread.scrollTop=thread.scrollHeight;
+  }catch(e){
+    typingEl.remove();
+    toast(e.message,'error');
+  }finally{if(btn)btn.disabled=false;}
+}
+
+async function deletePDF(id){
+  if(!confirm('Delete?'))return;
+  try{await api('/api/pdf/'+id,{method:'DELETE'});renderPDF();toast('Deleted','success');}
+  catch(e){toast(e.message,'error');}
+}
+
+// ── PRICING ───────────────────────────────────
+function renderPricing(){
+  document.getElementById('content').innerHTML=`
+<div class="page">
+  <div class="pricing-wrap">
+    <div class="pricing-title">Simple, transparent pricing</div>
+    <p class="pricing-sub">Upgrade anytime. Cancel anytime.</p>
+    <div class="pricing-grid">
+      <div class="price-card">
+        <div class="price-name">Free</div>
+        <div class="price-amount"><sup>$</sup>0</div>
+        <div class="price-period">forever</div>
+        <ul class="price-features">
+          <li>10 requests / day</li>
+          <li>All 150+ tools</li>
+          <li>PDF chat</li>
+          <li>Project saving</li>
+        </ul>
+        <button class="price-btn outline" disabled>Current plan</button>
+      </div>
+      <div class="price-card featured">
+        <div class="price-name">Pro</div>
+        <div class="price-amount"><sup>$</sup>19</div>
+        <div class="price-period">per month</div>
+        <ul class="price-features">
+          <li>500 requests / day</li>
+          <li>All 150+ tools</li>
+          <li>AI memory</li>
+          <li>Priority processing</li>
+          <li>Email support</li>
+        </ul>
+        <button class="price-btn primary" onclick="subscribe('pro')">Get Pro →</button>
+      </div>
+      <div class="price-card">
+        <div class="price-name">Elite</div>
+        <div class="price-amount"><sup>$</sup>49</div>
+        <div class="price-period">per month</div>
+        <ul class="price-features">
+          <li>Unlimited requests</li>
+          <li>All 150+ tools</li>
+          <li>API access</li>
+          <li>Priority support</li>
+        </ul>
+        <button class="price-btn outline" onclick="subscribe('elite')">Get Elite →</button>
+      </div>
+    </div>
+  </div>
+</div>`;
+}
+
+async function subscribe(plan){
+  try{
+    const data=await api('/api/subscribe',{method:'POST',body:{plan}});
+    if(data.checkoutUrl)window.open(data.checkoutUrl,'_blank');
+    else toast('Redirecting...','success');
+  }catch(e){toast(e.message,'error');}
+}
+
+// ── HELPERS ───────────────────────────────────
+function formatOutput(text){
+  if(!text)return'';
   return text
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/```(\w*)\n?([\s\S]*?)```/g,'<pre><code>$2</code></pre>')
@@ -606,291 +876,22 @@ function formatOutput(text) {
     .replace(/\n/g,'<br/>');
 }
 
-function escapeHtml(t) {
-  return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function escHtml(t){
+  return(t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function addToSession(role, content) { state.sessionHistory.push({ role, content }); }
-function scrollThread() { const el = document.getElementById('session-thread'); if (el) el.scrollTop = el.scrollHeight; }
-function newSession() { state.sessionId = null; state.sessionHistory = []; renderRunner(); toast('New session','success'); }
-
-async function copyOutput() {
-  const body = document.getElementById('output-body');
-  if (!body) return;
-  await navigator.clipboard.writeText(body.innerText).catch(()=>{});
-  toast('Copied!','success');
-}
-
-async function saveProject() {
-  const body = document.getElementById('output-body');
-  const t    = state.currentTool;
-  if (!body || !t) return;
-  try {
-    await api('/api/projects/save', { method:'POST', body:{ title:t.name, feature:t.id, input:'', output:body.innerText } });
-    toast('Project saved!','success');
-  } catch (e) { toast('Could not save: '+e.message,'error'); }
-}
-
-// ═══════════════════════════════════════════════
-// PROJECTS
-// ═══════════════════════════════════════════════
-async function renderProjects() {
-  document.getElementById('content').innerHTML = `<div class="page"><div style="color:var(--text2);padding:40px;text-align:center">Loading...</div></div>`;
-  try {
-    const { projects = [] } = await api('/api/projects');
-    document.getElementById('content').innerHTML = `
-<div class="page">
-  <div style="margin-bottom:24px"><div class="section-title">Saved Projects (${projects.length})</div></div>
-  ${projects.length ? `<div class="projects-grid">
-    ${projects.map(p=>`
-    <div class="project-card" onclick="viewProject(${p.id})">
-      <div class="project-feature-tag">${p.feature}</div>
-      <div class="project-title">${escapeHtml(p.title)}</div>
-      <div class="project-date">${new Date(p.created_at).toLocaleDateString()}</div>
-    </div>`).join('')}
-  </div>` : `<div style="text-align:center;padding:60px;color:var(--text2)"><div style="font-size:40px;margin-bottom:12px">📁</div><div>No saved projects yet.</div></div>`}
-</div>`;
-  } catch (e) { toast(e.message,'error'); }
-}
-
-async function viewProject(id) {
-  try {
-    const { project: p } = await api('/api/projects/'+id);
-    document.getElementById('content').innerHTML = `
-<div class="page">
-  <div class="runner-back" onclick="renderProjects()">← Back to Projects</div>
-  <div class="runner-header">
-    <div class="runner-title">${escapeHtml(p.title)}</div>
-    <div class="runner-desc">${p.feature} · ${new Date(p.created_at).toLocaleString()}</div>
-  </div>
-  <div class="output-wrap">
-    <div class="output-header">
-      <span class="output-title">Saved Output</span>
-      <div class="output-actions">
-        <button class="icon-btn" onclick="navigator.clipboard.writeText(document.getElementById('proj-body').innerText);toast('Copied!','success')">📋 Copy</button>
-        <button class="icon-btn" onclick="deleteProject(${p.id})" style="color:var(--accent3)">🗑 Delete</button>
-      </div>
-    </div>
-    <div class="output-body" id="proj-body">${formatOutput(p.output)}</div>
-  </div>
-</div>`;
-  } catch(e) { toast(e.message,'error'); }
-}
-
-async function deleteProject(id) {
-  if (!confirm('Delete?')) return;
-  try { await api('/api/projects/'+id,{method:'DELETE'}); toast('Deleted','success'); renderProjects(); }
-  catch(e){ toast(e.message,'error'); }
-}
-
-// ═══════════════════════════════════════════════
-// HISTORY
-// ═══════════════════════════════════════════════
-async function renderHistory() {
-  document.getElementById('content').innerHTML = `<div class="page"><div style="color:var(--text2);padding:40px;text-align:center">Loading...</div></div>`;
-  try {
-    const { history = [] } = await api('/api/history?limit=60');
-    document.getElementById('content').innerHTML = `
-<div class="page">
-  <div style="margin-bottom:24px"><div class="section-title">History (${history.length})</div></div>
-  ${history.length ? `<div class="history-list">
-    ${history.map(h=>`
-    <div class="history-item">
-      <div class="history-content">
-        <div class="history-title">${escapeHtml((h.content||'').slice(0,80))}</div>
-        <div class="history-preview">${escapeHtml((h.content||'').slice(80,140))}</div>
-      </div>
-      <div class="history-meta">
-        <div class="history-badge">${h.role}</div>
-        <div>${new Date(h.created_at).toLocaleDateString()}</div>
-      </div>
-    </div>`).join('')}
-  </div>` : `<div style="text-align:center;padding:60px;color:var(--text2)"><div style="font-size:40px;margin-bottom:12px">🕐</div><div>No history yet.</div></div>`}
-</div>`;
-  } catch(e){ toast(e.message,'error'); }
-}
-
-// ═══════════════════════════════════════════════
-// PDF CHAT
-// ═══════════════════════════════════════════════
-async function renderPDF() {
-  let docs = [];
-  try { const d = await api('/api/pdf/list'); docs = d.documents||[]; } catch(_){}
-  document.getElementById('content').innerHTML = `
-<div class="page" style="max-width:800px;margin:0 auto">
-  <div class="runner-header">
-    <div class="runner-title">📁 PDF Chat</div>
-    <div class="runner-desc">Upload a PDF and chat with it using AI</div>
-  </div>
-  <div class="upload-zone" id="upload-zone"
-    onclick="document.getElementById('pdf-file').click()"
-    ondragover="this.classList.add('dragover');event.preventDefault()"
-    ondragleave="this.classList.remove('dragover')"
-    ondrop="handlePDFDrop(event)">
-    <div class="upload-icon">📄</div>
-    <div class="upload-text"><strong>Click or drag a PDF here</strong><br/>Max 10 MB</div>
-    <input type="file" id="pdf-file" accept="application/pdf" style="display:none" onchange="uploadPDF(this.files[0])"/>
-  </div>
-  <div id="upload-status" style="display:none;padding:16px;border-radius:12px;background:var(--bg2);border:1px solid var(--border2);margin-bottom:20px;color:var(--text2)">
-    <div class="loader-dots"><div class="loader-dot"></div><div class="loader-dot"></div><div class="loader-dot"></div></div> Uploading...
-  </div>
-  ${docs.length ? `
-  <div class="section-header" style="margin-top:8px">
-    <div class="section-title">Your Documents (${docs.length})</div>
-  </div>
-  <div class="pdf-list">
-    ${docs.map(d=>`
-    <div class="pdf-item">
-      <div class="pdf-icon">📄</div>
-      <div class="pdf-info">
-        <div class="pdf-name">${escapeHtml(d.filename)}</div>
-        <div class="pdf-summary">${escapeHtml((d.summary||'').slice(0,150))}</div>
-      </div>
-      <div class="pdf-actions">
-        <button class="icon-btn" onclick="openPDFChat(${d.id},'${escapeHtml(d.filename)}')">💬 Chat</button>
-        <button class="icon-btn" onclick="deletePDF(${d.id})" style="color:var(--accent3)">🗑</button>
-      </div>
-    </div>`).join('')}
-  </div>` : ''}
-</div>`;
-}
-
-function handlePDFDrop(e) {
-  e.preventDefault();
-  document.getElementById('upload-zone').classList.remove('dragover');
-  const file = e.dataTransfer.files[0];
-  if (file?.type==='application/pdf') uploadPDF(file);
-  else toast('Please drop a PDF file','error');
-}
-
-async function uploadPDF(file) {
-  if (!file) return;
-  document.getElementById('upload-status').style.display = 'flex';
-  const form = new FormData();
-  form.append('pdf', file);
-  try {
-    const data = await api('/api/pdf/upload',{method:'POST',body:form});
-    toast('PDF uploaded!','success');
-    openPDFChat(data.id, data.filename, data.summary);
-  } catch(e){ toast(e.message,'error'); }
-  finally { document.getElementById('upload-status').style.display='none'; }
-}
-
-function openPDFChat(id, filename, summary) {
-  document.getElementById('content').innerHTML = `
-<div class="page" style="max-width:800px;margin:0 auto">
-  <div class="runner-back" onclick="renderPDF()">← Back to PDFs</div>
-  <div class="runner-header">
-    <div class="runner-title">📄 ${escapeHtml(filename)}</div>
-    <div class="runner-desc">Ask anything about this document</div>
-  </div>
-  ${summary?`<div style="background:var(--bg2);border:1px solid var(--border2);border-radius:14px;padding:20px;margin-bottom:20px">
-    <div style="font-size:12px;color:var(--accent);font-weight:600;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">AI Summary</div>
-    <div style="font-size:14px;color:var(--text2);line-height:1.7">${formatOutput(summary)}</div>
-  </div>`:''}
-  <div class="session-thread" id="pdf-thread" style="max-height:400px;overflow-y:auto;margin-bottom:16px"></div>
-  <div class="runner-form">
-    <label class="input-label">Ask a question</label>
-    <textarea class="runner-textarea" id="pdf-question" placeholder="What are the main conclusions?..." rows="3"></textarea>
-    <div class="runner-actions">
-      <button class="run-btn" id="pdf-ask-btn" onclick="askPDF(${id})"><span>▶</span> Ask AI</button>
-    </div>
-  </div>
-</div>`;
-}
-
-async function askPDF(id) {
-  const q = document.getElementById('pdf-question')?.value?.trim();
-  if (!q) { toast('Enter a question','error'); return; }
-  const btn    = document.getElementById('pdf-ask-btn');
-  btn.disabled = true;
-  const thread = document.getElementById('pdf-thread');
-  thread.innerHTML += `<div class="msg user"><div class="msg-role">👤 You</div><div class="msg-bubble">${escapeHtml(q)}</div></div>`;
-  try {
-    const data = await api('/api/pdf/'+id+'/ask',{method:'POST',body:{question:q}});
-    thread.innerHTML += `<div class="msg assistant"><div class="msg-role">🤖 AI</div><div class="msg-bubble">${formatOutput(data.answer)}</div></div>`;
-    document.getElementById('pdf-question').value = '';
-    thread.scrollTop = thread.scrollHeight;
-  } catch(e){ toast(e.message,'error'); }
-  finally { btn.disabled=false; }
-}
-
-async function deletePDF(id) {
-  if (!confirm('Delete?')) return;
-  try { await api('/api/pdf/'+id,{method:'DELETE'}); renderPDF(); toast('Deleted','success'); }
-  catch(e){ toast(e.message,'error'); }
-}
-
-// ═══════════════════════════════════════════════
-// PRICING
-// ═══════════════════════════════════════════════
-function renderPricing() {
-  document.getElementById('content').innerHTML = `
-<div class="page">
-  <div style="text-align:center;margin-bottom:40px">
-    <div class="home-greeting" style="font-size:36px">Simple pricing</div>
-    <div style="color:var(--text2);margin-top:8px">Upgrade anytime. Cancel anytime.</div>
-  </div>
-  <div class="pricing-grid">
-    <div class="price-card">
-      <div class="price-name">Free</div>
-      <div class="price-amount"><sup>$</sup>0</div>
-      <div class="price-period">forever</div>
-      <ul class="price-features">
-        <li>10 requests / day</li><li>All 150+ tools</li>
-        <li>PDF upload & chat</li><li>Project saving</li>
-      </ul>
-      <button class="price-btn secondary" disabled style="cursor:default">Current Plan</button>
-    </div>
-    <div class="price-card featured">
-      <div class="price-name">Pro</div>
-      <div class="price-amount"><sup>$</sup>19</div>
-      <div class="price-period">per month</div>
-      <ul class="price-features">
-        <li>500 requests / day</li><li>All 150+ tools</li>
-        <li>AI Memory</li><li>Priority processing</li><li>Email support</li>
-      </ul>
-      <button class="price-btn primary" onclick="subscribe('pro')">Get Pro →</button>
-    </div>
-    <div class="price-card">
-      <div class="price-name">Elite</div>
-      <div class="price-amount"><sup>$</sup>49</div>
-      <div class="price-period">per month</div>
-      <ul class="price-features">
-        <li>Unlimited requests</li><li>All 150+ tools</li>
-        <li>API access</li><li>Priority support</li>
-      </ul>
-      <button class="price-btn secondary" onclick="subscribe('elite')">Get Elite →</button>
-    </div>
-  </div>
-</div>`;
-}
-
-async function subscribe(plan) {
-  try {
-    const data = await api('/api/subscribe',{method:'POST',body:{plan}});
-    if (data.checkoutUrl) window.open(data.checkoutUrl,'_blank');
-    else toast('Redirecting...','success');
-  } catch(e){ toast(e.message,'error'); }
-}
-
-// ═══════════════════════════════════════════════
-// TOASTS
-// ═══════════════════════════════════════════════
-function toast(msg, type='') {
-  const wrap = document.getElementById('toast-wrap');
-  const el   = document.createElement('div');
-  el.className   = 'toast '+type;
-  el.textContent = msg;
+function toast(msg,type=''){
+  const wrap=document.getElementById('toast-wrap');
+  const el=document.createElement('div');
+  el.className='toast '+type;
+  el.textContent=msg;
   wrap.appendChild(el);
-  setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(),300); },3000);
+  setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity .3s';setTimeout(()=>el.remove(),300);},3000);
 }
 
-// ═══════════════════════════════════════════════
-// BOOT
-// ═══════════════════════════════════════════════
-document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('auth-email')   ?.addEventListener('keydown', e => { if(e.key==='Enter') handleAuth(); });
-  document.getElementById('auth-password')?.addEventListener('keydown', e => { if(e.key==='Enter') handleAuth(); });
-  if (state.token) initApp();
+// ── BOOT ─────────────────────────────────────
+document.addEventListener('DOMContentLoaded',()=>{
+  document.getElementById('auth-email')?.addEventListener('keydown',e=>{if(e.key==='Enter')handleAuth();});
+  document.getElementById('auth-password')?.addEventListener('keydown',e=>{if(e.key==='Enter')handleAuth();});
+  if(state.token)initApp();
 });
