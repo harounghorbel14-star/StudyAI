@@ -202,6 +202,26 @@ async function init(){
   renderToolList('');
   loadHistory();
   showEmpty();
+
+  // Auto greeting
+  setTimeout(()=>{
+    const hour=new Date().getHours();
+    const timeGreet=hour<12?'Good morning':'hour'<18?'Good afternoon':'Good evening';
+    const name=(S.user?.email||'').split('@')[0];
+    const greetings=[
+      `${timeGreet}, **${name}**! 👋\n\nI'm NexusAI — your AI assistant with 150+ tools. What would you like to create today?`,
+      `Hey **${name}**! ✨\n\nReady to create something amazing? Choose a tool from the sidebar or just tell me what you need.`,
+      `Welcome back, **${name}**! 🚀\n\nI have 150+ AI tools ready. Ask me anything or pick a tool from the sidebar!`,
+    ];
+    const msg=greetings[Math.floor(Math.random()*greetings.length)];
+    S.msgs=[];
+    // Type greeting with delay for effect
+    showTyping();
+    setTimeout(()=>{
+      hideTyping();
+      addMsg({role:'assistant',text:msg});
+    },1200);
+  },400);
 }
 
 function updateUsage(){
@@ -326,6 +346,23 @@ function quickStart(toolId,text){
   document.getElementById('msg-input').focus();
 }
 
+// Logo SVG mini — used as AI avatar
+const AI_AVATAR_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
+  <defs>
+    <radialGradient id="ag" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1a1d2e"/>
+      <stop offset="100%" stop-color="#07080b"/>
+    </radialGradient>
+  </defs>
+  <circle cx="50" cy="50" r="50" fill="url(#ag)"/>
+  <circle cx="50" cy="50" r="44" fill="none" stroke="#c6f135" stroke-width="1" opacity="0.5"/>
+  <rect x="24" y="28" width="8" height="44" rx="2" fill="#c6f135"/>
+  <rect x="68" y="28" width="8" height="44" rx="2" fill="#c6f135"/>
+  <line x1="32" y1="31" x2="68" y2="69" stroke="#c6f135" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="72" cy="74" r="4" fill="#35f1c6" opacity="0.9"/>
+  <circle cx="72" cy="74" r="2" fill="#ffffff"/>
+</svg>`;
+
 function renderAllMsgs(){
   const msgs=document.getElementById('messages');
   msgs.innerHTML=S.msgs.map((m,i)=>{
@@ -336,16 +373,25 @@ function renderAllMsgs(){
     else if(m.type==='audio') bubble+=`<audio class="msg-audio" controls src="${m.data}"></audio>`;
     else bubble+=isUser?esc(m.text):fmt(m.text);
 
-    return`<div class="msg ${isUser?'user':'assistant'}">
-      <div class="msg-av ${isUser?'me':'ai'}">${isUser?(S.user?.email||'U')[0].toUpperCase():'N'}</div>
-      <div class="msg-body">
-        <div class="msg-bubble">${bubble}</div>
-        ${!isUser?`<div class="msg-actions">
-          <button class="msg-act-btn" onclick="copyMsg(${i})">Copy</button>
-          ${m.data&&m.type==='audio'?`<a class="msg-act-btn" href="${m.data}" download>Download</a>`:''}
-        </div>`:''}
-      </div>
-    </div>`;
+    if(isUser){
+      return`<div class="msg user">
+        <div class="msg-av me">${(S.user?.email||'U')[0].toUpperCase()}</div>
+        <div class="msg-body">
+          <div class="msg-bubble">${bubble}</div>
+        </div>
+      </div>`;
+    } else {
+      return`<div class="msg assistant">
+        <div class="ai-avatar-wrap">${AI_AVATAR_SVG}</div>
+        <div class="msg-body">
+          <div class="msg-bubble">${bubble}</div>
+          <div class="msg-actions">
+            <button class="msg-act-btn" onclick="copyMsg(${i})">Copy</button>
+            ${m.data&&m.type==='audio'?`<a class="msg-act-btn" href="${m.data}" download>Download</a>`:''}
+          </div>
+        </div>
+      </div>`;
+    }
   }).join('');
   scrollBottom();
 }
@@ -364,7 +410,19 @@ function showTyping(){
   const msgs=document.getElementById('messages');
   const el=document.createElement('div');
   el.className='msg assistant';el.id='typing';
-  el.innerHTML=`<div class="msg-av ai">N</div><div class="msg-body"><div class="msg-bubble"><div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div></div>`;
+  el.innerHTML=`
+    <div class="ai-avatar-wrap is-typing">${AI_AVATAR_SVG}</div>
+    <div class="msg-body">
+      <div class="msg-bubble">
+        <div class="typing-bubble">
+          <div class="tbar"></div>
+          <div class="tbar"></div>
+          <div class="tbar"></div>
+          <div class="tbar"></div>
+          <div class="tbar"></div>
+        </div>
+      </div>
+    </div>`;
   msgs.appendChild(el);scrollBottom();
 }
 function hideTyping(){document.getElementById('typing')?.remove();}
