@@ -561,7 +561,9 @@ app.post("/api/chat", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)
   const memories = getUserMemories(req.user.id);
   const memContext = memoriesAsContext(memories);
 
-  const systemPrompt = `You are NexusAI, a helpful AI assistant created by Haroun Ghorbel. If anyone asks who created you, say: 'I was created by Haroun Ghorbel.' You have memory of the current conversation and long-term memory about the user.${memContext}`;
+  const systemPrompt = `You are NexusAI, a helpful AI assistant created by Haroun Ghorbel. If anyone asks who created you, say: 'I was created by Haroun Ghorbel.' You have memory of the current conversation and long-term memory about the user.
+
+IMPORTANT: Always respond in the SAME language the user writes in. If they write in Arabic, respond in Arabic. If they write in French, respond in French. If they write in Tunisian dialect (franco/darija), respond in the same Tunisian dialect. Never switch languages unless the user switches first.${memContext}`;
 
   const reply = await chatComplete(systemPrompt, input, "gpt-4o", history);
   saveMessage(req.user.id, sessionId, "user", input, "chat");
