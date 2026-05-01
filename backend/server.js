@@ -427,9 +427,25 @@ function requireAuth(req, res, next) {
   catch(err) { res.status(401).json({ error: err.name==="TokenExpiredError" ? "Token expired." : "Invalid token." }); }
 }
 
+// ─────────────────────────────────────────────
+// 👑 VIP WHITELIST — Free Elite access
+// ─────────────────────────────────────────────
+const VIP_EMAILS = [
+  'haroun.ghorbel@gmail.com',
+  'harounghorbel14@gmail.com',
+  'ghorbelharoun16@gmail.com',
+];
+
 function requireQuota(req, res, next) {
   const user = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
   if (!user) return res.status(401).json({ error:"User not found." });
+
+  // VIP = unlimited Elite
+  if (VIP_EMAILS.includes(user.email.toLowerCase())) {
+    req.dbUser = { ...user, plan:'elite', requests_today:0 };
+    return next();
+  }
+
   const today = new Date().toISOString().slice(0,10);
   if (user.requests_reset_at !== today) {
     db.prepare("UPDATE users SET requests_today=0,requests_reset_at=? WHERE id=?").run(today, user.id);
@@ -1842,9 +1858,9 @@ app.post("/api/clipdrop/reimagine", requireAuth, requireQuota, aiLimiter,
 );
 
 // ─────────────────────────────────────────────
-// 🔥 ERROR HANDLER
+// 🧯 ERROR HANDLER
 // ─────────────────────────────────────────────
-app.use((err, req, res, next) => {
+app.use((err,_req,res,_next) => {
   console.error("❌", err.message || err);
   if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error:"File too large." });
   const status = err.status || err.statusCode || 500;
