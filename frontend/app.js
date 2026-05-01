@@ -835,6 +835,7 @@ async function sendMessage(){
       hideTyping();
       addMsg({role:'assistant',text:result.reply});
       renderLatex();
+      if(deepThink) notify('NexusAI', 'Deep thinking complete! ✅');
     }
 
     // Refresh user
@@ -1180,16 +1181,104 @@ async function delPDF(id){
 
 // ── HELPERS ───────────────────────────────────
 function fmt(t){
-  if(!t)return'';
-  return t
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/```(\w*)\n?([\s\S]*?)```/g,'<pre><code>$2</code></pre>')
-    .replace(/`([^`]+)`/g,'<code>$1</code>')
-    .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
-    .replace(/^### (.+)$/gm,'<h3>$1</h3>')
-    .replace(/^## (.+)$/gm,'<h2>$1</h2>')
-    .replace(/^# (.+)$/gm,'<h1>$1</h1>')
-    .replace(/\n/g,'<br/>');
+  if(!t) return '';
+  // Escape HTML first (but preserve code blocks)
+  const codeBlocks = [];
+  t = t.replace(/```(\w*)\n?([\s\S]*?)```/g, (_,lang,code)=>{
+    const i = codeBlocks.length;
+    const escaped = code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const langLabel = lang ? `<div class="code-lang">${lang}</div>` : '';
+    const highlighted = highlightCode(escaped, lang);
+    codeBlocks.push(`<div class="code-block">
+      <div class="code-header">
+        ${langLabel}
+        <button class="code-copy" onclick="copyCode(this)">Copy</button>
+      </div>
+      <pre><code class="lang-${lang||'text'}">${highlighted}</code></pre>
+    </div>`);
+    return `%%CODEBLOCK_${i}%%`;
+  });
+
+  // Escape remaining HTML
+  t = t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  // Inline code
+  t = t.replace(/`([^`]+)`/g,'<code class="inline-code">$1</code>');
+
+  // Bold + italic
+  t = t.replace(/\*\*\*(.*?)\*\*\*/g,'<strong><em>$1</em></strong>');
+  t = t.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
+  t = t.replace(/\*(.*?)\*/g,'<em>$1</em>');
+
+  // Headers
+  t = t.replace(/^### (.+)$/gm,'<h3>$1</h3>');
+  t = t.replace(/^## (.+)$/gm,'<h2>$1</h2>');
+  t = t.replace(/^# (.+)$/gm,'<h1>$1</h1>');
+
+  // Horizontal rule
+  t = t.replace(/^---+$/gm,'<hr/>');
+
+  // Blockquote
+  t = t.replace(/^&gt; (.+)$/gm,'<blockquote>$1</blockquote>');
+
+  // Tables
+  t = t.replace(/^\|(.+)\|$/gm, (match) => {
+    if(match.includes('---')) return '<tr class="table-divider"></tr>';
+    const cells = match.split('|').filter(c=>c.trim());
+    return '<tr>' + cells.map(c=>`<td>${c.trim()}</td>`).join('') + '</tr>';
+  });
+  t = t.replace(/(<tr>[\s\S]*?<\/tr>(\n<tr>[\s\S]*?<\/tr>)*)/g,
+    '<div class="md-table"><table>$1</table></div>');
+
+  // Unordered lists
+  t = t.replace(/(^[*\-] .+$(\n[*\-] .+$)*)/gm, (match) => {
+    const items = match.split('\n').filter(l=>l.trim());
+    return '<ul>' + items.map(i=>`<li>${i.replace(/^[*\-] /,'')}</li>`).join('') + '</ul>';
+  });
+
+  // Ordered lists
+  t = t.replace(/(^\d+\. .+$(\n\d+\. .+$)*)/gm, (match) => {
+    const items = match.split('\n').filter(l=>l.trim());
+    return '<ol>' + items.map(i=>`<li>${i.replace(/^\d+\. /,'')}</li>`).join('') + '</ol>';
+  });
+
+  // Line breaks
+  t = t.replace(/\n\n/g,'</p><p>').replace(/\n/g,'<br/>');
+  t = `<p>${t}</p>`;
+
+  // Restore code blocks
+  codeBlocks.forEach((block,i)=>{
+    t = t.replace(`%%CODEBLOCK_${i}%%`, block);
+  });
+
+  return t;
+}
+
+// Simple syntax highlighting
+function highlightCode(code, lang){
+  if(!lang) return code;
+  const keywords = {
+    js:      /\b(const|let|var|function|return|if|else|for|while|class|import|export|async|await|try|catch|new|this|null|undefined|true|false)\b/g,
+    python:  /\b(def|class|import|from|return|if|elif|else|for|while|try|except|with|as|pass|lambda|True|False|None)\b/g,
+    html:    /(&lt;\/?[\w\s="/.':;#,\-]+&gt;)/g,
+    css:     /([a-z-]+)(?=\s*:)/g,
+  };
+  const strings = /(".*?"|'.*?'|`.*?`)/g;
+  const comments = /(\/\/.*$|#.*$|\/\*[\s\S]*?\*\/)/gm;
+  const numbers = /\b(\d+\.?\d*)\b/g;
+
+  code = code.replace(comments, '<span class="c-comment">$1</span>');
+  code = code.replace(strings, '<span class="c-string">$1</span>');
+  if(keywords[lang]) code = code.replace(keywords[lang], '<span class="c-keyword">$1</span>');
+  code = code.replace(numbers, '<span class="c-number">$1</span>');
+  return code;
+}
+
+function copyCode(btn){
+  const code = btn.closest('.code-block').querySelector('code').innerText;
+  navigator.clipboard.writeText(code).catch(()=>{});
+  btn.textContent = 'Copied!';
+  setTimeout(()=>btn.textContent='Copy', 2000);
 }
 function esc(t){return(t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
@@ -1201,7 +1290,35 @@ function toast(msg,type=''){
   setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity .3s';setTimeout(()=>el.remove(),300);},3000);
 }
 
-// ── WRITING STYLES ────────────────────────────
+// ── DARK / LIGHT MODE ─────────────────────────
+S.darkMode = localStorage.getItem('nx_dark') !== 'false';
+
+function initTheme(){
+  document.documentElement.setAttribute('data-theme', S.darkMode?'dark':'light');
+  const btn = document.getElementById('theme-btn');
+  if(btn) btn.textContent = S.darkMode ? '☀️' : '🌙';
+}
+
+function toggleTheme(){
+  S.darkMode = !S.darkMode;
+  localStorage.setItem('nx_dark', S.darkMode);
+  initTheme();
+  toast(S.darkMode?'Dark mode':'Light mode','success');
+}
+
+// ── NOTIFICATIONS ─────────────────────────────
+function notify(title, body){
+  // Browser notification
+  if(Notification.permission === 'granted'){
+    new Notification(title, {body, icon:'/logo.svg'});
+  } else if(Notification.permission !== 'denied'){
+    Notification.requestPermission().then(p=>{
+      if(p==='granted') new Notification(title, {body, icon:'/logo.svg'});
+    });
+  }
+  // Always show toast too
+  toast(`🔔 ${title}: ${body}`, 'success');
+}
 const STYLES = {
   default:    '',
   formal:     'Write in a formal, professional tone. Use proper grammar and structure.',
@@ -1306,5 +1423,6 @@ async function saveInstructions(){
 document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('auth-email')?.addEventListener('keydown',e=>{if(e.key==='Enter')handleAuth();});
   document.getElementById('auth-password')?.addEventListener('keydown',e=>{if(e.key==='Enter')handleAuth();});
+  initTheme();
   if(S.token)init();
 });

@@ -837,8 +837,101 @@ input,textarea{font-family:inherit;color:inherit}
 .msg-act-btn.star.saved{color:var(--a1)}
 
 /* ══════════════════════════════
-   WRITING STYLES
+   LIGHT MODE
 ══════════════════════════════ */
+[data-theme="light"]{
+  --bg:         #ffffff;
+  --bg2:        #f5f5f7;
+  --bg3:        #e8e8ed;
+  --bg4:        #dcdce0;
+  --sb:         #f0f0f5;
+  --border:     #e0e0e8;
+  --border2:    #c8c8d8;
+  --border3:    #b0b0c8;
+  --text:       #1a1a2e;
+  --t2:         #5a5a7a;
+  --t3:         #9090a8;
+  --glow1:      0 0 20px #c6f13540;
+  --glow2:      0 0 20px #35f1c640;
+}
+[data-theme="light"] body::before{
+  background-image:
+    linear-gradient(#0000000a 1px,transparent 1px),
+    linear-gradient(90deg,#0000000a 1px,transparent 1px);
+}
+[data-theme="light"] #canvas-preview-wrap{background:#f5f5f7}
+
+/* ══════════════════════════════
+   CODE BLOCKS — Syntax Highlight
+══════════════════════════════ */
+.code-block{
+  background:var(--sb);border:1px solid var(--border);
+  border-radius:12px;margin:10px 0;overflow:hidden;
+}
+.code-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 14px;border-bottom:1px solid var(--border);
+  background:var(--bg3);
+}
+.code-lang{
+  font-size:11px;font-weight:600;color:var(--a1);
+  text-transform:uppercase;letter-spacing:.5px;
+}
+.code-copy{
+  font-size:11px;color:var(--t2);padding:3px 8px;
+  border-radius:5px;border:1px solid var(--border);
+  cursor:pointer;transition:.15s;
+}
+.code-copy:hover{background:var(--bg2);color:var(--text)}
+.code-block pre{
+  padding:16px;margin:0;overflow-x:auto;
+  font-size:13px;line-height:1.7;
+}
+.code-block code{
+  background:none;border:none;padding:0;
+  font-family:'Fira Code','Cascadia Code',monospace;
+  font-size:13px;color:var(--text);
+}
+
+/* Syntax colors */
+.c-keyword{color:#c792ea;font-weight:500}
+.c-string{color:#c6f135}
+.c-comment{color:var(--t3);font-style:italic}
+.c-number{color:#35f1c6}
+
+/* Inline code */
+.inline-code{
+  background:var(--bg3);border:1px solid var(--border);
+  border-radius:4px;padding:2px 6px;
+  font-size:12.5px;color:var(--a2);
+  font-family:'Fira Code',monospace;
+}
+
+/* ══════════════════════════════
+   MARKDOWN ELEMENTS
+══════════════════════════════ */
+.msg-bubble blockquote{
+  border-left:3px solid var(--a1);
+  padding:8px 14px;margin:8px 0;
+  background:var(--bg2);border-radius:0 8px 8px 0;
+  color:var(--t2);font-style:italic;
+}
+.msg-bubble hr{border:none;border-top:1px solid var(--border);margin:12px 0}
+.msg-bubble p{margin:6px 0}
+.msg-bubble ul,.msg-bubble ol{padding-left:20px;margin:6px 0}
+.msg-bubble li{margin:4px 0}
+
+/* Tables */
+.md-table{overflow-x:auto;margin:10px 0}
+.md-table table{border-collapse:collapse;width:100%;font-size:13px}
+.md-table td{
+  padding:8px 12px;border:1px solid var(--border);
+}
+.md-table tr:first-child td{
+  background:var(--bg3);font-weight:600;color:var(--text);
+}
+.md-table tr:hover td{background:var(--bg2)}
+.table-divider{display:none}
 .style-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px 0}
 .style-btn{
   padding:5px 8px;border-radius:7px;font-size:11.5px;
