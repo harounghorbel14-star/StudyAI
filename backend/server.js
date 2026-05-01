@@ -1547,6 +1547,8 @@ app.post("/api/clipdrop/reimagine", requireAuth, requireQuota, aiLimiter,
     }finally{fs.unlink(filePath,()=>{});}
   })
 );
+
+app.use((err, req, res, next) => {
   console.error("❌", err.message || err);
   if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error:"File too large." });
   const status = err.status || err.statusCode || 500;
