@@ -170,8 +170,11 @@
 
     <!-- Top bar -->
     <header id="topbar">
-      <button class="top-btn" onclick="openSidebar()">
+      <button class="top-btn" onclick="openSidebar()" title="Menu">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <button class="top-btn" onclick="toggleCatGrid()" title="Browse categories" id="cat-grid-btn">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
       </button>
       <div class="topbar-mid">
         <div class="tool-label" id="tool-label">NexusAI</div>
@@ -261,6 +264,17 @@
 </div>
 
 <div id="toasts"></div>
+
+<!-- Categories Grid Overlay -->
+<div id="cat-overlay" style="display:none">
+  <div id="cat-panel">
+    <div class="cat-panel-header">
+      <div class="cat-panel-title" id="cat-panel-title">Browse Tools</div>
+      <button class="cat-panel-close" onclick="closeCatGrid()">✕</button>
+    </div>
+    <div id="cat-panel-body"></div>
+  </div>
+</div>
 
 <!-- Custom Instructions Modal -->
 <div id="instructions-modal" style="display:none;position:fixed;inset:0;z-index:200;background:#00000090;backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:20px">

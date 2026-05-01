@@ -1406,7 +1406,95 @@ function toast(msg,type=''){
   setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity .3s';setTimeout(()=>el.remove(),300);},3000);
 }
 
-// ── DARK / LIGHT MODE ─────────────────────────
+// ── CATEGORIES GRID ──────────────────────────
+const CAT_META = {
+  ai:          {e:'🧠', name:'AI Essentials'},
+  code:        {e:'💻', name:'Code & Dev'},
+  business:    {e:'📈', name:'Business'},
+  content:     {e:'📱', name:'Content'},
+  media:       {e:'🎨', name:'Image & Media'},
+  video:       {e:'🎬', name:'Video & Film'},
+  audio:       {e:'🔊', name:'Voice & Audio'},
+  productivity:{e:'⚡', name:'Productivity'},
+  students:    {e:'🎓', name:'Students'},
+  health:      {e:'🏥', name:'Health & Wellness'},
+  finance:     {e:'💰', name:'Finance'},
+  travel:      {e:'✈️', name:'Travel'},
+  food:        {e:'🍕', name:'Food & Recipes'},
+  legal:       {e:'⚖️', name:'Legal'},
+  education:   {e:'📚', name:'Education'},
+  marketing:   {e:'📢', name:'Marketing'},
+  science:     {e:'🔬', name:'Science'},
+  creative:    {e:'✨', name:'Creative Writing'},
+  hr:          {e:'👥', name:'HR & People'},
+};
+
+function toggleCatGrid(){
+  const overlay = document.getElementById('cat-overlay');
+  const btn = document.getElementById('cat-grid-btn');
+  if(overlay.style.display==='none'||!overlay.style.display){
+    overlay.style.display='block';
+    btn.classList.add('active');
+    showCatsGrid();
+  } else {
+    closeCatGrid();
+  }
+}
+
+function closeCatGrid(){
+  document.getElementById('cat-overlay').style.display='none';
+  document.getElementById('cat-grid-btn').classList.remove('active');
+}
+
+function showCatsGrid(){
+  document.getElementById('cat-panel-title').textContent='Browse Tools';
+  // Get unique cats with counts
+  const cats = {};
+  TOOLS.forEach(t=>{
+    if(!cats[t.cat]) cats[t.cat]={count:0,...(CAT_META[t.cat]||{e:'🔧',name:t.cat})};
+    cats[t.cat].count++;
+  });
+  document.getElementById('cat-panel-body').innerHTML=`
+    <div class="cats-grid">
+      ${Object.entries(cats).map(([cat,info])=>`
+        <button class="cat-card" onclick="showCatTools('${cat}','${info.name}')">
+          <span class="cat-card-emoji">${info.e}</span>
+          <div class="cat-card-name">${info.name}</div>
+          <div class="cat-card-count">${info.count} tools</div>
+        </button>`).join('')}
+    </div>`;
+}
+
+function showCatTools(cat, name){
+  document.getElementById('cat-panel-title').textContent=name;
+  const tools = TOOLS.filter(t=>t.cat===cat);
+  document.getElementById('cat-panel-body').innerHTML=`
+    <button class="cat-back-btn" onclick="showCatsGrid()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      All Categories
+    </button>
+    <div class="tools-grid-panel">
+      ${tools.map(t=>`
+        <button class="tool-grid-card" onclick="selectToolFromGrid('${t.id}')">
+          <span class="tool-grid-emoji">${t.e}</span>
+          <div class="tool-grid-name">${t.name}</div>
+        </button>`).join('')}
+    </div>`;
+}
+
+function selectToolFromGrid(id){
+  closeCatGrid();
+  selectTool(id);
+}
+
+// Close when clicking overlay background
+document.addEventListener('click', e=>{
+  const overlay = document.getElementById('cat-overlay');
+  const panel = document.getElementById('cat-panel');
+  if(overlay && overlay.style.display!=='none' && !panel?.contains(e.target) && e.target===overlay){
+    closeCatGrid();
+  }
+});
 S.darkMode = localStorage.getItem('nx_dark') !== 'false';
 
 function initTheme(){
