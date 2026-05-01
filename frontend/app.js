@@ -196,8 +196,17 @@ const TOOLS = [
   {id:'face-swap',cat:'media',e:'😊',name:'Face Swap'},
   {id:'restore-img',cat:'media',e:'🔧',name:'Restore Image'},
   {id:'music-cover',cat:'audio',e:'🎤',name:'Music Cover'},
+  {id:'music-song',cat:'audio',e:'🎼',name:'Full Song (Music 2.6)'},
+  {id:'grok-tts',cat:'audio',e:'🔊',name:'Grok TTS (xAI)'},
+  {id:'gemini-tts',cat:'audio',e:'🌐',name:'Gemini TTS (70+ langs)'},
   {id:'lipsync',cat:'video',e:'👄',name:'Lipsync Video'},
   {id:'video-gen',cat:'video',e:'🎬',name:'Video Generator'},
+  {id:'video-pixverse',cat:'video',e:'🎥',name:'PixVerse v6'},
+  {id:'video-from-image',cat:'video',e:'📸',name:'Video from Image'},
+  {id:'video-veo',cat:'video',e:'🌟',name:'Veo 3.1 (Google)'},
+  {id:'video-grok',cat:'video',e:'⚡',name:'Grok Video (xAI)'},
+  {id:'image-nanobanana',cat:'media',e:'🍌',name:'Nano Banana 2'},
+  {id:'image-seedream5',cat:'media',e:'✨',name:'Seedream 5 Lite'},
 
   // ── CLIPDROP POWERED ──────────────────────────
   {id:'remove-bg',cat:'media',e:'✂️',name:'Remove Background'},
@@ -935,7 +944,15 @@ async function sendMessage(){
       const isSketch = tool.id==='sketch-to-img';
       const isFaceSwap = tool.id==='face-swap';
       const isRestore = tool.id==='restore-img';
-      const isMusicCover = tool.id==='music-cover';
+      const isMusicSong = tool.id==='music-song';
+      const isGrokTTS = tool.id==='grok-tts';
+      const isGeminiTTS = tool.id==='gemini-tts';
+      const isPixverse = tool.id==='video-pixverse';
+      const isVideoFromImg = tool.id==='video-from-image';
+      const isVeo = tool.id==='video-veo';
+      const isGrokVideo = tool.id==='video-grok';
+      const isNanoBanana = tool.id==='image-nanobanana';
+      const isSeedream5 = tool.id==='image-seedream5';
       const isLipsync = tool.id==='lipsync';
       const isVideoGen = tool.id==='video-gen';
 
@@ -1071,13 +1088,69 @@ async function sendMessage(){
           hideTyping();addMsg({role:'assistant',text:'🎤 Music cover ready!',type:'audio',data:`data:audio/mp3;base64,${r.audio}`});}
         catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
 
-      } else if(isVideoGen){
-        toast('🎬 Generating video... this takes ~60 seconds','success');
+      } else if(isMusicSong){
+        toast('🎼 Generating full song... ~60 seconds','success');showTyping();
+        try{const r=await api('/api/music/song',{method:'POST',body:{prompt:text}});
+          hideTyping();addMsg({role:'assistant',text:'🎼 Full song generated!',type:'audio',data:`data:audio/mp3;base64,${r.audio}`});notify('NexusAI','Your song is ready! 🎼');}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isGrokTTS){
         showTyping();
+        try{const r=await api('/api/tts/grok',{method:'POST',body:{text}});
+          hideTyping();addMsg({role:'assistant',text:'🔊 Grok TTS:',type:'audio',data:`data:audio/mp3;base64,${r.audio}`});}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isGeminiTTS){
+        showTyping();
+        try{const r=await api('/api/tts/gemini',{method:'POST',body:{text}});
+          hideTyping();addMsg({role:'assistant',text:'🌐 Gemini TTS:',type:'audio',data:`data:audio/mp3;base64,${r.audio}`});}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isNanoBanana){
+        showTyping();
+        try{const r=await api('/api/image/nanobanana',{method:'POST',body:{prompt:text}});
+          hideTyping();addMsg({role:'assistant',text:'🍌 Generated with Nano Banana 2:',type:'image',data:r.url});}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isSeedream5){
+        showTyping();
+        try{const r=await api('/api/image/seedream5',{method:'POST',body:{prompt:text}});
+          hideTyping();addMsg({role:'assistant',text:'✨ Generated with Seedream 5:',type:'image',data:r.url});}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isVideoGen){
+        toast('🎬 Generating video... ~60 seconds','success');showTyping();
         try{const r=await api('/api/video/generate',{method:'POST',body:{prompt:text}});
-          hideTyping();
-          addMsg({role:'assistant',text:`🎬 **Video ready!**\n\n[▶ Watch Video](${r.url})`});
-          notify('NexusAI','Your video is ready! 🎬');}
+          hideTyping();addMsg({role:'assistant',text:`🎬 **Video ready!**\n\n[▶ Watch](${r.url})`});notify('NexusAI','Video ready! 🎬');}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isPixverse){
+        toast('🎥 Generating cinematic video...','success');showTyping();
+        try{const r=await api('/api/video/pixverse',{method:'POST',body:{prompt:text}});
+          hideTyping();addMsg({role:'assistant',text:`🎥 **PixVerse Video ready!**\n\n[▶ Watch](${r.url})`});notify('NexusAI','PixVerse video ready! 🎥');}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isVideoFromImg){
+        toast('📸 Animating image... ~60 seconds','success');showTyping();
+        const vf=new FormData();
+        if(img){const vb=atob(img.base64);const va=new Uint8Array(vb.length);for(let i=0;i<vb.length;i++)va[i]=vb.charCodeAt(i);vf.append('image',new Blob([va],{type:'image/png'}),'image.png');}
+        if(text)vf.append('prompt',text);
+        try{const r=await fetch(API+'/api/video/from-image',{method:'POST',headers:{Authorization:'Bearer '+S.token},body:vf});
+          const d=await r.json();if(!r.ok)throw new Error(d.error);
+          hideTyping();addMsg({role:'assistant',text:`📸 **Video from image ready!**\n\n[▶ Watch](${d.url})`});
+          S.attachedImg=null;clearAttachPreview();notify('NexusAI','Video ready! 📸');}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isVeo){
+        toast('🌟 Generating with Veo 3.1... ~90 seconds','success');showTyping();
+        try{const r=await api('/api/video/veo',{method:'POST',body:{prompt:text}});
+          hideTyping();addMsg({role:'assistant',text:`🌟 **Veo 3.1 Video ready!**\n\n[▶ Watch](${r.url})`});notify('NexusAI','Veo video ready! 🌟');}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isGrokVideo){
+        toast('⚡ Generating with Grok...','success');showTyping();
+        try{const r=await api('/api/video/grok',{method:'POST',body:{prompt:text}});
+          hideTyping();addMsg({role:'assistant',text:`⚡ **Grok Video ready!**\n\n[▶ Watch](${r.url})`});notify('NexusAI','Grok video ready! ⚡');}
         catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
 
       } else if(isTTS){

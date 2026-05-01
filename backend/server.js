@@ -1620,6 +1620,126 @@ app.post("/api/video/generate", requireAuth, requireQuota, aiLimiter, wrap(async
   res.json({url: Array.isArray(output)?output[0]:output});
 }));
 
+// Music 2.6 - full songs with lyrics
+app.post("/api/music/song", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {prompt, lyrics} = req.body;
+  if(!prompt) return res.status(400).json({error:"Missing prompt."});
+  const output = await replicateRun('minimax/music-2.6',{
+    prompt, lyrics:lyrics||'', auto_lyrics:!lyrics,
+  });
+  const audioUrl = Array.isArray(output)?output[0]:output;
+  const buf = Buffer.from(await (await fetch(audioUrl)).arrayBuffer());
+  res.json({audio:buf.toString('base64'),format:'mp3',url:audioUrl});
+}));
+
+// Nano Banana 2 - Google fast image gen
+app.post("/api/image/nanobanana", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {prompt} = req.body;
+  if(!prompt) return res.status(400).json({error:"Missing prompt."});
+  const output = await replicateRun('google/nano-banana-2',{prompt, aspect_ratio:'1:1'});
+  res.json({url: Array.isArray(output)?output[0]:output});
+}));
+
+// Seedream 5 Lite - smart image gen
+app.post("/api/image/seedream5", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {prompt} = req.body;
+  if(!prompt) return res.status(400).json({error:"Missing prompt."});
+  const output = await replicateRun('bytedance/seedream-5-lite',{prompt, aspect_ratio:'1:1'});
+  res.json({url: Array.isArray(output)?output[0]:output});
+}));
+
+// Grok TTS - xAI text to speech
+app.post("/api/tts/grok", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {text, voice='Default'} = req.body;
+  if(!text) return res.status(400).json({error:"Missing text."});
+  const output = await replicateRun('xai/grok-text-to-speech',{
+    text:text.slice(0,2000), voice,
+  });
+  const audioUrl = Array.isArray(output)?output[0]:output;
+  const buf = Buffer.from(await (await fetch(audioUrl)).arrayBuffer());
+  res.json({audio:buf.toString('base64'),format:'mp3'});
+}));
+
+// Grok STT - xAI speech to text (25 languages)
+app.post("/api/stt/grok", requireAuth, requireQuota, aiLimiter,
+  clipdropUpload.single("audio"),
+  wrap(async (req,res)=>{
+    if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+    if(!req.file) return res.status(400).json({error:"No audio uploaded."});
+    const filePath = req.file.path;
+    try{
+      const base64 = `data:audio/mp3;base64,${fs.readFileSync(filePath).toString('base64')}`;
+      const output = await replicateRun('xai/grok-speech-to-text',{audio:base64});
+      res.json({text: typeof output==='string'?output:output?.text||''});
+    }finally{fs.unlink(filePath,()=>{});}
+  })
+);
+
+// PixVerse v6 - cinematic video
+app.post("/api/video/pixverse", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {prompt} = req.body;
+  if(!prompt) return res.status(400).json({error:"Missing prompt."});
+  const output = await replicateRun('pixverse/pixverse-v6',{
+    prompt, duration:5, resolution:"720p", quality:"high",
+  });
+  res.json({url: Array.isArray(output)?output[0]:output});
+}));
+
+// HappyHorse - video from image
+app.post("/api/video/from-image", requireAuth, requireQuota, aiLimiter,
+  clipdropUpload.single("image"),
+  wrap(async (req,res)=>{
+    if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+    const prompt = req.body.prompt?.trim()||"animate this image naturally";
+    const filePath = req.file?.path;
+    try{
+      const input = {prompt};
+      if(filePath){
+        const base64 = `data:${req.file.mimetype};base64,${fs.readFileSync(filePath).toString('base64')}`;
+        input.image = base64;
+      }
+      const output = await replicateRun('alibaba/happyhorse-1.0',input);
+      res.json({url: Array.isArray(output)?output[0]:output});
+    }finally{if(filePath)fs.unlink(filePath,()=>{});}
+  })
+);
+
+// Veo 3.1 Lite - Google video gen
+app.post("/api/video/veo", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {prompt} = req.body;
+  if(!prompt) return res.status(400).json({error:"Missing prompt."});
+  const output = await replicateRun('google/veo-3.1-lite',{prompt, duration:5});
+  res.json({url: Array.isArray(output)?output[0]:output});
+}));
+
+// Grok Imagine Video - xAI video gen
+app.post("/api/video/grok", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {prompt} = req.body;
+  if(!prompt) return res.status(400).json({error:"Missing prompt."});
+  const output = await replicateRun('xai/grok-imagine-video',{prompt, duration:5});
+  res.json({url: Array.isArray(output)?output[0]:output});
+}));
+
+// Gemini 3.1 Flash TTS - Google fast TTS 70+ languages
+app.post("/api/tts/gemini", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {text, voice='Aoede'} = req.body;
+  if(!text) return res.status(400).json({error:"Missing text."});
+  const output = await replicateRun('google/gemini-3.1-flash-tts',{
+    text:text.slice(0,3000), voice,
+  });
+  const audioUrl = Array.isArray(output)?output[0]:output;
+  const buf = Buffer.from(await (await fetch(audioUrl)).arrayBuffer());
+  res.json({audio:buf.toString('base64'),format:'mp3'});
+}));
+
 // Remove background
 app.post("/api/clipdrop/remove-bg", requireAuth, requireQuota, aiLimiter,
   clipdropUpload.single("image"),
@@ -1721,6 +1841,9 @@ app.post("/api/clipdrop/reimagine", requireAuth, requireQuota, aiLimiter,
   })
 );
 
+// ─────────────────────────────────────────────
+// 🔥 ERROR HANDLER
+// ─────────────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error("❌", err.message || err);
   if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error:"File too large." });
