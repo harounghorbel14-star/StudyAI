@@ -548,10 +548,12 @@ function renderAllMsgs(){
         </div>
       </div>`;
     } else {
+      const canvasBtn = checkForCanvas(m.text||'', i);
       return`<div class="msg assistant">
         <div class="ai-avatar-wrap">${AI_AVATAR_SVG}</div>
         <div class="msg-body">
           <div class="msg-bubble">${bubble}</div>
+          ${canvasBtn}
           <div class="msg-actions">
             <button class="msg-act-btn" onclick="copyMsg(${i})">Copy</button>
             <button class="msg-act-btn star" onclick="saveToFavorites('${(m.text||'').replace(/'/g,"\\'").replace(/\n/g,'\\n')}','${S.tool?.name||''}')" title="Save">⭐</button>
@@ -607,6 +609,86 @@ function extractAndRunCode(i){
   const match = text.match(/```(?:javascript|js|html)?\n?([\s\S]*?)```/);
   if(match) runCode(match[1]);
   else toast('No runnable code found','error');
+}
+
+// ── 5. CANVAS / ARTIFACTS ────────────────────
+let canvasCode = '';
+
+function openCanvas(code, title){
+  canvasCode = code;
+  document.getElementById('canvas-title').textContent = title||'Canvas';
+  document.getElementById('canvas-panel').classList.remove('canvas-hidden');
+  // Show preview
+  switchCanvasTab('preview');
+  renderCanvasPreview(code);
+}
+
+function closeCanvas(){
+  document.getElementById('canvas-panel').classList.add('canvas-hidden');
+}
+
+function switchCanvasTab(tab){
+  document.getElementById('tab-preview').classList.toggle('active', tab==='preview');
+  document.getElementById('tab-code').classList.toggle('active', tab==='code');
+  document.getElementById('canvas-preview-wrap').style.display = tab==='preview'?'flex':'none';
+  document.getElementById('canvas-code-wrap').style.display   = tab==='code'?'block':'none';
+  if(tab==='code'){
+    document.getElementById('canvas-code-view').textContent = canvasCode;
+  }
+}
+
+function renderCanvasPreview(code){
+  const iframe = document.getElementById('canvas-iframe');
+  // Detect if HTML or JS
+  const isHTML = code.trim().startsWith('<') || code.includes('<html') || code.includes('<!DOCTYPE');
+  let html = isHTML ? code : `<!DOCTYPE html><html><head><style>
+    body{font-family:system-ui,sans-serif;padding:16px;background:#fff;color:#111;font-size:14px}
+  </style></head><body><script>
+    const log=console.log;
+    const pre=document.createElement('pre');pre.style.cssText='background:#f5f5f5;padding:12px;border-radius:8px;font-size:13px;white-space:pre-wrap';
+    document.body.appendChild(pre);
+    console.log=(...a)=>{pre.textContent+=a.join(' ')+'\\n';log(...a);};
+    try{${code}}catch(e){pre.textContent+='Error: '+e.message;}
+  <\/script></body></html>`;
+  iframe.srcdoc = html;
+}
+
+function copyCanvas(){
+  navigator.clipboard.writeText(canvasCode).catch(()=>{});
+  toast('Code copied!','success');
+}
+
+function downloadCanvas(){
+  const isHTML = canvasCode.trim().startsWith('<');
+  const blob = new Blob([canvasCode],{type:isHTML?'text/html':'text/javascript'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href=url; a.download=isHTML?'artifact.html':'code.js';
+  a.click(); URL.revokeObjectURL(url);
+  toast('Downloaded!','success');
+}
+
+// Auto-detect HTML/code in AI response and show Canvas button
+function checkForCanvas(text, msgIndex){
+  const htmlMatch = text.match(/```html\n?([\s\S]*?)```/);
+  const jsMatch   = text.match(/```(?:javascript|js)\n?([\s\S]*?)```/);
+  const match = htmlMatch||jsMatch;
+  if(!match) return '';
+  const code = match[1];
+  const type = htmlMatch?'HTML':'JavaScript';
+  // Store code for this message
+  window._canvasCodes = window._canvasCodes||{};
+  window._canvasCodes[msgIndex] = {code, type};
+  return `<button class="canvas-open-btn" onclick="openCanvasFromMsg(${msgIndex})">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 12h6M9 15h4"/></svg>
+    Open in Canvas · ${type}
+  </button>`;
+}
+
+function openCanvasFromMsg(i){
+  const data = window._canvasCodes?.[i];
+  if(!data){ toast('No canvas content','error'); return; }
+  openCanvas(data.code, data.type+' Canvas');
 }
 
 // ── SEND ─────────────────────────────────────
