@@ -1470,6 +1470,9 @@ app.post("/api/image/imagen4", requireAuth, requireQuota, aiLimiter, wrap(async 
   res.json({url:imageUrl});
 }));
 
+// multer for clipdrop/replicate file uploads
+const clipdropUpload = multer({ dest: uploadDir, limits:{ fileSize:30*1024*1024 } });
+
 // FLUX-2-Pro - image generation + editing with references
 app.post("/api/image/flux2pro", requireAuth, requireQuota, aiLimiter,
   clipdropUpload.array("images", 8),
@@ -1495,8 +1498,6 @@ app.post("/api/image/flux2pro", requireAuth, requireQuota, aiLimiter,
     res.json({url:imageUrl});
   })
 );
-const clipdropUpload = multer({ dest: uploadDir, limits:{ fileSize:30*1024*1024 } });
-
 // ─────────────────────────────────────────────
 // 🎬 MORE REPLICATE MODELS
 // ─────────────────────────────────────────────
