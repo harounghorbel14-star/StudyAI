@@ -183,6 +183,41 @@ const TOOLS = [
   {id:'recipe-generator',cat:'food',e:'👨‍🍳',name:'Recipe Generator'},
   {id:'ingredient-substitute',cat:'food',e:'🔄',name:'Ingredient Substitute'},
   {id:'diet-planner',cat:'food',e:'🥙',name:'Diet Planner'},
+
+  // ── LEGAL ─────────────────────────────────────
+  {id:'contract-reviewer',cat:'legal',e:'📜',name:'Contract Reviewer'},
+  {id:'terms-generator',cat:'legal',e:'⚖️',name:'Terms & Privacy'},
+  {id:'legal-letter',cat:'legal',e:'✉️',name:'Legal Letter'},
+  {id:'nda-generator',cat:'legal',e:'🔒',name:'NDA Generator'},
+
+  // ── EDUCATION ─────────────────────────────────
+  {id:'lesson-plan',cat:'education',e:'📚',name:'Lesson Plan'},
+  {id:'rubric-maker',cat:'education',e:'📋',name:'Rubric Maker'},
+  {id:'curriculum-planner',cat:'education',e:'🗂️',name:'Curriculum Planner'},
+  {id:'quiz-feedback',cat:'education',e:'✅',name:'Quiz Feedback'},
+
+  // ── MARKETING ─────────────────────────────────
+  {id:'ad-copy',cat:'marketing',e:'📢',name:'Ad Copy'},
+  {id:'seo-keywords',cat:'marketing',e:'🔍',name:'SEO Keywords'},
+  {id:'email-sequence',cat:'marketing',e:'📧',name:'Email Sequence'},
+  {id:'brand-voice',cat:'marketing',e:'🎯',name:'Brand Voice Guide'},
+
+  // ── SCIENCE ───────────────────────────────────
+  {id:'science-explainer',cat:'science',e:'🔬',name:'Science Explainer'},
+  {id:'research-summary',cat:'science',e:'📊',name:'Research Summary'},
+  {id:'hypothesis-builder',cat:'science',e:'💡',name:'Hypothesis Builder'},
+
+  // ── CREATIVE ──────────────────────────────────
+  {id:'character-creator',cat:'creative',e:'🧙',name:'Character Creator'},
+  {id:'worldbuilding',cat:'creative',e:'🌍',name:'World Builder'},
+  {id:'plot-generator',cat:'creative',e:'📖',name:'Plot Generator'},
+  {id:'dialogue-writer',cat:'creative',e:'💬',name:'Dialogue Writer'},
+
+  // ── HR ────────────────────────────────────────
+  {id:'performance-review',cat:'hr',e:'⭐',name:'Performance Review'},
+  {id:'onboarding-plan',cat:'hr',e:'🚀',name:'Onboarding Plan'},
+  {id:'interview-questions',cat:'hr',e:'🎤',name:'Interview Questions'},
+  {id:'hr-policy',cat:'hr',e:'📋',name:'HR Policy Writer'},
 ];
 
 // ── STATE ─────────────────────────────────────

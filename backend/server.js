@@ -169,6 +169,110 @@ const TOOLS = [
   {id:"essay-writer",cat:"students",label:"Essay Writer",inputKey:"topic_and_length",systemPrompt:"Write a well-structured academic essay. Include: thesis statement, introduction with hook, body paragraphs with evidence and analysis, counter-argument addressed, conclusion restating thesis, and bibliography suggestions."},
   {id:"translate-explain",cat:"students",label:"Translate + Explain",inputKey:"text_and_target_language",systemPrompt:"Translate this text and then explain it thoroughly. Provide: accurate translation, vocabulary notes for difficult words, cultural context if relevant, and a simplified version for better understanding."},
   {id:"summary-by-level",cat:"students",label:"Summary by Level",inputKey:"text_and_level",systemPrompt:"Summarize this content at the specified level (beginner/intermediate/advanced). Adjust vocabulary, depth of explanation, and assumed knowledge accordingly. Include key terms defined at the appropriate level."},
+
+  // ── NEW AI TOOLS ──────────────────────────────
+  {id:"fact-checker",cat:"ai",label:"Fact Checker",inputKey:"claim",systemPrompt:"Analyze this claim for accuracy. Rate it: True/Mostly True/Mixed/Mostly False/False. Explain the evidence, provide context, and cite what would be needed to verify it. Be objective and balanced."},
+  {id:"bias-detector",cat:"ai",label:"Bias Detector",inputKey:"text",systemPrompt:"Analyze this text for cognitive biases, logical fallacies, and one-sided arguments. List each bias found with explanation and suggest a more balanced perspective."},
+  {id:"argument-builder",cat:"ai",label:"Argument Builder",inputKey:"position",systemPrompt:"Build the strongest possible argument for this position. Include: thesis, 5 supporting arguments with evidence, counter-argument responses, and a powerful conclusion. Use rhetorical techniques."},
+  {id:"analogy-maker",cat:"ai",label:"Analogy Maker",inputKey:"concept",systemPrompt:"Create 5 creative and clear analogies to explain this concept. Each analogy should make the concept instantly understandable to someone with no background. Vary the contexts (everyday life, sports, cooking, etc.)."},
+
+  // ── NEW CODE TOOLS ────────────────────────────
+  {id:"regex-builder",cat:"code",label:"Regex Builder",inputKey:"description",systemPrompt:"Create a regex pattern for the described use case. Provide: the pattern, explanation of each part, test cases showing matches and non-matches, and variations for different regex flavors (JS, Python, etc.)."},
+  {id:"docker-helper",cat:"code",label:"Docker Helper",inputKey:"project_description",systemPrompt:"Create a complete Docker setup for this project. Include: Dockerfile, docker-compose.yml, .dockerignore, environment variables setup, volume configuration, and instructions to build and run."},
+  {id:"security-audit",cat:"code",label:"Security Audit",inputKey:"code",systemPrompt:"Perform a security audit of this code. Check for: SQL injection, XSS, CSRF, authentication issues, data exposure, insecure dependencies, and OWASP Top 10 vulnerabilities. Rate severity and provide fixes."},
+  {id:"architecture-planner",cat:"code",label:"Architecture Planner",inputKey:"project_description",systemPrompt:"Design a scalable software architecture. Include: system diagram description, tech stack recommendation, database design, API structure, microservices vs monolith analysis, and scaling strategy."},
+
+  // ── NEW BUSINESS TOOLS ────────────────────────
+  {id:"invoice-writer",cat:"business",label:"Invoice Writer",inputKey:"project_details",systemPrompt:"Create a professional invoice. Include: invoice number, date, client details, itemized services with prices, subtotal, taxes, total, payment terms, and bank details section. Format cleanly."},
+  {id:"job-description",cat:"business",label:"Job Description",inputKey:"role_and_company",systemPrompt:"Write a compelling job description. Include: role summary, key responsibilities, required qualifications, nice-to-have skills, company culture, benefits, and a compelling closing statement that attracts top talent."},
+  {id:"meeting-agenda",cat:"business",label:"Meeting Agenda",inputKey:"meeting_purpose",systemPrompt:"Create a structured meeting agenda. Include: meeting objective, attendees, time allocations per topic, discussion points, decision items, action items format, and follow-up process."},
+  {id:"press-release",cat:"business",label:"Press Release",inputKey:"announcement",systemPrompt:"Write a professional press release. Include: compelling headline, dateline, strong lead paragraph, body with quotes, boilerplate company info, and media contact. Follow AP style."},
+
+  // ── NEW CONTENT TOOLS ─────────────────────────
+  {id:"thread-writer",cat:"content",label:"Twitter Thread",inputKey:"topic",systemPrompt:"Write a viral Twitter/X thread. Start with a hook tweet, then 8-12 engaging tweets that build on each other. End with a strong CTA. Number each tweet. Include relevant emojis and line breaks."},
+  {id:"newsletter",cat:"content",label:"Newsletter",inputKey:"topic_and_audience",systemPrompt:"Write an engaging email newsletter. Include: catchy subject line, personalized opener, main content section with value, secondary section, interesting fact or tip, and CTA. Keep it scannable with headers."},
+  {id:"product-description",cat:"content",label:"Product Description",inputKey:"product",systemPrompt:"Write a compelling product description. Include: attention-grabbing headline, key benefits (not features), sensory details, social proof placeholder, urgency element, and clear CTA. Optimize for both humans and SEO."},
+  {id:"bio-writer",cat:"content",label:"Bio Writer",inputKey:"person_info",systemPrompt:"Write 3 versions of a professional bio: short (50 words), medium (150 words), and long (300 words). Make it compelling, third-person, and highlight achievements, expertise, and personality. Include a memorable hook."},
+
+  // ── NEW MEDIA TOOLS ───────────────────────────
+  {id:"infographic-plan",cat:"media",label:"Infographic Planner",inputKey:"topic",systemPrompt:"Plan a compelling infographic. Include: title, key sections with data points, visual hierarchy, color scheme suggestion, icon recommendations, layout description, and a DALL-E prompt to generate a preview."},
+  {id:"photo-caption",cat:"media",label:"Photo Caption",inputKey:"photo_description",systemPrompt:"Write 5 engaging captions for this photo. Vary styles: storytelling, factual, humorous, inspirational, and question-based. Each should fit the context and include relevant hashtag suggestions."},
+
+  // ── NEW AUDIO TOOLS ───────────────────────────
+  {id:"song-lyrics",cat:"audio",label:"Song Lyrics",inputKey:"theme_and_genre",systemPrompt:"Write original song lyrics. Include: intro, 2 verses, catchy chorus (repeated), bridge, and outro. Match the requested genre's style, rhyme scheme, and rhythm. Add notes on melody and tempo suggestions."},
+  {id:"rap-generator",cat:"audio",label:"Rap Generator",inputKey:"topic_and_style",systemPrompt:"Write original rap lyrics with strong wordplay, metaphors, and flow. Include: intro bars, 2 verses with internal rhymes, a hook, and an outro. Specify BPM recommendation and flow style."},
+
+  // ── NEW PRODUCTIVITY TOOLS ────────────────────
+  {id:"meeting-notes",cat:"productivity",label:"Meeting Notes",inputKey:"meeting_transcript",systemPrompt:"Convert this meeting transcript/notes into structured meeting minutes. Include: attendees, date, key discussion points, decisions made, action items with owners and deadlines, and next meeting date."},
+  {id:"okr-planner",cat:"productivity",label:"OKR Planner",inputKey:"goals",systemPrompt:"Create OKRs (Objectives and Key Results) from these goals. For each objective: write 3-5 measurable key results, set quarterly timeline, define success metrics, and identify potential blockers."},
+  {id:"feedback-writer",cat:"productivity",label:"Feedback Writer",inputKey:"situation",systemPrompt:"Write constructive feedback using the SBI framework (Situation-Behavior-Impact). Make it specific, actionable, and balanced. Include positive recognition and clear improvement suggestions."},
+
+  // ── NEW STUDENTS TOOLS ────────────────────────
+  {id:"thesis-helper",cat:"students",label:"Thesis Helper",inputKey:"topic_and_field",systemPrompt:"Help develop a thesis. Include: 3 thesis statement options (strong to stronger), outline structure, key arguments to develop, potential research questions, methodology suggestions, and common pitfalls to avoid."},
+  {id:"citation-generator",cat:"students",label:"Citation Generator",inputKey:"source_info",systemPrompt:"Generate citations in multiple formats for this source. Provide: APA 7th, MLA 9th, Chicago, Harvard, and Vancouver formats. Also provide an in-text citation example for each."},
+
+  // ── HEALTH & WELLNESS ─────────────────────────
+  {id:"meal-planner",cat:"health",label:"Meal Planner",inputKey:"goals_and_preferences",systemPrompt:"Create a personalized 7-day meal plan. Include: breakfast, lunch, dinner, and 2 snacks per day. Add calorie estimates, macros breakdown, shopping list, and meal prep tips. Consider dietary restrictions."},
+  {id:"workout-plan",cat:"health",label:"Workout Plan",inputKey:"fitness_goals",systemPrompt:"Design a personalized workout plan. Include: weekly schedule, exercises with sets/reps/rest time, warm-up and cool-down routines, progression plan for 4 weeks, and tips on form and injury prevention."},
+  {id:"mental-health-tips",cat:"health",label:"Mental Health Tips",inputKey:"situation",systemPrompt:"Provide evidence-based mental health strategies for this situation. Include: immediate coping techniques, long-term strategies, lifestyle changes, when to seek professional help, and available resources. Be empathetic and practical."},
+  {id:"symptom-checker",cat:"health",label:"Symptom Info",inputKey:"symptoms",systemPrompt:"Provide general information about these symptoms (NOT medical diagnosis). Include: possible common causes, when to see a doctor (urgency level), general self-care tips, and important disclaimer about professional medical advice."},
+  {id:"sleep-optimizer",cat:"health",label:"Sleep Optimizer",inputKey:"sleep_issues",systemPrompt:"Create a personalized sleep optimization plan. Include: sleep hygiene checklist, evening routine (2 hours before bed), morning routine, environment optimization tips, and evidence-based techniques for falling asleep faster."},
+  {id:"nutrition-analyzer",cat:"health",label:"Nutrition Analyzer",inputKey:"food_or_diet",systemPrompt:"Analyze the nutritional value of this food/diet. Include: macro and micronutrient breakdown, health benefits, potential concerns, comparison to daily recommendations, and suggestions for nutritional improvements."},
+
+  // ── FINANCE ───────────────────────────────────
+  {id:"budget-planner",cat:"finance",label:"Budget Planner",inputKey:"income_and_expenses",systemPrompt:"Create a personalized budget plan using the 50/30/20 rule. Categorize expenses, identify savings opportunities, set financial goals, and provide actionable steps to improve financial health."},
+  {id:"investment-explainer",cat:"finance",label:"Investment Explainer",inputKey:"investment_type",systemPrompt:"Explain this investment in simple terms. Include: how it works, risks and returns, who it's suitable for, minimum investment, tax implications, and comparison with alternatives. Use real examples."},
+  {id:"tax-tips",cat:"finance",label:"Tax Tips",inputKey:"situation",systemPrompt:"Provide general tax optimization tips for this situation. Include: common deductions to consider, tax-saving strategies, important deadlines, record-keeping tips, and when to consult a tax professional. (Not professional tax advice)"},
+  {id:"financial-goal",cat:"finance",label:"Financial Goals",inputKey:"goal_and_timeline",systemPrompt:"Create a detailed financial plan to achieve this goal. Include: monthly savings target, investment strategy, milestone checkpoints, risk assessment, and contingency planning."},
+  {id:"crypto-explainer",cat:"finance",label:"Crypto Explainer",inputKey:"crypto_topic",systemPrompt:"Explain this cryptocurrency concept clearly. Include: how it works, use cases, risks, how to get started safely, storage options, and important security tips. Balance optimism with realistic risk awareness."},
+
+  // ── TRAVEL ────────────────────────────────────
+  {id:"trip-planner",cat:"travel",label:"Trip Planner",inputKey:"destination_and_duration",systemPrompt:"Create a detailed day-by-day travel itinerary. Include: daily activities with timing, restaurant recommendations, transportation tips, estimated costs, local customs to know, and hidden gems to visit."},
+  {id:"packing-list",cat:"travel",label:"Packing List",inputKey:"trip_details",systemPrompt:"Create a comprehensive packing list for this trip. Organize by category: documents, clothing, toiletries, electronics, medications, and extras. Include weather-specific items and carry-on vs checked bag recommendations."},
+  {id:"travel-budget",cat:"travel",label:"Travel Budget",inputKey:"destination_and_duration",systemPrompt:"Create a detailed travel budget breakdown. Include: flights, accommodation, food, transport, activities, shopping, and emergency fund. Provide budget, mid-range, and luxury options with money-saving tips."},
+  {id:"local-guide",cat:"travel",label:"Local Guide",inputKey:"destination",systemPrompt:"Create a local insider guide for this destination. Include: must-see vs tourist traps, best local food spots, transportation tips, cultural etiquette, safety tips, best time to visit each attraction, and budget-saving hacks."},
+
+  // ── FOOD ──────────────────────────────────────
+  {id:"recipe-generator",cat:"food",label:"Recipe Generator",inputKey:"ingredients_or_dish",systemPrompt:"Create a detailed recipe. Include: ingredient list with measurements, step-by-step instructions, cooking times and temperatures, serving suggestions, nutritional info, storage tips, and variations."},
+  {id:"ingredient-substitute",cat:"food",label:"Ingredient Substitute",inputKey:"ingredient",systemPrompt:"Suggest substitutes for this ingredient. For each substitute: ratio/measurement adjustment, how it affects taste and texture, best use cases, and any additional modifications needed to the recipe."},
+  {id:"diet-planner",cat:"food",label:"Diet Planner",inputKey:"diet_type_and_goals",systemPrompt:"Create a personalized diet plan. Include: allowed and avoided foods, sample daily menu, meal timing recommendations, grocery list, easy meal prep ideas, and tips for staying on track."},
+
+  // ── EXTRA TOOLS TO REACH 150+ ─────────────────
+
+  // LEGAL
+  {id:"contract-reviewer",cat:"legal",label:"Contract Reviewer",inputKey:"contract_text",systemPrompt:"Review this contract and identify: key terms, potential risks, unusual clauses, missing protections, and negotiation points. Explain in plain language. Always recommend consulting a qualified lawyer."},
+  {id:"terms-generator",cat:"legal",label:"Terms & Privacy",inputKey:"business_description",systemPrompt:"Generate Terms of Service and Privacy Policy for this business. Include all standard sections, GDPR compliance notes, and data handling policies. Note: consult a lawyer before publishing."},
+  {id:"legal-letter",cat:"legal",label:"Legal Letter",inputKey:"situation",systemPrompt:"Draft a formal legal letter for this situation. Include proper legal language, clear demands or statements, deadlines, and consequences. Recommend professional legal review before sending."},
+  {id:"nda-generator",cat:"legal",label:"NDA Generator",inputKey:"parties_and_purpose",systemPrompt:"Generate a Non-Disclosure Agreement template. Include: parties, confidential information definition, obligations, exclusions, term, remedies, and governing law. Recommend legal review."},
+
+  // EDUCATION
+  {id:"lesson-plan",cat:"education",label:"Lesson Plan",inputKey:"subject_and_level",systemPrompt:"Create a complete lesson plan. Include: learning objectives, materials needed, warm-up activity, main instruction (step-by-step), practice activities, assessment method, homework, and differentiation for different learners."},
+  {id:"rubric-maker",cat:"education",label:"Rubric Maker",inputKey:"assignment_description",systemPrompt:"Create a detailed grading rubric. Include: criteria, performance levels (Excellent/Good/Satisfactory/Needs Improvement), point values, and descriptors for each level. Make it clear and fair."},
+  {id:"curriculum-planner",cat:"education",label:"Curriculum Planner",inputKey:"course_description",systemPrompt:"Design a full curriculum plan. Include: course overview, weekly topics, learning outcomes, assessment schedule, recommended resources, and pacing guide. Align with educational standards."},
+  {id:"quiz-feedback",cat:"education",label:"Quiz Feedback",inputKey:"student_answers",systemPrompt:"Provide detailed educational feedback on these student answers. Identify misconceptions, explain correct concepts clearly, suggest study resources, and give encouragement. Be constructive and supportive."},
+
+  // MARKETING
+  {id:"ad-copy",cat:"marketing",label:"Ad Copy",inputKey:"product_and_audience",systemPrompt:"Write high-converting ad copy for multiple platforms. Include: Google Ads (headlines + descriptions), Facebook/Instagram ad (primary text + headline), and LinkedIn ad. A/B test variations for each."},
+  {id:"seo-keywords",cat:"marketing",label:"SEO Keywords",inputKey:"business_or_topic",systemPrompt:"Generate a comprehensive SEO keyword strategy. Include: primary keywords, long-tail variations, semantic keywords, search intent analysis, competition level estimate, and content ideas for each keyword cluster."},
+  {id:"email-sequence",cat:"marketing",label:"Email Sequence",inputKey:"product_and_goal",systemPrompt:"Write a 5-email nurture sequence. Email 1: Welcome, Email 2: Value/Education, Email 3: Social Proof, Email 4: Objection Handling, Email 5: Offer/CTA. Include subject lines and preview text for each."},
+  {id:"brand-voice",cat:"marketing",label:"Brand Voice Guide",inputKey:"brand_info",systemPrompt:"Create a comprehensive brand voice guide. Include: brand personality traits, tone of voice, writing style rules, vocabulary (use/avoid), example phrases, and before/after copy examples showing the brand voice in action."},
+
+  // SCIENCE
+  {id:"science-explainer",cat:"science",label:"Science Explainer",inputKey:"concept",systemPrompt:"Explain this scientific concept comprehensively. Include: core principles, real-world applications, historical discovery, current research, common misconceptions, and a simple analogy anyone can understand."},
+  {id:"research-summary",cat:"science",label:"Research Summary",inputKey:"research_topic",systemPrompt:"Summarize this research topic. Include: current state of knowledge, key findings, methodology overview, limitations, controversies, and future research directions. Use clear scientific language."},
+  {id:"hypothesis-builder",cat:"science",label:"Hypothesis Builder",inputKey:"observation",systemPrompt:"Help formulate a scientific hypothesis. Include: null and alternative hypotheses, variables (independent/dependent/controlled), predicted outcomes, testing methodology, and potential sources of error."},
+
+  // CREATIVE
+  {id:"character-creator",cat:"creative",label:"Character Creator",inputKey:"story_type",systemPrompt:"Create a detailed fictional character. Include: name, appearance, personality traits, backstory, motivations, fears, strengths, weaknesses, speech patterns, relationships, and character arc potential. Make them feel real and complex."},
+  {id:"worldbuilding",cat:"creative",label:"World Builder",inputKey:"genre_and_setting",systemPrompt:"Build a detailed fictional world. Include: geography, history, political systems, cultures, religions, economy, technology level, magic/science systems, conflicts, and unique elements that make this world memorable."},
+  {id:"plot-generator",cat:"creative",label:"Plot Generator",inputKey:"genre_and_premise",systemPrompt:"Generate a compelling story plot. Include: hook, protagonist and antagonist, inciting incident, rising action (3 key plot points), climax, falling action, resolution, and potential sequel hooks. Include theme and underlying message."},
+  {id:"dialogue-writer",cat:"creative",label:"Dialogue Writer",inputKey:"scene_description",systemPrompt:"Write natural, compelling dialogue for this scene. Include subtext, character voice distinction, stage directions, emotional beats, and conflict. Each character should sound unique. Avoid exposition dumps."},
+
+  // HR
+  {id:"performance-review",cat:"hr",label:"Performance Review",inputKey:"employee_info",systemPrompt:"Write a professional performance review. Include: strengths, areas for improvement, goal achievement assessment, specific examples, development recommendations, and clear next-period goals. Be constructive and balanced."},
+  {id:"onboarding-plan",cat:"hr",label:"Onboarding Plan",inputKey:"role_and_company",systemPrompt:"Create a 30-60-90 day onboarding plan. Include: week 1 orientation schedule, training milestones, key people to meet, tools to learn, success metrics for each phase, and check-in schedule."},
+  {id:"interview-questions",cat:"hr",label:"Interview Questions",inputKey:"role_description",systemPrompt:"Generate comprehensive interview questions for this role. Include: technical questions, behavioral (STAR method), culture fit, situational, and role-specific questions. Add what to look for in ideal answers."},
+  {id:"hr-policy",cat:"hr",label:"HR Policy Writer",inputKey:"policy_topic",systemPrompt:"Write a professional HR policy document. Include: purpose, scope, policy statement, procedures, responsibilities, consequences for non-compliance, and review date. Use clear, professional language."},
 ];
 
 function getTool(id) { return TOOLS.find(t => t.id === id) || null; }
