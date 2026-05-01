@@ -567,15 +567,25 @@ app.post("/api/chat", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)
   const input = req.body.input.trim();
   const history = getHistory(req.user.id, sessionId);
 
-  // Load long-term memories
+  // Load long-term memories + custom instructions
   const memories = getUserMemories(req.user.id);
   const memContext = memoriesAsContext(memories);
 
+  // Custom instructions
+  const customAbout = db.prepare(`SELECT value FROM user_memories WHERE user_id=? AND key='__custom_about'`).get(req.user.id);
+  const customStyle = db.prepare(`SELECT value FROM user_memories WHERE user_id=? AND key='__custom_style'`).get(req.user.id);
+  const customContext = (customAbout?.value || customStyle?.value)
+    ? `\n\n[Custom Instructions:\nAbout user: ${customAbout?.value||'N/A'}\nResponse style: ${customStyle?.value||'N/A'}]`
+    : '';
+
   const systemPrompt = `You are NexusAI, a helpful AI assistant created by Haroun Ghorbel. If anyone asks who created you, say: 'I was created by Haroun Ghorbel.' You have memory of the current conversation and long-term memory about the user.
 
-IMPORTANT: Always respond in the SAME language the user writes in. If they write in Arabic, respond in Arabic. If they write in French, respond in French. If they write in Tunisian dialect (franco/darija), respond in the same Tunisian dialect. Never switch languages unless the user switches first.${memContext}`;
+IMPORTANT: Always respond in the SAME language the user writes in. If they write in Arabic, respond in Arabic. If they write in French, respond in French. If they write in Tunisian dialect (franco/darija), respond in the same Tunisian dialect. Never switch languages unless the user switches first.${memContext}${customContext}`;
 
-  const reply = await chatComplete(systemPrompt, input, "gpt-4o", history);
+  const deepThink = req.body.deep_think === true;
+  const model = deepThink ? "o1-mini" : "gpt-4o";
+
+  const reply = await chatComplete(systemPrompt, input, model, history);
   saveMessage(req.user.id, sessionId, "user", input, "chat");
   saveMessage(req.user.id, sessionId, "assistant", reply, "chat");
 
@@ -603,6 +613,114 @@ app.post("/api/agent", requireAuth, requireQuota, aiLimiter, wrap(async (req,res
     saveMessage(req.user.id, sessionId, "assistant", data, "agent");
   }
   res.json({ type, data, session_id:sessionId });
+}));
+
+// ─────────────────────────────────────────────
+// 📊 FILE ANALYSIS — Excel/CSV/Word/PPT
+// ─────────────────────────────────────────────
+const fileUpload = multer({
+  dest: uploadDir,
+  limits: { fileSize: 10*1024*1024 },
+});
+
+app.post("/api/file/analyze", requireAuth, requireQuota, aiLimiter,
+  fileUpload.single("file"),
+  wrap(async (req, res) => {
+    if (!req.file) return res.status(400).json({ error:"No file uploaded." });
+    const question = req.body.question?.trim() || "Analyze this file and give me key insights, patterns, and a summary.";
+    const filePath = req.file.path;
+    const filename = req.file.originalname || 'file';
+    const ext = filename.split('.').pop().toLowerCase();
+
+    let content = '';
+    try {
+      const buffer = fs.readFileSync(filePath);
+
+      if (ext === 'csv' || ext === 'txt') {
+        content = buffer.toString('utf-8').slice(0, 15000);
+
+      } else if (ext === 'pdf') {
+        const parsed = await pdfParse(buffer);
+        content = parsed.text.slice(0, 15000);
+
+      } else if (ext === 'json') {
+        content = buffer.toString('utf-8').slice(0, 15000);
+
+      } else {
+        // For Excel/Word/PPT — extract what we can as text
+        content = buffer.toString('utf-8', 0, Math.min(buffer.length, 10000))
+          .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .slice(0, 8000);
+      }
+
+      if (!content || content.trim().length < 20) {
+        return res.status(422).json({ error: "Could not extract content from file. Please try CSV or PDF format." });
+      }
+
+      const analysis = await chatComplete(
+        `You are a data analyst. Analyze the provided file content and answer the user's question. 
+         Format your response with: 
+         📊 **Summary** — what the data is about
+         🔍 **Key Insights** — important patterns or findings  
+         📈 **Notable Points** — anything interesting
+         💡 **Recommendations** — if applicable
+         Be specific with numbers and facts from the data.`,
+        `File: "${filename}"\n\nContent:\n${content}\n\nQuestion: ${question}`,
+        "gpt-4o"
+      );
+
+      res.json({ analysis, filename, question });
+
+    } finally {
+      fs.unlink(filePath, ()=>{});
+    }
+  })
+);
+
+// ─────────────────────────────────────────────
+// 🔗 SHARE CHAT
+// ─────────────────────────────────────────────
+const sharedChats = new Map(); // in-memory store (simple)
+
+app.post("/api/share", requireAuth, wrap(async (req, res) => {
+  const { messages, title } = req.body;
+  if (!messages?.length) return res.status(400).json({ error:"No messages to share." });
+  const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  sharedChats.set(id, {
+    title: title || 'NexusAI Chat',
+    messages: messages.slice(0, 50),
+    createdAt: new Date().toISOString(),
+    createdBy: req.user.email,
+  });
+  // Auto-delete after 7 days
+  setTimeout(() => sharedChats.delete(id), 7*24*60*60*1000);
+  res.json({ shareId: id, url: `${process.env.APP_URL || 'https://nexusai-rust.vercel.app'}/?share=${id}` });
+}));
+
+app.get("/api/share/:id", (req, res) => {
+  const chat = sharedChats.get(req.params.id);
+  if (!chat) return res.status(404).json({ error:"Shared chat not found or expired." });
+  res.json(chat);
+});
+
+// ─────────────────────────────────────────────
+// ⚙️ CUSTOM INSTRUCTIONS
+// ─────────────────────────────────────────────
+app.post("/api/instructions", requireAuth, wrap(async (req, res) => {
+  const { about_user, response_style } = req.body;
+  setMemory(req.user.id, '__custom_about', about_user?.slice(0,500)||'');
+  setMemory(req.user.id, '__custom_style', response_style?.slice(0,500)||'');
+  res.json({ ok:true });
+}));
+
+app.get("/api/instructions", requireAuth, wrap(async (req, res) => {
+  const about = db.prepare(`SELECT value FROM user_memories WHERE user_id=? AND key='__custom_about'`).get(req.user.id);
+  const style = db.prepare(`SELECT value FROM user_memories WHERE user_id=? AND key='__custom_style'`).get(req.user.id);
+  res.json({
+    about_user: about?.value||'',
+    response_style: style?.value||'',
+  });
 }));
 
 // ─────────────────────────────────────────────

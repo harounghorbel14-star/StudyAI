@@ -811,11 +811,30 @@ async function sendMessage(){
       }
 
     } else {
-      // General chat
-      result=await api('/api/chat',{method:'POST',body:{input:text,session_id:S.sessionId||undefined}});
+      // General chat — include style + thinking mode
+      const stylePrompt = STYLES[S.writingStyle]||'';
+      const deepThink = S.thinkingMode === 'deep';
+
+      // Show thinking badge if deep mode
+      if(deepThink){
+        const msgs = document.getElementById('messages');
+        const badge = document.createElement('div');
+        badge.className='thinking-badge';badge.id='think-badge';
+        badge.innerHTML='🧠 Thinking deeply...';
+        msgs.appendChild(badge);
+        scrollBottom();
+      }
+
+      result=await api('/api/chat',{method:'POST',body:{
+        input: text + (stylePrompt?`\n\n[Style: ${stylePrompt}]`:''),
+        session_id:S.sessionId||undefined,
+        deep_think: deepThink,
+      }});
+      document.getElementById('think-badge')?.remove();
       S.sessionId=result.session_id;
       hideTyping();
       addMsg({role:'assistant',text:result.reply});
+      renderLatex();
     }
 
     // Refresh user
@@ -823,6 +842,7 @@ async function sendMessage(){
 
     // Smart Suggestions — generate 3 follow-up questions
     showSmartSuggestions(text);
+    renderLatex();
 
   }catch(e){
     hideTyping();
@@ -1179,6 +1199,107 @@ function toast(msg,type=''){
   el.className='toast '+type;el.textContent=msg;
   wrap.appendChild(el);
   setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity .3s';setTimeout(()=>el.remove(),300);},3000);
+}
+
+// ── WRITING STYLES ────────────────────────────
+const STYLES = {
+  default:    '',
+  formal:     'Write in a formal, professional tone. Use proper grammar and structure.',
+  casual:     'Write in a casual, friendly, conversational tone. Use simple language.',
+  academic:   'Write in an academic style with citations approach, structured arguments, and scholarly language.',
+  persuasive: 'Write in a persuasive, compelling style. Use rhetorical techniques and strong arguments.',
+  simple:     'Write as simply as possible. Use short sentences. Avoid jargon. ELI5 approach.',
+};
+S.writingStyle = 'default';
+
+function setStyle(btn, style){
+  S.writingStyle = style;
+  document.querySelectorAll('.style-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  toast(`Style: ${btn.textContent.trim()}`, 'success');
+}
+
+// ── THINKING MODE ─────────────────────────────
+S.thinkingMode = 'fast';
+
+function setThinking(btn, mode){
+  S.thinkingMode = mode;
+  document.querySelectorAll('.think-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  toast(mode==='deep' ? '🧠 Deep Think ON — slower but smarter' : '⚡ Fast mode', 'success');
+}
+
+// ── LATEX RENDERER ────────────────────────────
+function renderLatex(){
+  if(window.renderMathInElement){
+    setTimeout(()=>{
+      const msgs = document.getElementById('messages');
+      if(msgs) renderMathInElement(msgs,{
+        delimiters:[
+          {left:'$$',right:'$$',display:true},
+          {left:'$',right:'$',display:false},
+          {left:'\\[',right:'\\]',display:true},
+          {left:'\\(',right:'\\)',display:false},
+        ],
+        throwOnError:false,
+      });
+    },100);
+  }
+}
+async function handleFileAnalysis(input){
+  const file=input.files[0];
+  if(!file)return;
+  input.value='';
+  const question=document.getElementById('msg-input')?.value?.trim()||'';
+  document.getElementById('msg-input').value='';
+  addMsg({role:'user',text:`📎 **${file.name}**${question?'\n'+question:'\nAnalyze this file'}`});
+  showTyping();
+  const form=new FormData();
+  form.append('file',file);
+  if(question)form.append('question',question);
+  try{
+    const r=await fetch(API+'/api/file/analyze',{method:'POST',headers:{Authorization:'Bearer '+S.token},body:form});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||'Analysis failed');
+    hideTyping();
+    addMsg({role:'assistant',text:d.analysis});
+    try{S.user=await api('/api/me');updateUsage();}catch(_){}
+  }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});toast(e.message,'error');}
+}
+
+// ── SHARE CHAT ────────────────────────────────
+async function shareChat(){
+  if(!S.msgs.length){toast('No messages to share','error');return;}
+  try{
+    const msgs=S.msgs.map(m=>({role:m.role,text:m.text||'',type:m.type||'text'}));
+    const d=await api('/api/share',{method:'POST',body:{messages:msgs,title:S.tool?.name||'NexusAI Chat'}});
+    await navigator.clipboard.writeText(d.url).catch(()=>{});
+    toast('🔗 Share link copied!','success');
+    addMsg({role:'assistant',text:`🔗 **Share link created!**\n\n${d.url}\n\n_Link expires in 7 days_`});
+  }catch(e){toast(e.message,'error');}
+}
+
+// ── CUSTOM INSTRUCTIONS ───────────────────────
+async function openInstructions(){
+  const modal=document.getElementById('instructions-modal');
+  modal.style.display='flex';
+  try{
+    const d=await api('/api/instructions');
+    document.getElementById('inst-about').value=d.about_user||'';
+    document.getElementById('inst-style').value=d.response_style||'';
+  }catch(_){}
+}
+function closeInstructions(){
+  document.getElementById('instructions-modal').style.display='none';
+}
+async function saveInstructions(){
+  const about=document.getElementById('inst-about').value.trim();
+  const style=document.getElementById('inst-style').value.trim();
+  try{
+    await api('/api/instructions',{method:'POST',body:{about_user:about,response_style:style}});
+    closeInstructions();
+    toast('✅ Instructions saved!','success');
+  }catch(e){toast(e.message,'error');}
 }
 
 // ── BOOT ─────────────────────────────────────

@@ -10,6 +10,11 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <link rel="icon" type="image/svg+xml" href="logo.svg"/>
 <link rel="stylesheet" href="style.css"/>
+<!-- KaTeX for math rendering -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css"/>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]})"></script>
 </head>
 <body>
 
@@ -90,6 +95,24 @@
       <button class="sb-nav-btn" onclick="navigate('pdf')">📄 PDF Chat</button>
 
       <div class="sb-divider"></div>
+      <div class="sb-label">Writing Style</div>
+      <div class="style-grid">
+        <button class="style-btn active" onclick="setStyle(this,'default')">✍️ Default</button>
+        <button class="style-btn" onclick="setStyle(this,'formal')">🎩 Formal</button>
+        <button class="style-btn" onclick="setStyle(this,'casual')">😎 Casual</button>
+        <button class="style-btn" onclick="setStyle(this,'academic')">🎓 Academic</button>
+        <button class="style-btn" onclick="setStyle(this,'persuasive')">🎯 Persuasive</button>
+        <button class="style-btn" onclick="setStyle(this,'simple')">🌱 Simple</button>
+      </div>
+
+      <div class="sb-divider"></div>
+      <div class="sb-label">Thinking Mode</div>
+      <div class="think-row">
+        <button class="think-btn active" id="think-fast" onclick="setThinking(this,'fast')">⚡ Fast</button>
+        <button class="think-btn" id="think-deep" onclick="setThinking(this,'deep')">🧠 Deep Think</button>
+      </div>
+
+      <div class="sb-divider"></div>
       <div class="sb-label">AI Persona</div>
       <div class="persona-grid">
         <button class="persona-btn active" onclick="setPersona(this,'default')">🤖 Default</button>
@@ -136,6 +159,12 @@
         <button class="top-btn" onclick="exportChat()" title="Export chat">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         </button>
+        <button class="top-btn" onclick="shareChat()" title="Share chat">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        </button>
+        <button class="top-btn" onclick="openInstructions()" title="Custom Instructions">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        </button>
         <button class="top-btn" onclick="newChat()" title="New chat">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
         </button>
@@ -162,6 +191,11 @@
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
               </button>
               <input type="file" id="img-picker" accept="image/*" style="display:none" onchange="handleImageAttach(this)"/>
+              <!-- File analysis -->
+              <button class="input-btn" onclick="document.getElementById('file-picker').click()" title="Analyze file (CSV, Excel, PDF)">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              </button>
+              <input type="file" id="file-picker" accept=".csv,.xlsx,.xls,.pdf,.txt,.json,.docx,.pptx" style="display:none" onchange="handleFileAnalysis(this)"/>
               <textarea id="msg-input" placeholder="Message NexusAI..." rows="1" oninput="autoGrow(this)" onkeydown="onKey(event)"></textarea>
               <button class="input-btn" id="voice-btn" onclick="toggleVoice()" title="Voice message">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
@@ -203,6 +237,28 @@
 </div>
 
 <div id="toasts"></div>
+
+<!-- Custom Instructions Modal -->
+<div id="instructions-modal" style="display:none;position:fixed;inset:0;z-index:200;background:#00000090;backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:16px;width:100%;max-width:480px;padding:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <div style="font-size:16px;font-weight:600">⚙️ Custom Instructions</div>
+      <button onclick="closeInstructions()" style="color:var(--t2);font-size:18px">✕</button>
+    </div>
+    <div style="font-size:13px;color:var(--t2);margin-bottom:16px">Tell NexusAI about yourself so it can tailor responses.</div>
+
+    <label style="font-size:12px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px">What should NexusAI know about you?</label>
+    <textarea id="inst-about" rows="3" placeholder="e.g. I'm a software developer in Saudi Arabia who prefers concise answers..."
+      style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;color:var(--text);outline:none;resize:none;margin:6px 0 14px"></textarea>
+
+    <label style="font-size:12px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px">How should NexusAI respond?</label>
+    <textarea id="inst-style" rows="3" placeholder="e.g. Be concise. Always give examples. Use bullet points. Respond in Arabic."
+      style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;color:var(--text);outline:none;resize:none;margin:6px 0 16px"></textarea>
+
+    <button onclick="saveInstructions()" style="width:100%;padding:11px;background:linear-gradient(135deg,#c6f135,#35f1c6);color:#000;border-radius:8px;font-size:14px;font-weight:600">Save Instructions</button>
+  </div>
+</div>
+
 <script src="app.js"></script>
 </body>
 </html>

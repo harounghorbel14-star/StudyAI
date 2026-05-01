@@ -837,6 +837,55 @@ input,textarea{font-family:inherit;color:inherit}
 .msg-act-btn.star.saved{color:var(--a1)}
 
 /* ══════════════════════════════
+   WRITING STYLES
+══════════════════════════════ */
+.style-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px 0}
+.style-btn{
+  padding:5px 8px;border-radius:7px;font-size:11.5px;
+  color:var(--t2);border:1px solid var(--border);
+  transition:.15s;text-align:left;cursor:pointer;
+}
+.style-btn:hover{border-color:var(--a2);color:var(--text)}
+.style-btn.active{
+  background:linear-gradient(135deg,#35f1c615,#c6f13515);
+  border-color:var(--a2);color:var(--text);
+}
+
+/* ══════════════════════════════
+   THINKING MODE
+══════════════════════════════ */
+.think-row{display:flex;gap:4px;padding:4px 0}
+.think-btn{
+  flex:1;padding:6px;border-radius:7px;font-size:12px;
+  color:var(--t2);border:1px solid var(--border);
+  transition:.15s;cursor:pointer;text-align:center;
+}
+.think-btn:hover{border-color:var(--a1);color:var(--text)}
+.think-btn.active{
+  background:linear-gradient(135deg,#c6f13515,#35f1c615);
+  border-color:var(--a1);color:var(--text);font-weight:500;
+}
+
+/* Deep thinking indicator */
+.thinking-badge{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:11px;color:var(--a1);
+  background:#c6f13510;border:1px solid #c6f13530;
+  border-radius:99px;padding:3px 10px;
+  margin-bottom:8px;
+  animation:thinkPulse 1.5s ease-in-out infinite;
+}
+@keyframes thinkPulse{0%,100%{opacity:.6}50%{opacity:1}}
+
+/* LaTeX rendered math */
+.katex-display{
+  overflow-x:auto;padding:8px 0;
+  background:var(--bg3);border-radius:8px;
+  padding:12px;margin:8px 0;
+}
+.katex{color:var(--text)!important;font-size:15px!important}
+
+/* ══════════════════════════════
    CANVAS / ARTIFACTS
 ══════════════════════════════ */
 #workspace{
