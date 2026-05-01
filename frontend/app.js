@@ -184,6 +184,17 @@ const TOOLS = [
   {id:'ingredient-substitute',cat:'food',e:'🔄',name:'Ingredient Substitute'},
   {id:'diet-planner',cat:'food',e:'🥙',name:'Diet Planner'},
 
+  // ── REPLICATE POWERED ─────────────────────────
+  {id:'music-gen',cat:'audio',e:'🎵',name:'Music Generator (AI)'},
+  {id:'image-flux',cat:'media',e:'✨',name:'Image Gen (FLUX Pro)'},
+  {id:'image-edit-pro',cat:'media',e:'🖌️',name:'Image Edit Pro'},
+
+  // ── CLIPDROP POWERED ──────────────────────────
+  {id:'remove-bg',cat:'media',e:'✂️',name:'Remove Background'},
+  {id:'replace-bg',cat:'media',e:'🌅',name:'Replace Background'},
+  {id:'upscale-img',cat:'media',e:'🔍',name:'Upscale Image'},
+  {id:'reimagine',cat:'media',e:'🎨',name:'Reimagine Image'},
+
   // ── LEGAL ─────────────────────────────────────
   {id:'contract-reviewer',cat:'legal',e:'📜',name:'Contract Reviewer'},
   {id:'terms-generator',cat:'legal',e:'⚖️',name:'Terms & Privacy'},
@@ -865,25 +876,32 @@ async function sendMessage(){
 
     // Image attached → edit image with prompt
     if(img&&img.base64){
-      if(text){ // has prompt → edit image
+      if(text){
         showTyping();
         const form=new FormData();
-        // convert base64 to blob
         const byteStr=atob(img.base64);
         const arr=new Uint8Array(byteStr.length);
         for(let i=0;i<byteStr.length;i++)arr[i]=byteStr.charCodeAt(i);
         const blob=new Blob([arr],{type:'image/png'});
         form.append('image',blob,'image.png');
         form.append('prompt',text);
-        const result=await fetch(API+'/api/image/edit',{
-          method:'POST',
-          headers:{Authorization:'Bearer '+S.token},
-          body:form,
-        });
-        const data=await result.json();
-        if(!result.ok)throw new Error(data.error||'Edit failed');
-        hideTyping();
-        addMsg({role:'assistant',text:'✅ Here is your edited image:',type:'image',data:data.url});
+        // Try Pro first, fallback to basic
+        const endpoint = '/api/image/edit-pro';
+        try{
+          const result=await fetch(API+endpoint,{method:'POST',headers:{Authorization:'Bearer '+S.token},body:form});
+          const data=await result.json();
+          if(!result.ok)throw new Error(data.error||'Edit failed');
+          hideTyping();
+          addMsg({role:'assistant',text:'🖌️ Here is your edited image:',type:'image',data:data.url});
+        }catch(e){
+          // Fallback to basic edit
+          const result2=await fetch(API+'/api/image/edit',{method:'POST',headers:{Authorization:'Bearer '+S.token},body:form});
+          const data2=await result2.json();
+          hideTyping();
+          if(result2.ok) addMsg({role:'assistant',text:'Here is your edited image:',type:'image',data:data2.url});
+          else addMsg({role:'assistant',text:'❌ '+data2.error});
+        }
+        S.attachedImg=null;clearAttachPreview();
       } else { // no prompt → analyze image
         const result=await api('/api/chat',{method:'POST',body:{
           input:'Describe and analyze this image in detail.',
@@ -897,8 +915,67 @@ async function sendMessage(){
     } else if(tool){
       const isTTS=['tts','tts-nova','tts-echo','tts-fable','tts-onyx'].includes(tool.id);
       const isImage=['image-gen','poster-gen','avatar-creator'].includes(tool.id);
+      const isFlux = tool.id==='image-flux';
+      const isMusicGen = tool.id==='music-gen';
+      const isEditPro = tool.id==='image-edit-pro';
 
-      if(isTTS){
+      if(isMusicGen){
+        addMsg({role:'user',text:`🎵 Generate music: ${text}`});
+        showTyping();
+        try{
+          const r=await api('/api/music/generate',{method:'POST',body:{prompt:text,duration:15}});
+          hideTyping();
+          const audioUrl=`data:audio/mp3;base64,${r.audio}`;
+          addMsg({role:'assistant',text:`🎵 **Music generated!**\nPrompt: ${text}`,type:'audio',data:audioUrl});
+        }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isFlux){
+        showTyping();
+        try{
+          const r=await api('/api/image/flux',{method:'POST',body:{prompt:text}});
+          hideTyping();
+          addMsg({role:'assistant',text:'✨ Generated with FLUX Pro:',type:'image',data:r.url});
+        }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isEditPro){
+        if(!img){toast('Please attach an image first!','error');hideTyping();return;}
+        const form=new FormData();
+        const byteStr=atob(img.base64);
+        const arr=new Uint8Array(byteStr.length);
+        for(let i=0;i<byteStr.length;i++)arr[i]=byteStr.charCodeAt(i);
+        const blob=new Blob([arr],{type:'image/png'});
+        form.append('image',blob,'image.png');
+        form.append('prompt',text||'enhance this image');
+        try{
+          const r=await fetch(API+'/api/image/edit-pro',{method:'POST',headers:{Authorization:'Bearer '+S.token},body:form});
+          const d=await r.json();
+          if(!r.ok)throw new Error(d.error);
+          hideTyping();
+          addMsg({role:'assistant',text:'🖌️ Image edited with FLUX Kontext Pro:',type:'image',data:d.url});
+          S.attachedImg=null;clearAttachPreview();
+        }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(['remove-bg','replace-bg','upscale-img','reimagine'].includes(tool.id)){
+        if(!img){toast('Please attach an image first!','error');hideTyping();return;}
+        const form=new FormData();
+        const byteStr=atob(img.base64);
+        const arr=new Uint8Array(byteStr.length);
+        for(let i=0;i<byteStr.length;i++)arr[i]=byteStr.charCodeAt(i);
+        const blob=new Blob([arr],{type:'image/png'});
+        form.append('image',blob,'image.png');
+        if(tool.id==='replace-bg') form.append('prompt',text||'beautiful nature background');
+        const endpoints={'remove-bg':'/api/clipdrop/remove-bg','replace-bg':'/api/clipdrop/replace-bg','upscale-img':'/api/clipdrop/upscale','reimagine':'/api/clipdrop/reimagine'};
+        try{
+          const r=await fetch(API+endpoints[tool.id],{method:'POST',headers:{Authorization:'Bearer '+S.token},body:form});
+          const d=await r.json();
+          if(!r.ok)throw new Error(d.error);
+          hideTyping();
+          const imgUrl=`data:image/png;base64,${d.image}`;
+          addMsg({role:'assistant',text:`✅ ${tool.name} complete!`,type:'image',data:imgUrl});
+          S.attachedImg=null;clearAttachPreview();
+        }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isTTS){
         const voices={tts:'alloy','tts-nova':'nova','tts-echo':'echo','tts-fable':'fable','tts-onyx':'onyx'};
         result=await api('/api/tts',{method:'POST',body:{text,voice:voices[tool.id]}});
         const audioUrl=`data:audio/mp3;base64,${result.audio}`;

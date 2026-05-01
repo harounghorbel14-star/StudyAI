@@ -1369,7 +1369,184 @@ app.get("/api/voice/list", requireAuth, wrap(async (req, res) => {
   const d = await r.json();
   res.json({ voices: (d.voices||[]).map(v=>({id:v.voice_id, name:v.name, preview_url:v.preview_url})) });
 }));
-app.use((err,_req,res,_next) => {
+
+// ─────────────────────────────────────────────
+// 🎨 REPLICATE — Image Edit + Music + FLUX
+// ─────────────────────────────────────────────
+async function replicateRun(model, input){
+  const r = await fetch('https://api.replicate.com/v1/models/'+model+'/predictions',{
+    method:'POST',
+    headers:{'Authorization':'Token '+process.env.REPLICATE_API_KEY,'Content-Type':'application/json'},
+    body:JSON.stringify({input}),
+  });
+  if(!r.ok) throw new Error('Replicate API error: '+r.status);
+  let pred = await r.json();
+  const id = pred.id;
+  for(let i=0;i<30;i++){
+    await new Promise(res=>setTimeout(res,2000));
+    const poll = await fetch('https://api.replicate.com/v1/predictions/'+id,{
+      headers:{'Authorization':'Token '+process.env.REPLICATE_API_KEY},
+    });
+    pred = await poll.json();
+    if(pred.status==='succeeded') return pred.output;
+    if(pred.status==='failed') throw new Error('Replicate failed: '+(pred.error||'unknown'));
+  }
+  throw new Error('Replicate timeout');
+}
+
+// True image editing with flux-kontext-pro
+app.post("/api/image/edit-pro", requireAuth, requireQuota, aiLimiter,
+  imageUpload.single("image"),
+  wrap(async (req,res)=>{
+    if(!req.file) return res.status(400).json({error:"No image uploaded."});
+    if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+    const prompt = req.body.prompt?.trim();
+    if(!prompt) return res.status(400).json({error:"Missing prompt."});
+    const filePath = req.file.path;
+    try{
+      const buffer = fs.readFileSync(filePath);
+      const base64 = buffer.toString('base64');
+      const mimeType = req.file.mimetype||'image/png';
+      const dataUrl = `data:${mimeType};base64,${base64}`;
+      const output = await replicateRun('black-forest-labs/flux-kontext-pro',{prompt,input_image:dataUrl});
+      const imageUrl = Array.isArray(output)?output[0]:output;
+      res.json({url:imageUrl,type:'edited'});
+    }finally{fs.unlink(filePath,()=>{});}
+  })
+);
+
+// Music generation with MusicGen
+app.post("/api/music/generate", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {prompt, duration=15} = req.body;
+  if(!prompt) return res.status(400).json({error:"Missing prompt."});
+  const output = await replicateRun('meta/musicgen',{
+    prompt,model_version:'stereo-large',output_format:'mp3',
+    duration:Math.min(Number(duration)||15,30),
+  });
+  const audioUrl = Array.isArray(output)?output[0]:output;
+  const audioRes = await fetch(audioUrl);
+  const buf = Buffer.from(await audioRes.arrayBuffer());
+  res.json({audio:buf.toString('base64'),format:'mp3',url:audioUrl});
+}));
+
+// Better image gen with FLUX 1.1 Pro
+app.post("/api/image/flux", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {prompt} = req.body;
+  if(!prompt) return res.status(400).json({error:"Missing prompt."});
+  const output = await replicateRun('black-forest-labs/flux-1.1-pro',{
+    prompt,width:1024,height:1024,output_format:'webp',output_quality:90,
+  });
+  const imageUrl = Array.isArray(output)?output[0]:output;
+  res.json({url:imageUrl});
+}));
+
+// ─────────────────────────────────────────────
+// ✂️ CLIPDROP — Background Remove + Replace + Upscale
+// ─────────────────────────────────────────────
+const clipdropUpload = multer({ dest: uploadDir, limits:{ fileSize:30*1024*1024 } });
+
+// Remove background
+app.post("/api/clipdrop/remove-bg", requireAuth, requireQuota, aiLimiter,
+  clipdropUpload.single("image"),
+  wrap(async (req,res)=>{
+    if(!req.file) return res.status(400).json({error:"No image uploaded."});
+    if(!process.env.CLIPDROP_API_KEY) return res.status(500).json({error:"CLIPDROP_API_KEY not set."});
+    const filePath = req.file.path;
+    try{
+      const form = new FormData();
+      const { Blob } = await import('node:buffer');
+      const buffer = fs.readFileSync(filePath);
+      form.append('image_file', new Blob([buffer],{type:req.file.mimetype||'image/png'}), req.file.originalname||'image.png');
+      const r = await fetch('https://clipdrop-api.co/remove-background/v1',{
+        method:'POST',
+        headers:{'x-api-key':process.env.CLIPDROP_API_KEY},
+        body:form,
+      });
+      if(!r.ok) throw new Error('Clipdrop error: '+r.status);
+      const buf = Buffer.from(await r.arrayBuffer());
+      res.json({image:buf.toString('base64'),format:'png'});
+    }finally{fs.unlink(filePath,()=>{});}
+  })
+);
+
+// Replace background
+app.post("/api/clipdrop/replace-bg", requireAuth, requireQuota, aiLimiter,
+  clipdropUpload.single("image"),
+  wrap(async (req,res)=>{
+    if(!req.file) return res.status(400).json({error:"No image uploaded."});
+    if(!process.env.CLIPDROP_API_KEY) return res.status(500).json({error:"CLIPDROP_API_KEY not set."});
+    const prompt = req.body.prompt?.trim();
+    if(!prompt) return res.status(400).json({error:"Missing background prompt."});
+    const filePath = req.file.path;
+    try{
+      const form = new FormData();
+      const { Blob } = await import('node:buffer');
+      const buffer = fs.readFileSync(filePath);
+      form.append('image_file', new Blob([buffer],{type:req.file.mimetype||'image/png'}), 'image.png');
+      form.append('prompt', prompt);
+      const r = await fetch('https://clipdrop-api.co/replace-background/v1',{
+        method:'POST',
+        headers:{'x-api-key':process.env.CLIPDROP_API_KEY},
+        body:form,
+      });
+      if(!r.ok) throw new Error('Clipdrop error: '+r.status);
+      const buf = Buffer.from(await r.arrayBuffer());
+      res.json({image:buf.toString('base64'),format:'png'});
+    }finally{fs.unlink(filePath,()=>{});}
+  })
+);
+
+// Upscale image
+app.post("/api/clipdrop/upscale", requireAuth, requireQuota, aiLimiter,
+  clipdropUpload.single("image"),
+  wrap(async (req,res)=>{
+    if(!req.file) return res.status(400).json({error:"No image uploaded."});
+    if(!process.env.CLIPDROP_API_KEY) return res.status(500).json({error:"CLIPDROP_API_KEY not set."});
+    const filePath = req.file.path;
+    try{
+      const form = new FormData();
+      const { Blob } = await import('node:buffer');
+      const buffer = fs.readFileSync(filePath);
+      form.append('image_file', new Blob([buffer],{type:req.file.mimetype||'image/png'}), 'image.png');
+      form.append('target_width', req.body.width||'2048');
+      form.append('target_height', req.body.height||'2048');
+      const r = await fetch('https://clipdrop-api.co/image-upscaling/v1/upscale',{
+        method:'POST',
+        headers:{'x-api-key':process.env.CLIPDROP_API_KEY},
+        body:form,
+      });
+      if(!r.ok) throw new Error('Clipdrop error: '+r.status);
+      const buf = Buffer.from(await r.arrayBuffer());
+      res.json({image:buf.toString('base64'),format:'png'});
+    }finally{fs.unlink(filePath,()=>{});}
+  })
+);
+
+// Reimagine (style transfer)
+app.post("/api/clipdrop/reimagine", requireAuth, requireQuota, aiLimiter,
+  clipdropUpload.single("image"),
+  wrap(async (req,res)=>{
+    if(!req.file) return res.status(400).json({error:"No image uploaded."});
+    if(!process.env.CLIPDROP_API_KEY) return res.status(500).json({error:"CLIPDROP_API_KEY not set."});
+    const filePath = req.file.path;
+    try{
+      const form = new FormData();
+      const { Blob } = await import('node:buffer');
+      const buffer = fs.readFileSync(filePath);
+      form.append('image_file', new Blob([buffer],{type:req.file.mimetype||'image/png'}), 'image.png');
+      const r = await fetch('https://clipdrop-api.co/reimagine/v1/reimagine',{
+        method:'POST',
+        headers:{'x-api-key':process.env.CLIPDROP_API_KEY},
+        body:form,
+      });
+      if(!r.ok) throw new Error('Clipdrop error: '+r.status);
+      const buf = Buffer.from(await r.arrayBuffer());
+      res.json({image:buf.toString('base64'),format:'png'});
+    }finally{fs.unlink(filePath,()=>{});}
+  })
+);
   console.error("❌", err.message || err);
   if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error:"File too large." });
   const status = err.status || err.statusCode || 500;
