@@ -190,6 +190,14 @@ const TOOLS = [
   {id:'image-edit-pro',cat:'media',e:'🖌️',name:'Image Edit Pro'},
   {id:'imagen4',cat:'media',e:'🌟',name:'Imagen 4 (Google)'},
   {id:'flux2pro',cat:'media',e:'🔥',name:'FLUX 2 Pro'},
+  {id:'gpt-image2',cat:'media',e:'🖼️',name:'GPT Image 2'},
+  {id:'ocr',cat:'media',e:'📝',name:'OCR - Image to Text'},
+  {id:'sketch-to-img',cat:'media',e:'✏️',name:'Sketch to Image'},
+  {id:'face-swap',cat:'media',e:'😊',name:'Face Swap'},
+  {id:'restore-img',cat:'media',e:'🔧',name:'Restore Image'},
+  {id:'music-cover',cat:'audio',e:'🎤',name:'Music Cover'},
+  {id:'lipsync',cat:'video',e:'👄',name:'Lipsync Video'},
+  {id:'video-gen',cat:'video',e:'🎬',name:'Video Generator'},
 
   // ── CLIPDROP POWERED ──────────────────────────
   {id:'remove-bg',cat:'media',e:'✂️',name:'Remove Background'},
@@ -922,6 +930,14 @@ async function sendMessage(){
       const isEditPro = tool.id==='image-edit-pro';
       const isImagen4 = tool.id==='imagen4';
       const isFlux2Pro = tool.id==='flux2pro';
+      const isGpt2 = tool.id==='gpt-image2';
+      const isOCR = tool.id==='ocr';
+      const isSketch = tool.id==='sketch-to-img';
+      const isFaceSwap = tool.id==='face-swap';
+      const isRestore = tool.id==='restore-img';
+      const isMusicCover = tool.id==='music-cover';
+      const isLipsync = tool.id==='lipsync';
+      const isVideoGen = tool.id==='video-gen';
 
       if(isMusicGen){
         addMsg({role:'user',text:`🎵 Generate music: ${text}`});
@@ -1009,6 +1025,60 @@ async function sendMessage(){
           addMsg({role:'assistant',text:`✅ ${tool.name} complete!`,type:'image',data:imgUrl});
           S.attachedImg=null;clearAttachPreview();
         }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isGpt2){
+        showTyping();
+        try{const r=await api('/api/image/gpt2',{method:'POST',body:{prompt:text}});hideTyping();addMsg({role:'assistant',text:'🖼️ Generated with GPT Image 2:',type:'image',data:r.url});}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isOCR){
+        if(!img){toast('Attach an image first!','error');hideTyping();return;}
+        const ocrForm=new FormData();const ob=atob(img.base64);const oa=new Uint8Array(ob.length);
+        for(let i=0;i<ob.length;i++)oa[i]=ob.charCodeAt(i);
+        ocrForm.append('image',new Blob([oa],{type:'image/png'}),'image.png');
+        try{const r=await fetch(API+'/api/image/ocr',{method:'POST',headers:{Authorization:'Bearer '+S.token},body:ocrForm});
+          const d=await r.json();if(!r.ok)throw new Error(d.error);
+          hideTyping();addMsg({role:'assistant',text:`📝 **Extracted Text:**\n\n${d.text}`});
+          S.attachedImg=null;clearAttachPreview();}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isSketch){
+        if(!img){toast('Attach a sketch first!','error');hideTyping();return;}
+        const sf=new FormData();const sb=atob(img.base64);const sa=new Uint8Array(sb.length);
+        for(let i=0;i<sb.length;i++)sa[i]=sb.charCodeAt(i);
+        sf.append('image',new Blob([sa],{type:'image/png'}),'sketch.png');
+        if(text)sf.append('prompt',text);
+        try{const r=await fetch(API+'/api/image/sketch',{method:'POST',headers:{Authorization:'Bearer '+S.token},body:sf});
+          const d=await r.json();if(!r.ok)throw new Error(d.error);
+          hideTyping();addMsg({role:'assistant',text:'✏️ Sketch converted:',type:'image',data:d.url});
+          S.attachedImg=null;clearAttachPreview();}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isRestore){
+        if(!img){toast('Attach an image first!','error');hideTyping();return;}
+        const rf=new FormData();const rb=atob(img.base64);const ra=new Uint8Array(rb.length);
+        for(let i=0;i<rb.length;i++)ra[i]=rb.charCodeAt(i);
+        rf.append('image',new Blob([ra],{type:'image/png'}),'image.png');
+        try{const r=await fetch(API+'/api/image/restore',{method:'POST',headers:{Authorization:'Bearer '+S.token},body:rf});
+          const d=await r.json();if(!r.ok)throw new Error(d.error);
+          hideTyping();addMsg({role:'assistant',text:'🔧 Image restored:',type:'image',data:d.url});
+          S.attachedImg=null;clearAttachPreview();}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isMusicCover){
+        showTyping();
+        try{const r=await api('/api/music/cover',{method:'POST',body:{prompt:text,style:'pop'}});
+          hideTyping();addMsg({role:'assistant',text:'🎤 Music cover ready!',type:'audio',data:`data:audio/mp3;base64,${r.audio}`});}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isVideoGen){
+        toast('🎬 Generating video... this takes ~60 seconds','success');
+        showTyping();
+        try{const r=await api('/api/video/generate',{method:'POST',body:{prompt:text}});
+          hideTyping();
+          addMsg({role:'assistant',text:`🎬 **Video ready!**\n\n[▶ Watch Video](${r.url})`});
+          notify('NexusAI','Your video is ready! 🎬');}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
 
       } else if(isTTS){
         const voices={tts:'alloy','tts-nova':'nova','tts-echo':'echo','tts-fable':'fable','tts-onyx':'onyx'};

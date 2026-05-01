@@ -1481,6 +1481,145 @@ app.post("/api/image/flux2pro", requireAuth, requireQuota, aiLimiter,
 );
 const clipdropUpload = multer({ dest: uploadDir, limits:{ fileSize:30*1024*1024 } });
 
+// ─────────────────────────────────────────────
+// 🎬 MORE REPLICATE MODELS
+// ─────────────────────────────────────────────
+
+// GPT-Image-2 (OpenAI latest image model)
+app.post("/api/image/gpt2", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  const {prompt} = req.body;
+  if(!prompt) return res.status(400).json({error:"Missing prompt."});
+  const result = await openai.images.generate({
+    model:"gpt-image-1", prompt, size:"1024x1024", quality:"high", n:1,
+  });
+  const url = result.data[0].url || `data:image/png;base64,${result.data[0].b64_json}`;
+  res.json({url});
+}));
+
+// OCR - extract text from image using GPT-4o vision
+app.post("/api/image/ocr", requireAuth, requireQuota, aiLimiter,
+  clipdropUpload.single("image"),
+  wrap(async (req,res)=>{
+    if(!req.file) return res.status(400).json({error:"No image uploaded."});
+    const filePath = req.file.path;
+    try{
+      const buffer = fs.readFileSync(filePath);
+      const base64 = buffer.toString('base64');
+      const mimeType = req.file.mimetype||'image/png';
+      const result = await openai.chat.completions.create({
+        model:"gpt-4o", max_tokens:2000,
+        messages:[{role:"user",content:[
+          {type:"image_url",image_url:{url:`data:${mimeType};base64,${base64}`}},
+          {type:"text",text:"Extract ALL text from this image. Preserve formatting and structure. Return only the extracted text."}
+        ]}]
+      });
+      res.json({text: result.choices[0]?.message?.content||""});
+    }finally{fs.unlink(filePath,()=>{});}
+  })
+);
+
+// Sketch to Image (Seedream-4)
+app.post("/api/image/sketch", requireAuth, requireQuota, aiLimiter,
+  clipdropUpload.single("image"),
+  wrap(async (req,res)=>{
+    if(!req.file) return res.status(400).json({error:"No image uploaded."});
+    if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+    const prompt = req.body.prompt?.trim()||"a detailed realistic image";
+    const filePath = req.file.path;
+    try{
+      const buffer = fs.readFileSync(filePath);
+      const base64 = `data:${req.file.mimetype};base64,${buffer.toString('base64')}`;
+      const output = await replicateRun('bytedance/seedream-4',{
+        prompt, image:base64, guidance_scale:7, num_inference_steps:28,
+      });
+      res.json({url: Array.isArray(output)?output[0]:output});
+    }finally{fs.unlink(filePath,()=>{});}
+  })
+);
+
+// Face Swap
+app.post("/api/image/faceswap", requireAuth, requireQuota, aiLimiter,
+  clipdropUpload.fields([{name:'source',maxCount:1},{name:'target',maxCount:1}]),
+  wrap(async (req,res)=>{
+    if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+    const source = req.files?.source?.[0];
+    const target = req.files?.target?.[0];
+    if(!source||!target) return res.status(400).json({error:"Need source and target images."});
+    try{
+      const srcB64 = `data:${source.mimetype};base64,${fs.readFileSync(source.path).toString('base64')}`;
+      const tgtB64 = `data:${target.mimetype};base64,${fs.readFileSync(target.path).toString('base64')}`;
+      const output = await replicateRun('codeplugtech/face-swap',{swap_image:srcB64,target_image:tgtB64});
+      res.json({url: Array.isArray(output)?output[0]:output});
+    }finally{
+      fs.unlink(source.path,()=>{});
+      fs.unlink(target.path,()=>{});
+    }
+  })
+);
+
+// Restore old/damaged images
+app.post("/api/image/restore", requireAuth, requireQuota, aiLimiter,
+  clipdropUpload.single("image"),
+  wrap(async (req,res)=>{
+    if(!req.file) return res.status(400).json({error:"No image uploaded."});
+    if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+    const filePath = req.file.path;
+    try{
+      const base64 = `data:${req.file.mimetype};base64,${fs.readFileSync(filePath).toString('base64')}`;
+      const output = await replicateRun('flux-kontext-apps/restore-image',{
+        image:base64, prompt:"restore and enhance this image, fix damage, improve quality",
+      });
+      res.json({url: Array.isArray(output)?output[0]:output});
+    }finally{fs.unlink(filePath,()=>{});}
+  })
+);
+
+// Music Cover
+app.post("/api/music/cover", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {prompt, style} = req.body;
+  if(!prompt) return res.status(400).json({error:"Missing prompt."});
+  const output = await replicateRun('minimax/music-cover',{
+    prompt:`${prompt} in ${style||'pop'} style`, quality:"high",
+  });
+  const audioUrl = Array.isArray(output)?output[0]:output;
+  const buf = Buffer.from(await (await fetch(audioUrl)).arrayBuffer());
+  res.json({audio:buf.toString('base64'),format:'mp3',url:audioUrl});
+}));
+
+// Lipsync video
+app.post("/api/video/lipsync", requireAuth, requireQuota, aiLimiter,
+  clipdropUpload.fields([{name:'video',maxCount:1},{name:'audio',maxCount:1}]),
+  wrap(async (req,res)=>{
+    if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+    const video = req.files?.video?.[0];
+    if(!video) return res.status(400).json({error:"Need video file."});
+    try{
+      const vidB64 = `data:video/mp4;base64,${fs.readFileSync(video.path).toString('base64')}`;
+      const input = {video:vidB64};
+      if(req.files?.audio?.[0]){
+        const aud = req.files.audio[0];
+        input.audio = `data:audio/mp3;base64,${fs.readFileSync(aud.path).toString('base64')}`;
+        fs.unlink(aud.path,()=>{});
+      }
+      if(req.body.text) input.text = req.body.text;
+      const output = await replicateRun('heygen/lipsync-precision',input);
+      res.json({url: Array.isArray(output)?output[0]:output});
+    }finally{fs.unlink(video.path,()=>{});}
+  })
+);
+
+// Video Generation
+app.post("/api/video/generate", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {prompt} = req.body;
+  if(!prompt) return res.status(400).json({error:"Missing prompt."});
+  const output = await replicateRun('bytedance/seedance-2.0',{
+    prompt, duration:5, resolution:"720p", watermark:false,
+  });
+  res.json({url: Array.isArray(output)?output[0]:output});
+}));
+
 // Remove background
 app.post("/api/clipdrop/remove-bg", requireAuth, requireQuota, aiLimiter,
   clipdropUpload.single("image"),
@@ -1581,6 +1720,8 @@ app.post("/api/clipdrop/reimagine", requireAuth, requireQuota, aiLimiter,
     }finally{fs.unlink(filePath,()=>{});}
   })
 );
+
+app.use((err, req, res, next) => {
   console.error("❌", err.message || err);
   if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error:"File too large." });
   const status = err.status || err.statusCode || 500;
