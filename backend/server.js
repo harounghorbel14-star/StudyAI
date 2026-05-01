@@ -1442,9 +1442,43 @@ app.post("/api/image/flux", requireAuth, requireQuota, aiLimiter, wrap(async (re
   res.json({url:imageUrl});
 }));
 
-// ─────────────────────────────────────────────
-// ✂️ CLIPDROP — Background Remove + Replace + Upscale
-// ─────────────────────────────────────────────
+// Imagen-4 (Google) - best image quality
+app.post("/api/image/imagen4", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {prompt} = req.body;
+  if(!prompt) return res.status(400).json({error:"Missing prompt."});
+  const output = await replicateRun('google/imagen-4',{
+    prompt, aspect_ratio:'1:1', output_format:'webp',
+  });
+  const imageUrl = Array.isArray(output)?output[0]:output;
+  res.json({url:imageUrl});
+}));
+
+// FLUX-2-Pro - image generation + editing with references
+app.post("/api/image/flux2pro", requireAuth, requireQuota, aiLimiter,
+  clipdropUpload.array("images", 8),
+  wrap(async (req,res)=>{
+    if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+    const prompt = req.body.prompt?.trim();
+    if(!prompt) return res.status(400).json({error:"Missing prompt."});
+    const files = req.files||[];
+    const input = {prompt, output_format:'webp', output_quality:90};
+    // Add reference images if provided
+    if(files.length>0){
+      const { Blob } = await import('node:buffer');
+      const refs = [];
+      for(const f of files){
+        const buf = fs.readFileSync(f.path);
+        refs.push(`data:${f.mimetype};base64,${buf.toString('base64')}`);
+        fs.unlink(f.path,()=>{});
+      }
+      input.input_images = refs;
+    }
+    const output = await replicateRun('black-forest-labs/flux-2-pro', input);
+    const imageUrl = Array.isArray(output)?output[0]:output;
+    res.json({url:imageUrl});
+  })
+);
 const clipdropUpload = multer({ dest: uploadDir, limits:{ fileSize:30*1024*1024 } });
 
 // Remove background
@@ -1547,8 +1581,6 @@ app.post("/api/clipdrop/reimagine", requireAuth, requireQuota, aiLimiter,
     }finally{fs.unlink(filePath,()=>{});}
   })
 );
-
-app.use((err, req, res, next) => {
   console.error("❌", err.message || err);
   if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error:"File too large." });
   const status = err.status || err.statusCode || 500;

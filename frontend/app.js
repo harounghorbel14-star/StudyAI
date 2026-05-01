@@ -188,6 +188,8 @@ const TOOLS = [
   {id:'music-gen',cat:'audio',e:'🎵',name:'Music Generator (AI)'},
   {id:'image-flux',cat:'media',e:'✨',name:'Image Gen (FLUX Pro)'},
   {id:'image-edit-pro',cat:'media',e:'🖌️',name:'Image Edit Pro'},
+  {id:'imagen4',cat:'media',e:'🌟',name:'Imagen 4 (Google)'},
+  {id:'flux2pro',cat:'media',e:'🔥',name:'FLUX 2 Pro'},
 
   // ── CLIPDROP POWERED ──────────────────────────
   {id:'remove-bg',cat:'media',e:'✂️',name:'Remove Background'},
@@ -918,6 +920,8 @@ async function sendMessage(){
       const isFlux = tool.id==='image-flux';
       const isMusicGen = tool.id==='music-gen';
       const isEditPro = tool.id==='image-edit-pro';
+      const isImagen4 = tool.id==='imagen4';
+      const isFlux2Pro = tool.id==='flux2pro';
 
       if(isMusicGen){
         addMsg({role:'user',text:`🎵 Generate music: ${text}`});
@@ -955,7 +959,38 @@ async function sendMessage(){
           S.attachedImg=null;clearAttachPreview();
         }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
 
-      } else if(['remove-bg','replace-bg','upscale-img','reimagine'].includes(tool.id)){
+      } else if(isImagen4){
+        showTyping();
+        try{
+          const r=await api('/api/image/imagen4',{method:'POST',body:{prompt:text}});
+          hideTyping();
+          addMsg({role:'assistant',text:'🌟 Generated with Imagen 4 (Google):',type:'image',data:r.url});
+        }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isFlux2Pro){
+        showTyping();
+        try{
+          if(img){
+            // With reference image
+            const form=new FormData();
+            const byteStr=atob(img.base64);
+            const arr=new Uint8Array(byteStr.length);
+            for(let i=0;i<byteStr.length;i++)arr[i]=byteStr.charCodeAt(i);
+            const blob=new Blob([arr],{type:'image/png'});
+            form.append('images',blob,'ref.png');
+            form.append('prompt',text);
+            const r=await fetch(API+'/api/image/flux2pro',{method:'POST',headers:{Authorization:'Bearer '+S.token},body:form});
+            const d=await r.json();
+            if(!r.ok)throw new Error(d.error);
+            hideTyping();
+            addMsg({role:'assistant',text:'🔥 Generated with FLUX 2 Pro:',type:'image',data:d.url});
+            S.attachedImg=null;clearAttachPreview();
+          } else {
+            const r=await api('/api/image/flux2pro',{method:'POST',body:{prompt:text}});
+            hideTyping();
+            addMsg({role:'assistant',text:'🔥 Generated with FLUX 2 Pro:',type:'image',data:r.url});
+          }
+        }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
         if(!img){toast('Please attach an image first!','error');hideTyping();return;}
         const form=new FormData();
         const byteStr=atob(img.base64);
