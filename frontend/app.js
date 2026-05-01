@@ -554,8 +554,10 @@ function renderAllMsgs(){
           <div class="msg-bubble">${bubble}</div>
           <div class="msg-actions">
             <button class="msg-act-btn" onclick="copyMsg(${i})">Copy</button>
-            <button class="msg-act-btn star" onclick="saveToFavorites('${(m.text||'').replace(/'/g,"\\'")}','${S.tool?.name||''}')" title="Save to favorites">⭐ Save</button>
-            ${m.data&&m.type==='audio'?`<a class="msg-act-btn" href="${m.data}" download>Download</a>`:''}
+            <button class="msg-act-btn star" onclick="saveToFavorites('${(m.text||'').replace(/'/g,"\\'").replace(/\n/g,'\\n')}','${S.tool?.name||''}')" title="Save">⭐</button>
+            <button class="msg-act-btn" onclick="speakResponse('${(m.text||'').slice(0,200).replace(/'/g,"\\'")}')" title="Listen">🔊</button>
+            ${m.text?.includes('```')?`<button class="msg-act-btn" onclick="extractAndRunCode(${i})" title="Run code">▶ Run</button>`:''}
+            ${m.data&&m.type==='audio'?`<a class="msg-act-btn" href="${m.data}" download>⬇ Download</a>`:''}
           </div>
         </div>
       </div>`;
@@ -598,6 +600,13 @@ function hideTyping(){document.getElementById('typing')?.remove();}
 function copyMsg(i){
   navigator.clipboard.writeText(S.msgs[i]?.text||'').catch(()=>{});
   toast('Copied!','success');
+}
+
+function extractAndRunCode(i){
+  const text = S.msgs[i]?.text||'';
+  const match = text.match(/```(?:javascript|js|html)?\n?([\s\S]*?)```/);
+  if(match) runCode(match[1]);
+  else toast('No runnable code found','error');
 }
 
 // ── SEND ─────────────────────────────────────
@@ -730,6 +739,9 @@ async function sendMessage(){
     // Refresh user
     try{S.user=await api('/api/me');updateUsage();loadHistory();}catch(_){}
 
+    // Smart Suggestions — generate 3 follow-up questions
+    showSmartSuggestions(text);
+
   }catch(e){
     hideTyping();
     addMsg({role:'assistant',text:'❌ '+e.message});
@@ -737,6 +749,101 @@ async function sendMessage(){
   }finally{
     document.getElementById('send-btn').disabled=false;
   }
+}
+
+// ── 1. SMART SUGGESTIONS ─────────────────────
+async function showSmartSuggestions(lastInput){
+  // Generate 3 follow-up questions in background
+  try{
+    const res = await openaiSuggest(lastInput);
+    if(!res?.length) return;
+    // Remove old suggestions
+    document.getElementById('suggestions-row')?.remove();
+    const wrap = document.createElement('div');
+    wrap.id = 'suggestions-row';
+    wrap.className = 'suggestions-row';
+    wrap.innerHTML = '<div class="sugg-label">💡 You might also ask:</div>' +
+      res.map(q=>`<button class="sugg-btn" onclick="useSuggestion('${q.replace(/'/g,"\\'")}')">${q}</button>`).join('');
+    document.getElementById('messages').appendChild(wrap);
+    scrollBottom();
+  }catch(_){}
+}
+
+async function openaiSuggest(context){
+  try{
+    const d = await api('/api/suggest',{method:'POST',body:{context:context.slice(0,200)}});
+    return d.suggestions||[];
+  }catch(_){return[];}
+}
+
+function useSuggestion(text){
+  document.getElementById('suggestions-row')?.remove();
+  const input = document.getElementById('msg-input');
+  if(input){ input.value=text; input.focus(); autoGrow(input); }
+}
+
+// ── 2. VOICE RESPONSE ────────────────────────
+async function speakResponse(text){
+  if(!text) return;
+  try{
+    const result = await api('/api/tts',{method:'POST',body:{text:text.slice(0,500),voice:'nova'}});
+    const audio = new Audio(`data:audio/mp3;base64,${result.audio}`);
+    audio.play();
+    toast('🔊 Playing response...','success');
+  }catch(e){ toast(e.message,'error'); }
+}
+
+// ── 3. AI DEBATE ─────────────────────────────
+async function startDebate(topic){
+  if(!topic){
+    const input = document.getElementById('msg-input')?.value?.trim();
+    if(!input){ toast('Enter a topic first','error'); return; }
+    topic = input;
+    document.getElementById('msg-input').value='';
+  }
+  addMsg({role:'user', text:`🥊 Debate: ${topic}`});
+  showTyping();
+  try{
+    const [pro, con] = await Promise.all([
+      api('/api/chat',{method:'POST',body:{input:`Argue strongly FOR this: "${topic}". Give 3 compelling arguments. Be persuasive.`}}),
+      api('/api/chat',{method:'POST',body:{input:`Argue strongly AGAINST this: "${topic}". Give 3 compelling counter-arguments. Be persuasive.`}})
+    ]);
+    hideTyping();
+    addMsg({role:'assistant', text:`**✅ FOR:**\n${pro.reply}\n\n**❌ AGAINST:**\n${con.reply}`});
+  }catch(e){ hideTyping(); toast(e.message,'error'); }
+}
+
+// ── 4. CODE RUNNER ───────────────────────────
+function runCode(code){
+  // Run JS code in iframe sandbox
+  const html = `<!DOCTYPE html><html><head><style>
+    body{font-family:monospace;padding:12px;background:#1a1a2e;color:#ececec;font-size:13px}
+    .output{white-space:pre-wrap}
+    .error{color:#f87171}
+  </style></head><body>
+  <div id="out" class="output"></div>
+  <script>
+    const out=document.getElementById('out');
+    const log=console.log;
+    console.log=(...a)=>{out.innerHTML+=a.join(' ')+'\\n';log(...a);};
+    console.error=(...a)=>{out.innerHTML+='<span class="error">'+a.join(' ')+'</span>\\n';};
+    try{${code}}catch(e){out.innerHTML+='<span class="error">Error: '+e.message+'</span>';}
+  <\/script></body></html>`;
+  const blob = new Blob([html],{type:'text/html'});
+  const url  = URL.createObjectURL(blob);
+  // Show in modal
+  const modal = document.createElement('div');
+  modal.style.cssText='position:fixed;inset:0;z-index:999;background:#00000090;display:flex;align-items:center;justify-content:center;';
+  modal.innerHTML=`
+    <div style="background:#1a1a2e;border:1px solid #383838;border-radius:14px;width:90%;max-width:600px;overflow:hidden">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #383838">
+        <span style="font-size:14px;font-weight:500">▶ Code Output</span>
+        <button onclick="this.closest('div[style]').remove();URL.revokeObjectURL('${url}')" style="color:#8e8ea0;font-size:16px;cursor:pointer">✕</button>
+      </div>
+      <iframe src="${url}" style="width:100%;height:300px;border:none"></iframe>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.onclick = e=>{ if(e.target===modal){ modal.remove(); URL.revokeObjectURL(url); }};
 }
 
 // ── IMAGE ATTACH ──────────────────────────────

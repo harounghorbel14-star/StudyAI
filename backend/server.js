@@ -712,6 +712,24 @@ app.get("/api/tools", requireAuth, (_req,res) => res.json({ tools:listTools() })
 app.get("/health", (_req,res) => res.json({ status:"ok", timestamp:new Date().toISOString() }));
 
 // ─────────────────────────────────────────────
+// 💡 SMART SUGGESTIONS
+// ─────────────────────────────────────────────
+app.post("/api/suggest", requireAuth, wrap(async (req,res) => {
+  const { context } = req.body;
+  if(!context) return res.json({ suggestions:[] });
+  const result = await openai.chat.completions.create({
+    model:"gpt-4o-mini",
+    max_tokens:100,
+    messages:[{role:"user",content:`Based on this user input: "${context.slice(0,200)}", generate exactly 3 short follow-up questions the user might want to ask next. Return JSON array only, example: ["Question 1?","Question 2?","Question 3?"]. No explanation, JSON only:`}]
+  });
+  const text = result.choices[0]?.message?.content?.trim()||'[]';
+  try{
+    const suggestions = JSON.parse(text.replace(/```json|```/g,'').trim());
+    res.json({ suggestions: Array.isArray(suggestions)?suggestions.slice(0,3):[] });
+  }catch(_){ res.json({ suggestions:[] }); }
+}));
+
+// ─────────────────────────────────────────────
 // ⭐ FAVORITES
 // ─────────────────────────────────────────────
 app.get("/api/favorites", requireAuth, wrap(async (req,res) => {

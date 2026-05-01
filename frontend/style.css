@@ -828,3 +828,33 @@ input,textarea{font-family:inherit;color:inherit}
 .msg-act-btn.star{color:var(--t3)}
 .msg-act-btn.star:hover{color:var(--a1)}
 .msg-act-btn.star.saved{color:var(--a1)}
+
+/* ══════════════════════════════
+   SMART SUGGESTIONS
+══════════════════════════════ */
+.suggestions-row{
+  padding:12px 0 4px;
+  display:flex;flex-direction:column;gap:6px;
+  animation:fadeUp .3s ease;
+}
+.sugg-label{
+  font-size:11px;color:var(--t3);
+  text-transform:uppercase;letter-spacing:.5px;
+  padding:0 0 4px;
+}
+.sugg-btn{
+  display:block;width:100%;
+  text-align:left;
+  font-size:13px;color:var(--t2);
+  padding:8px 14px;
+  background:var(--bg2);
+  border:1px solid var(--border);
+  border-radius:10px;
+  cursor:pointer;transition:.15s;
+}
+.sugg-btn:hover{
+  border-color:var(--a1);
+  color:var(--text);
+  background:linear-gradient(90deg,#c6f13508,transparent);
+  transform:translateX(4px);
+}
