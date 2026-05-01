@@ -1406,7 +1406,244 @@ function toast(msg,type=''){
   setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity .3s';setTimeout(()=>el.remove(),300);},3000);
 }
 
-// ── CATEGORIES GRID ──────────────────────────
+// ── AI AGENTS ────────────────────────────────
+const AGENT_LIST = [
+  {id:'research', e:'🔍', name:'Research Agent',    desc:'Search + analyze + report'},
+  {id:'code',     e:'💻', name:'Code Agent',         desc:'Plan + write + review code'},
+  {id:'content',  e:'📱', name:'Content Agent',      desc:'TikTok + Instagram + Twitter'},
+  {id:'business', e:'📈', name:'Business Agent',     desc:'Market + plan + strategy'},
+  {id:'seo',      e:'🔎', name:'SEO Agent',          desc:'Keywords + content + report'},
+  {id:'study',    e:'📚', name:'Study Agent',        desc:'Plan + flashcards + quiz'},
+  {id:'email',    e:'📧', name:'Email Agent',        desc:'7-email sequence'},
+  {id:'creative', e:'🎨', name:'Creative Agent',     desc:'Story + characters + prompts'},
+  {id:'sales',    e:'🤝', name:'Sales Agent',        desc:'Pitch + script + funnel'},
+  {id:'data',     e:'📊', name:'Data Agent',         desc:'Analysis + insights + KPIs'},
+];
+
+async function runAgent(agentId, input){
+  if(!input){
+    const i = document.getElementById('msg-input')?.value?.trim();
+    if(!i){ toast('Enter your topic first','error'); return; }
+    input = i;
+    document.getElementById('msg-input').value='';
+  }
+  const agent = AGENT_LIST.find(a=>a.id===agentId);
+  if(!agent) return;
+
+  addMsg({role:'user', text:`${agent.e} **${agent.name}**: ${input}`});
+
+  // Show steps progress
+  const thread = document.getElementById('messages');
+  const stepsEl = document.createElement('div');
+  stepsEl.className='msg assistant';stepsEl.id='agent-steps';
+  stepsEl.innerHTML=`
+    <div class="ai-avatar-wrap">${AI_AVATAR_SVG}</div>
+    <div class="msg-body">
+      <div class="msg-bubble">
+        <div class="agent-running">
+          <div class="agent-name">${agent.e} ${agent.name} running...</div>
+          <div class="agent-steps-list" id="agent-steps-list">
+            <div class="agent-step running">⏳ Starting agent...</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  thread.appendChild(stepsEl);
+  scrollBottom();
+
+  try{
+    const result = await api('/api/agent/run',{method:'POST',body:{agent_id:agentId,input}});
+    stepsEl.remove();
+
+    // Show steps summary
+    const stepsText = result.steps?.map(s=>`${s.status==='done'?'✅':'⏳'} ${s.step}`).join('\n')||'';
+    let finalText = `**${result.agent_emoji} ${result.agent_name} Complete!**\n\n`;
+    if(stepsText) finalText += `${stepsText}\n\n---\n\n`;
+    finalText += result.result||'';
+
+    if(result.sources?.length){
+      finalText += '\n\n**Sources:**\n' + result.sources.map((s,i)=>`[${i+1}] [${s.title}](${s.url})`).join('\n');
+    }
+
+    addMsg({role:'assistant', text:finalText});
+    renderLatex();
+    notify(result.agent_name, 'Agent task complete! ✅');
+    try{S.user=await api('/api/me');updateUsage();}catch(_){}
+
+  }catch(e){
+    stepsEl.remove();
+    addMsg({role:'assistant',text:'❌ Agent error: '+e.message});
+    toast(e.message,'error');
+  }
+}
+
+function navigate_agents(){
+  S.page='agents';
+  closeSidebar();
+  document.getElementById('tool-label').textContent='🤖 AI Agents';
+  document.getElementById('tool-sub').textContent='10 specialized agents';
+  document.getElementById('messages').innerHTML=`
+    <div class="page-wrap">
+      <div class="page-title">🤖 AI Agents</div>
+      <p style="color:var(--t2);font-size:14px;margin-bottom:20px">Each agent runs multiple steps automatically to complete complex tasks.</p>
+      <div class="agents-grid">
+        ${AGENT_LIST.map(a=>`
+        <div class="agent-card" onclick="promptAgent('${a.id}')">
+          <div class="agent-emoji">${a.e}</div>
+          <div class="agent-card-name">${a.name}</div>
+          <div class="agent-card-desc">${a.desc}</div>
+          <button class="agent-run-btn">Run Agent →</button>
+        </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+function promptAgent(id){
+  const agent = AGENT_LIST.find(a=>a.id===id);
+  if(!agent) return;
+  const input = prompt(`${agent.e} ${agent.name}\n\nEnter your topic or task:`);
+  if(input?.trim()){
+    // Go to chat
+    document.getElementById('tool-label').textContent=agent.e+' '+agent.name;
+    document.getElementById('tool-sub').textContent='AI Agent';
+    document.getElementById('messages').innerHTML='';
+    runAgent(id, input.trim());
+  }
+}
+
+// ── AI WORKFLOWS ─────────────────────────────
+let workflowSteps = [];
+
+function navigate_workflow(){
+  S.page='workflow';
+  closeSidebar();
+  document.getElementById('tool-label').textContent='🔄 AI Workflows';
+  document.getElementById('tool-sub').textContent='Chain tools together';
+  renderWorkflowBuilder();
+}
+
+function renderWorkflowBuilder(){
+  document.getElementById('messages').innerHTML=`
+    <div class="page-wrap">
+      <div class="page-title">🔄 AI Workflow Builder</div>
+      <p style="color:var(--t2);font-size:14px;margin-bottom:20px">Chain multiple AI tools together. Output of each step becomes input for the next.</p>
+
+      <div class="workflow-builder">
+        <div class="workflow-input-wrap">
+          <label style="font-size:12px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px">Starting input</label>
+          <textarea id="wf-input" placeholder="Enter your starting text or topic..." rows="3"
+            style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;color:var(--text);outline:none;resize:none;margin-top:6px"></textarea>
+        </div>
+
+        <div style="margin:16px 0">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <div style="font-size:13px;font-weight:500">Workflow Steps</div>
+            <div style="font-size:11px;color:var(--t3)">Max 5 steps</div>
+          </div>
+          <div id="wf-steps"></div>
+          ${workflowSteps.length<5?`
+          <button onclick="addWorkflowStep()" style="width:100%;padding:10px;border:2px dashed var(--border);border-radius:10px;color:var(--t2);font-size:13px;cursor:pointer;transition:.15s;margin-top:8px"
+            onmouseover="this.style.borderColor='var(--a1)';this.style.color='var(--text)'"
+            onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--t2)'">
+            + Add Step
+          </button>`:''}
+        </div>
+
+        <div style="display:flex;gap:8px">
+          <button onclick="runWorkflow()" style="flex:1;padding:12px;background:var(--grad);color:#000;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">
+            ▶ Run Workflow
+          </button>
+          <button onclick="workflowSteps=[];renderWorkflowBuilder()" style="padding:12px 16px;border:1px solid var(--border);border-radius:10px;color:var(--t2);font-size:13px;cursor:pointer">
+            Reset
+          </button>
+        </div>
+
+        <!-- Presets -->
+        <div style="margin-top:20px">
+          <div style="font-size:12px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Quick Presets</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            <button class="tpl-btn" onclick="loadPreset('research')">🔍 Research → Summary → Translate</button>
+            <button class="tpl-btn" onclick="loadPreset('content')">📝 Summarize → TikTok → Hashtags</button>
+            <button class="tpl-btn" onclick="loadPreset('business')">💼 Idea → Business Plan → Pitch</button>
+            <button class="tpl-btn" onclick="loadPreset('code')">💻 Requirements → Code → Review</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  renderWorkflowSteps();
+}
+
+function renderWorkflowSteps(){
+  const el = document.getElementById('wf-steps');
+  if(!el) return;
+  el.innerHTML = workflowSteps.map((s,i)=>`
+    <div class="wf-step">
+      <div class="wf-step-num">${i+1}</div>
+      <select class="wf-step-select" onchange="workflowSteps[${i}]=this.value">
+        ${TOOLS.slice(0,50).map(t=>`<option value="${t.id}" ${s===t.id?'selected':''}>${t.e} ${t.name}</option>`).join('')}
+      </select>
+      <button onclick="workflowSteps.splice(${i},1);renderWorkflowBuilder()" style="color:var(--t3);padding:4px 8px;border-radius:5px;font-size:12px">✕</button>
+    </div>
+    ${i<workflowSteps.length-1?'<div class="wf-arrow">↓</div>':''}`
+  ).join('');
+}
+
+function addWorkflowStep(){
+  if(workflowSteps.length>=5){ toast('Max 5 steps','error'); return; }
+  workflowSteps.push('summarize');
+  renderWorkflowBuilder();
+}
+
+function loadPreset(preset){
+  const presets = {
+    research: ['summarize','translate','mindmap'],
+    content:  ['summarize','tiktok-script','hashtags'],
+    business: ['idea-to-plan','business-plan','pitch-deck'],
+    code:     ['code-explain','code-review','docs-writer'],
+  };
+  workflowSteps = presets[preset]||[];
+  renderWorkflowBuilder();
+  toast('Preset loaded!','success');
+}
+
+async function runWorkflow(){
+  const input = document.getElementById('wf-input')?.value?.trim();
+  if(!input){ toast('Enter starting input','error'); return; }
+  if(!workflowSteps.length){ toast('Add at least one step','error'); return; }
+
+  addMsg({role:'user', text:`🔄 **Workflow** (${workflowSteps.length} steps):\n${input}`});
+  showTyping();
+
+  try{
+    const result = await api('/api/workflow/run',{method:'POST',body:{steps:workflowSteps.map(id=>({tool_id:id})),input}});
+    hideTyping();
+
+    let text = `🔄 **Workflow Complete!**\n\n`;
+    result.results?.forEach((r,i)=>{
+      text += `**Step ${i+1}: ${r.tool_name}**\n${r.output?.slice(0,300)||r.error||''}...\n\n`;
+    });
+    text += `---\n**Final Output:**\n${result.final_output||''}`;
+
+    addMsg({role:'assistant',text});
+    notify('Workflow','All steps complete! ✅');
+    try{S.user=await api('/api/me');updateUsage();}catch(_){}
+  }catch(e){
+    hideTyping();
+    addMsg({role:'assistant',text:'❌ '+e.message});
+    toast(e.message,'error');
+  }
+}
+
+// ── VOICE CLONING ─────────────────────────────
+async function cloneVoiceTTS(text, voiceId){
+  try{
+    const result = await api('/api/voice/clone-tts',{method:'POST',body:{text,voice_id:voiceId}});
+    const audioUrl = `data:audio/mp3;base64,${result.audio}`;
+    const audio = new Audio(audioUrl);
+    audio.play();
+    toast(`🎤 Playing with ${result.provider==='elevenlabs'?'ElevenLabs':'AI'} voice`,'success');
+  }catch(e){ toast(e.message,'error'); }
+}
 const CAT_META = {
   ai:          {e:'🧠', name:'AI Essentials'},
   code:        {e:'💻', name:'Code & Dev'},

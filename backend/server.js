@@ -1042,8 +1042,333 @@ app.post("/api/image/edit", requireAuth, requireQuota, aiLimiter,
 );
 
 // ─────────────────────────────────────────────
-// 🧯 ERROR HANDLER
+// 🤖 10 AI AGENTS
 // ─────────────────────────────────────────────
+const AGENTS = {
+  research: {
+    name: "Research Agent",
+    emoji: "🔍",
+    steps: ["Search web", "Extract key info", "Synthesize findings", "Format report"],
+    async run(input, userId, openai, fetch){
+      const steps = [];
+      // Step 1: Web search
+      steps.push({step:"🔍 Searching the web...", status:"running"});
+      const searchRes = await fetch("https://api.tavily.com/search",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({api_key:process.env.TAVILY_API_KEY,query:input,search_depth:"basic",max_results:5,include_answer:true})
+      });
+      const searchData = await searchRes.json();
+      const results = (searchData.results||[]).map((r,i)=>`[${i+1}] ${r.title}\n${r.content?.slice(0,300)}\nURL: ${r.url}`).join("\n\n");
+      steps.push({step:"🔍 Web search complete", status:"done"});
+
+      // Step 2: Analyze
+      steps.push({step:"🧠 Analyzing results...", status:"running"});
+      const analysis = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:500,
+        messages:[{role:"user",content:`Extract the most important and relevant information about "${input}" from these search results:\n\n${results}\n\nList the top 5 key findings with sources.`}]
+      });
+      const findings = analysis.choices[0]?.message?.content||"";
+      steps.push({step:"🧠 Analysis complete", status:"done"});
+
+      // Step 3: Final report
+      steps.push({step:"📝 Writing report...", status:"running"});
+      const report = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:1000,
+        messages:[{role:"user",content:`Write a comprehensive research report about "${input}" based on these findings:\n\n${findings}\n\nFormat: Executive Summary, Key Findings, Detailed Analysis, Conclusion, Sources`}]
+      });
+      steps.push({step:"📝 Report ready", status:"done"});
+      return {result: report.choices[0]?.message?.content||"", steps, sources: (searchData.results||[]).map(r=>({title:r.title,url:r.url}))};
+    }
+  },
+
+  code: {
+    name: "Code Agent",
+    emoji: "💻",
+    steps: ["Understand requirements", "Plan architecture", "Write code", "Review & optimize"],
+    async run(input, userId, openai){
+      const steps = [];
+      steps.push({step:"🧠 Planning architecture...", status:"running"});
+      const plan = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:300,
+        messages:[{role:"user",content:`Plan the architecture for: "${input}". List: tech stack, file structure, key functions needed. Be concise.`}]
+      });
+      steps.push({step:"🧠 Architecture planned", status:"done"});
+
+      steps.push({step:"💻 Writing code...", status:"running"});
+      const code = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:2000,
+        messages:[{role:"user",content:`Write complete, production-ready code for: "${input}"\n\nPlan:\n${plan.choices[0]?.message?.content}\n\nProvide full working code with comments.`}]
+      });
+      steps.push({step:"💻 Code written", status:"done"});
+
+      steps.push({step:"🔍 Reviewing code...", status:"running"});
+      const review = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:400,
+        messages:[{role:"user",content:`Review this code for bugs, security issues, and improvements:\n\n${code.choices[0]?.message?.content}\n\nList any issues and fixes.`}]
+      });
+      steps.push({step:"✅ Review complete", status:"done"});
+
+      return {result: code.choices[0]?.message?.content + "\n\n---\n**Code Review:**\n" + review.choices[0]?.message?.content, steps};
+    }
+  },
+
+  content: {
+    name: "Content Agent",
+    emoji: "📱",
+    steps: ["Research topic", "Create hook", "Write content", "Optimize for platforms"],
+    async run(input, userId, openai, fetch){
+      const steps = [];
+      steps.push({step:"🔍 Researching topic...", status:"running"});
+      const research = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:300,
+        messages:[{role:"user",content:`Research and identify: key angles, trending aspects, target audience for content about: "${input}"`}]
+      });
+      steps.push({step:"🔍 Research done", status:"done"});
+
+      steps.push({step:"✍️ Creating content...", status:"running"});
+      const content = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:1500,
+        messages:[{role:"user",content:`Create a complete content package about "${input}" for social media. Include:\n\n1. 🎵 TikTok/Reel script (60 sec)\n2. 📸 Instagram caption (5 variations)\n3. 🐦 Twitter thread (8 tweets)\n4. 📧 Newsletter section\n5. #️⃣ Hashtag set\n\nResearch context: ${research.choices[0]?.message?.content}`}]
+      });
+      steps.push({step:"✅ Content ready", status:"done"});
+      return {result: content.choices[0]?.message?.content||"", steps};
+    }
+  },
+
+  business: {
+    name: "Business Agent",
+    emoji: "📈",
+    steps: ["Market analysis", "Business model", "Financial plan", "Go-to-market strategy"],
+    async run(input, userId, openai){
+      const steps = [];
+      steps.push({step:"📊 Analyzing market...", status:"running"});
+      const market = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:400,
+        messages:[{role:"user",content:`Analyze the market for: "${input}". Cover: market size, competitors, opportunities, target customers.`}]
+      });
+      steps.push({step:"📊 Market analysis done", status:"done"});
+
+      steps.push({step:"💰 Building business plan...", status:"running"});
+      const plan = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:1500,
+        messages:[{role:"user",content:`Create a complete business plan for: "${input}"\n\nMarket Analysis:\n${market.choices[0]?.message?.content}\n\nInclude: Executive Summary, Value Proposition, Revenue Model, Pricing Strategy, Marketing Plan, Financial Projections, Risk Analysis, Action Plan`}]
+      });
+      steps.push({step:"✅ Business plan ready", status:"done"});
+      return {result: plan.choices[0]?.message?.content||"", steps};
+    }
+  },
+
+  seo: {
+    name: "SEO Agent",
+    emoji: "🔎",
+    steps: ["Keyword research", "Competitor analysis", "Content strategy", "SEO report"],
+    async run(input, userId, openai, fetch){
+      const steps = [];
+      steps.push({step:"🔍 Researching keywords...", status:"running"});
+      const keywords = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:400,
+        messages:[{role:"user",content:`Generate a comprehensive SEO keyword strategy for "${input}". Include primary keywords, long-tail variations, search intent, and competition level.`}]
+      });
+      steps.push({step:"🔍 Keywords found", status:"done"});
+
+      steps.push({step:"📝 Creating SEO strategy...", status:"running"});
+      const strategy = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:1200,
+        messages:[{role:"user",content:`Create a complete SEO strategy for "${input}" with these keywords:\n${keywords.choices[0]?.message?.content}\n\nInclude: Content Calendar (12 articles), On-page SEO checklist, Link building strategy, Technical SEO tips, Expected timeline and results.`}]
+      });
+      steps.push({step:"✅ SEO strategy ready", status:"done"});
+      return {result: strategy.choices[0]?.message?.content||"", steps};
+    }
+  },
+
+  study: {
+    name: "Study Agent",
+    emoji: "📚",
+    steps: ["Break down topic", "Create study plan", "Generate materials", "Build quiz"],
+    async run(input, userId, openai){
+      const steps = [];
+      steps.push({step:"📚 Analyzing subject...", status:"running"});
+      const breakdown = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:400,
+        messages:[{role:"user",content:`Break down "${input}" into key concepts and sub-topics for studying. Identify: core concepts, difficulty levels, prerequisite knowledge.`}]
+      });
+      steps.push({step:"📚 Subject analyzed", status:"done"});
+
+      steps.push({step:"📅 Creating study plan...", status:"running"});
+      const materials = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:1800,
+        messages:[{role:"user",content:`Create complete study materials for "${input}":\n\nSubject breakdown:\n${breakdown.choices[0]?.message?.content}\n\nProvide:\n1. 📅 2-week Study Schedule\n2. 📝 Key Concepts Summary\n3. 🃏 20 Flashcards (FRONT: question | BACK: answer)\n4. ❓ 10 Practice Questions with answers\n5. 💡 Memory tips and mnemonics`}]
+      });
+      steps.push({step:"✅ Study materials ready", status:"done"});
+      return {result: materials.choices[0]?.message?.content||"", steps};
+    }
+  },
+
+  email: {
+    name: "Email Agent",
+    emoji: "📧",
+    steps: ["Analyze goal", "Write sequence", "Add personalization", "Optimize"],
+    async run(input, userId, openai){
+      const steps = [];
+      steps.push({step:"📧 Planning email sequence...", status:"running"});
+      const sequence = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:2000,
+        messages:[{role:"user",content:`Write a complete 7-email marketing sequence for: "${input}"\n\nFor each email include:\n- Subject line (3 variations)\n- Preview text\n- Full email body\n- CTA\n- Best send time\n\nEmails: Welcome, Value, Story, Social Proof, Objection Handler, Offer, Follow-up`}]
+      });
+      steps.push({step:"✅ Email sequence ready", status:"done"});
+      return {result: sequence.choices[0]?.message?.content||"", steps};
+    }
+  },
+
+  creative: {
+    name: "Creative Agent",
+    emoji: "🎨",
+    steps: ["Concept development", "World building", "Write story", "Generate image prompts"],
+    async run(input, userId, openai){
+      const steps = [];
+      steps.push({step:"🎨 Developing concept...", status:"running"});
+      const concept = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:400,
+        messages:[{role:"user",content:`Develop a creative concept for: "${input}". Include: theme, genre, tone, unique angle, target audience.`}]
+      });
+      steps.push({step:"🎨 Concept ready", status:"done"});
+
+      steps.push({step:"✍️ Creating content...", status:"running"});
+      const creative = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:2000,
+        messages:[{role:"user",content:`Create complete creative content for: "${input}"\n\nConcept: ${concept.choices[0]?.message?.content}\n\nProvide:\n1. 📖 Short story (500 words)\n2. 🎭 Character profiles (3 characters)\n3. 🌍 World description\n4. 💬 Sample dialogues\n5. 🖼️ 5 DALL-E image prompts to visualize the story`}]
+      });
+      steps.push({step:"✅ Creative content ready", status:"done"});
+      return {result: creative.choices[0]?.message?.content||"", steps};
+    }
+  },
+
+  sales: {
+    name: "Sales Agent",
+    emoji: "🤝",
+    steps: ["Identify prospects", "Build pitch", "Handle objections", "Create funnel"],
+    async run(input, userId, openai){
+      const steps = [];
+      steps.push({step:"🎯 Analyzing product/service...", status:"running"});
+      const sales = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:2000,
+        messages:[{role:"user",content:`Create a complete sales package for: "${input}"\n\nInclude:\n1. 🎯 Ideal Customer Profile (ICP)\n2. 💬 30-60-90 second elevator pitch\n3. 📞 Cold call script\n4. 📧 Cold email template\n5. ❓ 10 discovery questions\n6. 🛡️ Top 5 objections + responses\n7. 🔽 Complete sales funnel\n8. 🤝 Closing techniques (3 methods)`}]
+      });
+      steps.push({step:"✅ Sales package ready", status:"done"});
+      return {result: sales.choices[0]?.message?.content||"", steps};
+    }
+  },
+
+  data: {
+    name: "Data Agent",
+    emoji: "📊",
+    steps: ["Understand data", "Find patterns", "Generate insights", "Create recommendations"],
+    async run(input, userId, openai){
+      const steps = [];
+      steps.push({step:"📊 Analyzing data...", status:"running"});
+      const analysis = await openai.chat.completions.create({
+        model:"gpt-4o",max_tokens:2000,
+        messages:[{role:"user",content:`Perform a comprehensive data analysis for: "${input}"\n\nProvide:\n1. 📊 Key metrics to track\n2. 📈 Trend analysis\n3. 🔍 Pattern identification\n4. ⚠️ Anomalies or concerns\n5. 💡 Data-driven recommendations\n6. 📋 Dashboard design suggestion\n7. 🎯 KPIs to monitor\n8. 📅 Reporting schedule recommendation`}]
+      });
+      steps.push({step:"✅ Analysis complete", status:"done"});
+      return {result: analysis.choices[0]?.message?.content||"", steps};
+    }
+  },
+};
+
+// Agent endpoint
+app.post("/api/agent/run", requireAuth, requireQuota, aiLimiter, wrap(async (req, res) => {
+  const { agent_id, input } = req.body;
+  if(!agent_id || !input) return res.status(400).json({ error:"Missing agent_id or input" });
+  const agent = AGENTS[agent_id];
+  if(!agent) return res.status(404).json({ error:"Agent not found" });
+
+  try {
+    const result = await agent.run(input, req.user.id, openai, fetch);
+    // Save as project
+    saveProject(req.user.id, `${agent.emoji} ${agent.name}: ${input.slice(0,50)}`, agent_id, input, result.result);
+    res.json({ ...result, agent_name: agent.name, agent_emoji: agent.emoji });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+}));
+
+app.get("/api/agents", requireAuth, (_req, res) => {
+  res.json({ agents: Object.entries(AGENTS).map(([id,a])=>({id, name:a.name, emoji:a.emoji, steps:a.steps})) });
+});
+
+// ─────────────────────────────────────────────
+// 🔄 AI WORKFLOWS
+// ─────────────────────────────────────────────
+app.post("/api/workflow/run", requireAuth, requireQuota, aiLimiter, wrap(async (req, res) => {
+  const { steps, input } = req.body;
+  // steps = [{tool_id: "summarize"}, {tool_id: "translate"}, ...]
+  if(!steps?.length || !input) return res.status(400).json({ error:"Missing steps or input" });
+
+  const results = [];
+  let currentInput = input;
+
+  for(const step of steps.slice(0, 5)) { // max 5 steps
+    const tool = TOOLS.find(t=>t.id===step.tool_id);
+    if(!tool) continue;
+    try {
+      const output = await chatComplete(tool.systemPrompt, currentInput, "gpt-4o");
+      results.push({ tool_id: step.tool_id, tool_name: tool.label, input: currentInput.slice(0,100), output });
+      currentInput = output; // chain output as next input
+    } catch(e) {
+      results.push({ tool_id: step.tool_id, tool_name: tool.label, error: e.message });
+      break;
+    }
+  }
+
+  const finalOutput = results[results.length-1]?.output || "";
+  saveProject(req.user.id, `Workflow: ${input.slice(0,50)}`, 'workflow', input, finalOutput);
+  res.json({ results, final_output: finalOutput });
+}));
+
+// ─────────────────────────────────────────────
+// 🎤 VOICE CLONING — ElevenLabs
+// ─────────────────────────────────────────────
+app.post("/api/voice/clone-tts", requireAuth, requireQuota, aiLimiter, wrap(async (req, res) => {
+  const { text, voice_id } = req.body;
+  if(!text) return res.status(400).json({ error:"Missing text" });
+
+  const elevenKey = process.env.ELEVENLABS_API_KEY;
+  if(!elevenKey) {
+    // Fallback to OpenAI TTS
+    const speech = await openai.audio.speech.create({ model:"tts-1", voice:"nova", input:text.slice(0,4096) });
+    const buffer = Buffer.from(await speech.arrayBuffer());
+    return res.json({ audio: buffer.toString("base64"), format:"mp3", provider:"openai" });
+  }
+
+  // ElevenLabs TTS
+  const vid = voice_id || "21m00Tcm4TlvDq8ikWAM"; // default Rachel voice
+  const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${vid}`, {
+    method:"POST",
+    headers:{"Content-Type":"application/json","xi-api-key":elevenKey},
+    body:JSON.stringify({text:text.slice(0,2500), model_id:"eleven_multilingual_v2", voice_settings:{stability:.5,similarity_boost:.75}})
+  });
+  if(!r.ok) throw new Error("ElevenLabs API error");
+  const buf = Buffer.from(await r.arrayBuffer());
+  res.json({ audio: buf.toString("base64"), format:"mp3", provider:"elevenlabs" });
+}));
+
+app.get("/api/voice/list", requireAuth, wrap(async (req, res) => {
+  const elevenKey = process.env.ELEVENLABS_API_KEY;
+  if(!elevenKey) return res.json({ voices:[
+    {id:"alloy",name:"Alloy"},
+    {id:"nova",name:"Nova"},
+    {id:"echo",name:"Echo"},
+    {id:"fable",name:"Fable"},
+    {id:"onyx",name:"Onyx"},
+  ]});
+
+  const r = await fetch("https://api.elevenlabs.io/v1/voices",{
+    headers:{"xi-api-key":elevenKey}
+  });
+  const d = await r.json();
+  res.json({ voices: (d.voices||[]).map(v=>({id:v.voice_id, name:v.name, preview_url:v.preview_url})) });
+}));
 app.use((err,_req,res,_next) => {
   console.error("❌", err.message || err);
   if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error:"File too large." });
