@@ -112,6 +112,77 @@ const TOOLS = [
   {id:'essay-writer',cat:'students',e:'📝',name:'Essay Writer'},
   {id:'translate-explain',cat:'students',e:'🌐',name:'Translate + Explain'},
   {id:'summary-by-level',cat:'students',e:'📊',name:'Summary by Level'},
+
+  // ── NEW TOOLS ────────────────────────────────
+
+  // AI ESSENTIALS (+4)
+  {id:'fact-checker',cat:'ai',e:'🔍',name:'Fact Checker'},
+  {id:'bias-detector',cat:'ai',e:'⚖️',name:'Bias Detector'},
+  {id:'argument-builder',cat:'ai',e:'🗣️',name:'Argument Builder'},
+  {id:'analogy-maker',cat:'ai',e:'🔗',name:'Analogy Maker'},
+
+  // CODE (+4)
+  {id:'regex-builder',cat:'code',e:'🔤',name:'Regex Builder'},
+  {id:'docker-helper',cat:'code',e:'🐳',name:'Docker Helper'},
+  {id:'security-audit',cat:'code',e:'🔒',name:'Security Audit'},
+  {id:'architecture-planner',cat:'code',e:'🏗️',name:'Architecture Planner'},
+
+  // BUSINESS (+4)
+  {id:'invoice-writer',cat:'business',e:'🧾',name:'Invoice Writer'},
+  {id:'job-description',cat:'business',e:'💼',name:'Job Description'},
+  {id:'meeting-agenda',cat:'business',e:'📋',name:'Meeting Agenda'},
+  {id:'press-release',cat:'business',e:'📰',name:'Press Release'},
+
+  // CONTENT (+4)
+  {id:'thread-writer',cat:'content',e:'🧵',name:'Twitter Thread'},
+  {id:'newsletter',cat:'content',e:'📧',name:'Newsletter'},
+  {id:'product-description',cat:'content',e:'🛍️',name:'Product Description'},
+  {id:'bio-writer',cat:'content',e:'👤',name:'Bio Writer'},
+
+  // MEDIA (+2)
+  {id:'infographic-plan',cat:'media',e:'📊',name:'Infographic Planner'},
+  {id:'photo-caption',cat:'media',e:'📸',name:'Photo Caption'},
+
+  // AUDIO (+2)
+  {id:'song-lyrics',cat:'audio',e:'🎵',name:'Song Lyrics'},
+  {id:'rap-generator',cat:'audio',e:'🎤',name:'Rap Generator'},
+
+  // PRODUCTIVITY (+3)
+  {id:'meeting-notes',cat:'productivity',e:'📝',name:'Meeting Notes'},
+  {id:'okr-planner',cat:'productivity',e:'🎯',name:'OKR Planner'},
+  {id:'feedback-writer',cat:'productivity',e:'💬',name:'Feedback Writer'},
+
+  // STUDENTS (+2)
+  {id:'thesis-helper',cat:'students',e:'📚',name:'Thesis Helper'},
+  {id:'citation-generator',cat:'students',e:'📖',name:'Citation Generator'},
+
+  // ── NEW CATEGORIES ───────────────────────────
+
+  // HEALTH & WELLNESS
+  {id:'meal-planner',cat:'health',e:'🥗',name:'Meal Planner'},
+  {id:'workout-plan',cat:'health',e:'💪',name:'Workout Plan'},
+  {id:'mental-health-tips',cat:'health',e:'🧘',name:'Mental Health Tips'},
+  {id:'symptom-checker',cat:'health',e:'🏥',name:'Symptom Info'},
+  {id:'sleep-optimizer',cat:'health',e:'😴',name:'Sleep Optimizer'},
+  {id:'nutrition-analyzer',cat:'health',e:'🥦',name:'Nutrition Analyzer'},
+
+  // FINANCE
+  {id:'budget-planner',cat:'finance',e:'💰',name:'Budget Planner'},
+  {id:'investment-explainer',cat:'finance',e:'📈',name:'Investment Explainer'},
+  {id:'tax-tips',cat:'finance',e:'🧾',name:'Tax Tips'},
+  {id:'financial-goal',cat:'finance',e:'🎯',name:'Financial Goals'},
+  {id:'crypto-explainer',cat:'finance',e:'₿',name:'Crypto Explainer'},
+
+  // TRAVEL
+  {id:'trip-planner',cat:'travel',e:'✈️',name:'Trip Planner'},
+  {id:'packing-list',cat:'travel',e:'🧳',name:'Packing List'},
+  {id:'travel-budget',cat:'travel',e:'💵',name:'Travel Budget'},
+  {id:'local-guide',cat:'travel',e:'🗺️',name:'Local Guide'},
+
+  // FOOD
+  {id:'recipe-generator',cat:'food',e:'👨‍🍳',name:'Recipe Generator'},
+  {id:'ingredient-substitute',cat:'food',e:'🔄',name:'Ingredient Substitute'},
+  {id:'diet-planner',cat:'food',e:'🥙',name:'Diet Planner'},
 ];
 
 // ── STATE ─────────────────────────────────────
@@ -423,6 +494,16 @@ function selectCat(btn,cat){
   document.querySelectorAll('.cat-tab').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
   renderToolList(cat);
+}
+
+function selectCat2(cat){
+  S.currentCat=cat;
+  document.querySelectorAll('.cat-tab').forEach(b=>b.classList.remove('active'));
+  renderToolList(cat);
+  closeSidebar();
+  const labels={health:'🏥 Health & Wellness',finance:'💰 Finance',travel:'✈️ Travel',food:'🍕 Food & Recipes'};
+  document.getElementById('tool-label').textContent=labels[cat]||cat;
+  document.getElementById('tool-sub').textContent=TOOLS.filter(t=>t.cat===cat).length+' tools';
 }
 
 function renderToolList(cat){
