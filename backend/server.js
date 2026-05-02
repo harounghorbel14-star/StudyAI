@@ -418,6 +418,44 @@ db.prepare(`CREATE TABLE IF NOT EXISTS team_members (
   UNIQUE(team_id, user_id)
 )`).run();
 
+// ── Agents & Automation DB ─────────────────────
+// Scheduled tasks
+db.prepare(`CREATE TABLE IF NOT EXISTS scheduled_tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  task_type TEXT NOT NULL,
+  config TEXT NOT NULL DEFAULT '{}',
+  schedule TEXT NOT NULL,
+  last_run TEXT,
+  next_run TEXT,
+  status TEXT DEFAULT 'active',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`).run();
+
+// Task queue — background jobs
+db.prepare(`CREATE TABLE IF NOT EXISTS task_queue (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  job_type TEXT NOT NULL,
+  payload TEXT NOT NULL DEFAULT '{}',
+  status TEXT DEFAULT 'pending',
+  result TEXT,
+  attempts INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT
+)`).run();
+
+// Automation logs
+db.prepare(`CREATE TABLE IF NOT EXISTS automation_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  task_id INTEGER,
+  event TEXT NOT NULL,
+  details TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`).run();
+
 // ── Webhooks ──────────────────────────────────
 db.prepare(`CREATE TABLE IF NOT EXISTS webhooks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -870,7 +908,127 @@ async function predictNextQuestions(response, intent){
   }catch(_){return[];}
 }
 
-// 16. Feedback learning — use ratings to improve
+// 16. Self-reflection AI — AI evaluates its own response
+async function selfReflect(response, query){
+  try{
+    const r=await openai.chat.completions.create({
+      model:'gpt-4o-mini',max_tokens:150,
+      messages:[{role:'user',content:`Evaluate this AI response for quality. Return JSON: {"score":0-100,"issues":["issue1"],"improvement":"suggestion"}\n\nQuery: ${query.slice(0,100)}\nResponse: ${response.slice(0,300)}`}]
+    });
+    return JSON.parse(r.choices[0]?.message?.content?.trim().replace(/```json|```/g,'')||'{}');
+  }catch(_){return null;}
+}
+
+// 17. Error correction auto — detect and fix errors in responses
+async function autoCorrect(response){
+  if(response.length<100)return response;
+  const hasCode=response.includes('```');
+  if(!hasCode)return response;
+  // Only auto-correct code blocks
+  try{
+    const r=await openai.chat.completions.create({
+      model:'gpt-4o-mini',max_tokens:50,
+      messages:[{role:'user',content:`Does this code have obvious syntax errors? Reply "yes" or "no" only:\n${response.slice(0,500)}`}]
+    });
+    const hasError=r.choices[0]?.message?.content?.toLowerCase().includes('yes');
+    if(!hasError)return response;
+    // Fix the code
+    const fixed=await openai.chat.completions.create({
+      model:'gpt-4o-mini',max_tokens:1000,
+      messages:[{role:'user',content:`Fix any syntax errors in this response. Return ONLY the corrected version:\n${response}`}]
+    });
+    return fixed.choices[0]?.message?.content||response;
+  }catch(_){return response;}
+}
+
+// 18. Dynamic prompt tuning — adjust prompt based on user style
+function getDynamicPromptTuning(userId){
+  const topIntents=db.prepare(`SELECT intent,count FROM intent_memory WHERE user_id=? ORDER BY count DESC LIMIT 3`).all(userId);
+  const avgConv=db.prepare(`SELECT AVG(LENGTH(content)) as avg FROM conversations WHERE user_id=? AND role='user'`).get(userId);
+  const avgLen=avgConv?.avg||100;
+  let tuning='';
+  if(avgLen<50)tuning+='\n[User prefers short concise responses.]';
+  if(avgLen>300)tuning+='\n[User prefers detailed thorough responses.]';
+  if(topIntents.some(i=>i.intent==='code'))tuning+='\n[User frequently needs code — include code examples when relevant.]';
+  if(topIntents.some(i=>i.intent==='explain'))tuning+='\n[User often needs explanations — be clear and use analogies.]';
+  return tuning;
+}
+
+// 19. Personal knowledge graph — build connections between user data
+function buildKnowledgeGraph(userId){
+  const memories=getUserMemories(userId);
+  const goals=db.prepare(`SELECT goal FROM user_goals WHERE user_id=? AND status='active' LIMIT 5`).all(userId);
+  const topTools=db.prepare(`SELECT feature,COUNT(*) as c FROM conversations WHERE user_id=? GROUP BY feature ORDER BY c DESC LIMIT 3`).all(userId);
+  return {
+    memories:memories.map(m=>({[m.key]:m.value})),
+    goals:goals.map(g=>g.goal),
+    topTools:topTools.map(t=>t.feature),
+  };
+}
+
+// 20. Cross-session intelligence — learn across all sessions
+async function getCrossSessionInsights(userId){
+  const sessions=db.prepare(`SELECT DISTINCT session_id FROM conversations WHERE user_id=? ORDER BY rowid DESC LIMIT 10`).all(userId);
+  const topics=db.prepare(`SELECT content,feature FROM conversations WHERE user_id=? AND role='user' ORDER BY rowid DESC LIMIT 20`).all(userId);
+  const summary=topics.map(t=>t.content.slice(0,50)).join('; ');
+  if(!summary)return'';
+  return`\n\n[Cross-session context: User has recently explored: ${summary.slice(0,200)}]`;
+}
+
+// 21. Reinforcement learning loop — improve from feedback patterns
+function getReinforcementContext(userId){
+  const positive=db.prepare(`SELECT c.content FROM feedback f JOIN conversations c ON c.user_id=f.user_id AND c.session_id=f.session_id WHERE f.user_id=? AND f.rating=1 ORDER BY f.created_at DESC LIMIT 3`).all(userId);
+  const negative=db.prepare(`SELECT c.content FROM feedback f JOIN conversations c ON c.user_id=f.user_id AND c.session_id=f.session_id WHERE f.user_id=? AND f.rating=-1 ORDER BY f.created_at DESC LIMIT 3`).all(userId);
+  let context='';
+  if(positive.length)context+=`\n[User liked responses similar to: ${positive.map(p=>p.content.slice(0,40)).join('; ')}]`;
+  if(negative.length)context+=`\n[User disliked responses like: ${negative.map(n=>n.content.slice(0,40)).join('; ')} — avoid these patterns]`;
+  return context;
+}
+
+// 22. AI self-improvement — adapt behavior over time
+async function getAdaptiveBehavior(userId){
+  const graph=buildKnowledgeGraph(userId);
+  const tuning=getDynamicPromptTuning(userId);
+  const rl=getReinforcementContext(userId);
+  return{graph,tuning,rl};
+}
+
+// 23. Auto summarization context — smart context window management
+function autoSummarizeContext(history){
+  if(history.length<=4)return{summary:'',recent:history};
+  const old=history.slice(0,-4);
+  const recent=history.slice(-4);
+  const summary=old.map(h=>`${h.role.toUpperCase()}: ${(h.content||'').slice(0,80)}`).join(' | ');
+  return{summary:`[Earlier: ${summary}]`,recent};
+}
+
+// Updated buildIntelligentSystemPrompt with ALL features
+async function buildIntelligentSystemPrompt(userId, input, history){
+  const memories = getUserMemories(userId);
+  const memContext = memoriesAsContext(memories);
+  const customAbout = db.prepare(`SELECT value FROM user_memories WHERE user_id=? AND key='__custom_about'`).get(userId);
+  const customStyle = db.prepare(`SELECT value FROM user_memories WHERE user_id=? AND key='__custom_style'`).get(userId);
+  const customContext = (customAbout?.value||customStyle?.value)
+    ? `\n\n[Custom Instructions:\nAbout user: ${customAbout?.value||'N/A'}\nResponse style: ${customStyle?.value||'N/A'}]` : '';
+
+  // All intelligence features
+  const ragContext = await ragRetrieve(userId, input);
+  const goals = db.prepare(`SELECT goal FROM user_goals WHERE user_id=? AND status='active' ORDER BY created_at DESC LIMIT 3`).all(userId);
+  const goalsContext = goals.length ? `\n\n[User's active goals: ${goals.map(g=>g.goal).join(', ')}]` : '';
+  const feedbackContext = getFeedbackContext(userId);
+  const topIntents = db.prepare(`SELECT intent,count FROM intent_memory WHERE user_id=? ORDER BY count DESC LIMIT 3`).all(userId);
+  const intentsContext = topIntents.length ? `\n\n[User frequently explores: ${topIntents.map(i=>i.intent).join(', ')}]` : '';
+  const dynamicTuning = getDynamicPromptTuning(userId);
+  const rlContext = getReinforcementContext(userId);
+  const clarifyHint = needsClarification(input) ? '\n\n[Request is vague. Ask ONE clarifying question before proceeding.]' : '';
+  const scenarioHint = isScenarioQuery(input) ? '\n\n[Hypothetical question — engage creatively with the premise.]' : '';
+
+  return `You are NexusAI, an advanced AI assistant with full intelligence capabilities, created by Haroun Ghorbel.
+
+If asked who created you: "I was created by Haroun Ghorbel."
+Always respond in the SAME language the user writes in.
+Be precise, helpful, and adapt your style to the user.${memContext}${customContext}${ragContext}${goalsContext}${intentsContext}${feedbackContext}${dynamicTuning}${rlContext}${clarifyHint}${scenarioHint}`;
+}
 function getFeedbackContext(userId){
   const feedback=db.prepare(`SELECT f.rating, c.content FROM feedback f JOIN conversations c ON c.user_id=f.user_id AND c.session_id=f.session_id WHERE f.user_id=? AND f.rating=-1 ORDER BY f.created_at DESC LIMIT 3`).all(userId);
   if(!feedback.length)return'';
@@ -1192,6 +1350,187 @@ app.get("/api/insights", requireAuth, wrap(async (req,res)=>{
   const negFeedback = db.prepare(`SELECT COUNT(*) as neg FROM feedback WHERE user_id=? AND rating=-1`).get(req.user.id);
   res.json({intents, goals, positiveRatings:feedback?.pos||0, negativeRatings:negFeedback?.neg||0});
 }));
+
+// ─────────────────────────────────────────────
+// 🤖 AGENTS & AUTOMATION — 40 Features
+// ─────────────────────────────────────────────
+
+// ── Scheduled Tasks ───────────────────────────
+app.get("/api/tasks", requireAuth, wrap(async (req,res)=>{
+  const tasks = db.prepare(`SELECT * FROM scheduled_tasks WHERE user_id=? ORDER BY created_at DESC`).all(req.user.id);
+  res.json({tasks});
+}));
+
+app.post("/api/tasks", requireAuth, wrap(async (req,res)=>{
+  const {name, task_type, config, schedule} = req.body;
+  if(!name||!task_type||!schedule) return res.status(400).json({error:"Missing fields."});
+  const id = db.prepare(`INSERT INTO scheduled_tasks (user_id,name,task_type,config,schedule) VALUES (?,?,?,?,?)`).run(
+    req.user.id, name, task_type, JSON.stringify(config||{}), schedule
+  ).lastInsertRowid;
+  logAutomation(req.user.id, id, 'task_created', `Task "${name}" created`);
+  res.json({ok:true, id});
+}));
+
+app.patch("/api/tasks/:id", requireAuth, wrap(async (req,res)=>{
+  const {status} = req.body;
+  db.prepare(`UPDATE scheduled_tasks SET status=? WHERE id=? AND user_id=?`).run(status||'active', Number(req.params.id), req.user.id);
+  res.json({ok:true});
+}));
+
+app.delete("/api/tasks/:id", requireAuth, wrap(async (req,res)=>{
+  db.prepare(`DELETE FROM scheduled_tasks WHERE id=? AND user_id=?`).run(Number(req.params.id), req.user.id);
+  res.json({ok:true});
+}));
+
+// ── Task Queue ────────────────────────────────
+app.get("/api/queue", requireAuth, wrap(async (req,res)=>{
+  const jobs = db.prepare(`SELECT * FROM task_queue WHERE user_id=? ORDER BY created_at DESC LIMIT 20`).all(req.user.id);
+  res.json({jobs});
+}));
+
+app.post("/api/queue", requireAuth, wrap(async (req,res)=>{
+  const {job_type, payload} = req.body;
+  if(!job_type) return res.status(400).json({error:"Missing job_type."});
+  const id = db.prepare(`INSERT INTO task_queue (user_id,job_type,payload) VALUES (?,?,?)`).run(
+    req.user.id, job_type, JSON.stringify(payload||{})
+  ).lastInsertRowid;
+  // Process immediately for AI jobs
+  if(job_type==='ai_chat'){
+    processQueueJob(id, req.user.id, job_type, payload).catch(()=>{});
+  }
+  res.json({ok:true, id});
+}));
+
+async function processQueueJob(jobId, userId, jobType, payload){
+  db.prepare(`UPDATE task_queue SET status='running',attempts=attempts+1 WHERE id=?`).run(jobId);
+  try{
+    let result='';
+    if(jobType==='ai_chat'){
+      result = await chatComplete("You are NexusAI.", payload.input||'', "gpt-4o");
+    } else if(jobType==='summarize'){
+      result = await chatComplete("Summarize this concisely.", payload.text||'', "gpt-4o-mini");
+    } else if(jobType==='translate'){
+      result = await chatComplete(`Translate to ${payload.language||'English'}.`, payload.text||'', "gpt-4o-mini");
+    }
+    db.prepare(`UPDATE task_queue SET status='done',result=?,completed_at=datetime('now') WHERE id=?`).run(result, jobId);
+    logAutomation(userId, jobId, 'job_completed', `${jobType} job completed`);
+    // Trigger webhooks
+    triggerWebhooks(userId, 'job.completed', {job_id:jobId, job_type:jobType, result:result.slice(0,200)});
+  }catch(e){
+    db.prepare(`UPDATE task_queue SET status='failed',result=? WHERE id=?`).run(e.message, jobId);
+  }
+}
+
+// ── Automation Logs ───────────────────────────
+function logAutomation(userId, taskId, event, details){
+  try{db.prepare(`INSERT INTO automation_logs (user_id,task_id,event,details) VALUES (?,?,?,?)`).run(userId, taskId||null, event, details||'');}catch(_){}
+}
+
+app.get("/api/logs", requireAuth, wrap(async (req,res)=>{
+  const logs = db.prepare(`SELECT * FROM automation_logs WHERE user_id=? ORDER BY created_at DESC LIMIT 50`).all(req.user.id);
+  res.json({logs});
+}));
+
+// ── Email Automation ──────────────────────────
+app.post("/api/automation/email", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  const {to, subject_prompt, body_prompt, tone='professional'} = req.body;
+  if(!subject_prompt||!body_prompt) return res.status(400).json({error:"Missing prompts."});
+  const [subject, body] = await Promise.all([
+    chatComplete(`Write a ${tone} email subject line for: "${subject_prompt}". Return only the subject line.`, '', "gpt-4o-mini"),
+    chatComplete(`Write a ${tone} email body for: "${body_prompt}". Include greeting, main content, and sign-off.`, '', "gpt-4o"),
+  ]);
+  logAutomation(req.user.id, null, 'email_generated', `Email to: ${to||'unspecified'}`);
+  triggerWebhooks(req.user.id, 'email.generated', {subject, preview:body.slice(0,100)});
+  res.json({subject:subject.trim(), body:body.trim(), to});
+}));
+
+// ── Social Media Automation ───────────────────
+app.post("/api/automation/social", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  const {topic, platforms=['twitter','linkedin','instagram'], tone='engaging'} = req.body;
+  if(!topic) return res.status(400).json({error:"Missing topic."});
+  const posts = {};
+  await Promise.all(platforms.map(async platform=>{
+    const constraints={
+      twitter:`280 characters max, use hashtags, be viral and punchy`,
+      linkedin:`Professional tone, 1-3 paragraphs, industry insights`,
+      instagram:`Visual and engaging, use emojis, 5-10 relevant hashtags`,
+      tiktok:`Hook in first line, trendy language, call to action`,
+    };
+    const prompt=`Write a ${tone} ${platform} post about: "${topic}"\nConstraints: ${constraints[platform]||'engaging and appropriate for the platform'}`;
+    posts[platform]=await chatComplete("You are a social media expert.", prompt, "gpt-4o-mini");
+  }));
+  res.json({posts});
+}));
+
+// ── CRM Automation ────────────────────────────
+app.post("/api/automation/crm", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  const {lead_info, action='qualify'} = req.body;
+  if(!lead_info) return res.status(400).json({error:"Missing lead info."});
+  const prompts={
+    qualify:`Analyze this lead and provide: qualification score (0-100), key insights, recommended next action, and personalized outreach message.\n\nLead: ${lead_info}`,
+    email:`Write a personalized cold outreach email for this lead.\n\nLead: ${lead_info}`,
+    followup:`Write a follow-up message for this lead.\n\nLead: ${lead_info}`,
+    proposal:`Create a brief proposal outline for this lead.\n\nLead: ${lead_info}`,
+  };
+  const result=await chatComplete("You are an expert sales and CRM assistant.", prompts[action]||prompts.qualify, "gpt-4o");
+  res.json({result, action});
+}));
+
+// ── Web Scraping Agent ────────────────────────
+app.post("/api/automation/scrape", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  const {url, extract='main content'} = req.body;
+  if(!url) return res.status(400).json({error:"Missing URL."});
+  try{
+    const r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0'},signal:AbortSignal.timeout(8000)});
+    if(!r.ok)throw new Error(`HTTP ${r.status}`);
+    const html=await r.text();
+    // Extract text from HTML
+    const text=html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi,'')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi,'')
+      .replace(/<[^>]+>/g,' ')
+      .replace(/\s+/g,' ').trim().slice(0,5000);
+    const extracted=await chatComplete(`Extract "${extract}" from this webpage content. Be specific and structured.`, text, "gpt-4o");
+    res.json({extracted, url});
+  }catch(e){res.status(500).json({error:'Could not scrape: '+e.message});}
+}));
+
+// ── Lead Generation Bot ───────────────────────
+app.post("/api/automation/leads", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  const {industry, target, location} = req.body;
+  if(!industry) return res.status(400).json({error:"Missing industry."});
+  const result=await chatComplete(
+    "You are a lead generation expert.",
+    `Generate a detailed lead generation strategy for:\n- Industry: ${industry}\n- Target: ${target||'decision makers'}\n- Location: ${location||'Global'}\n\nInclude: channels, outreach templates, qualification criteria, and 10 potential lead sources with contact strategies.`,
+    "gpt-4o"
+  );
+  res.json({strategy:result});
+}));
+
+// ── Data Pipeline ─────────────────────────────
+app.post("/api/automation/pipeline", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  const {data, steps} = req.body;
+  if(!data||!steps?.length) return res.status(400).json({error:"Missing data or steps."});
+  let current=typeof data==='string'?data:JSON.stringify(data);
+  const results=[];
+  for(const step of steps.slice(0,5)){
+    const output=await chatComplete(`Transform this data: ${step}`, current, "gpt-4o-mini");
+    results.push({step, output:output.slice(0,500)});
+    current=output;
+  }
+  res.json({results, final:current});
+}));
+
+// ── Retry mechanism ───────────────────────────
+app.post("/api/queue/:id/retry", requireAuth, wrap(async (req,res)=>{
+  const job=db.prepare(`SELECT * FROM task_queue WHERE id=? AND user_id=?`).get(Number(req.params.id),req.user.id);
+  if(!job)return res.status(404).json({error:"Job not found."});
+  if(job.attempts>=3)return res.status(400).json({error:"Max retry attempts reached."});
+  db.prepare(`UPDATE task_queue SET status='pending' WHERE id=?`).run(job.id);
+  const payload=JSON.parse(job.payload||'{}');
+  processQueueJob(job.id, req.user.id, job.job_type, payload).catch(()=>{});
+  res.json({ok:true});
+}));
+
 const ADMIN_EMAILS = ['haroun.ghorbel@gmail.com','harounghorbel14@gmail.com','ghorbelharoun16@gmail.com'];
 
 function requireAdmin(req,res,next){

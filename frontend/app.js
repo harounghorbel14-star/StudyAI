@@ -2161,6 +2161,194 @@ async function navigate_insights(){
   }catch(e){toast(e.message,'error');}
 }
 
+// ── 🤖 AGENTS & AUTOMATION UI ─────────────────
+
+async function navigate_automation(){
+  S.page='automation';closeSidebar();
+  document.getElementById('tool-label').textContent='⚡ Automation';
+  document.getElementById('messages').innerHTML=`<div class="page-wrap">
+    <div class="page-title">⚡ Automation Hub</div>
+    <p style="color:var(--t2);font-size:14px;margin-bottom:20px">Automate repetitive tasks with AI.</p>
+    <div class="agents-grid">
+      <div class="agent-card" onclick="autoEmail()">
+        <div class="agent-emoji">📧</div>
+        <div class="agent-card-name">Email Generator</div>
+        <div class="agent-card-desc">Generate professional emails automatically</div>
+        <button class="agent-run-btn">Run →</button>
+      </div>
+      <div class="agent-card" onclick="autoSocial()">
+        <div class="agent-emoji">📱</div>
+        <div class="agent-card-name">Social Media</div>
+        <div class="agent-card-desc">Create posts for all platforms at once</div>
+        <button class="agent-run-btn">Run →</button>
+      </div>
+      <div class="agent-card" onclick="autoCRM()">
+        <div class="agent-emoji">💼</div>
+        <div class="agent-card-name">CRM Automation</div>
+        <div class="agent-card-desc">Qualify leads and generate outreach</div>
+        <button class="agent-run-btn">Run →</button>
+      </div>
+      <div class="agent-card" onclick="autoScrape()">
+        <div class="agent-emoji">🕷️</div>
+        <div class="agent-card-name">Web Scraper</div>
+        <div class="agent-card-desc">Extract data from any website</div>
+        <button class="agent-run-btn">Run →</button>
+      </div>
+      <div class="agent-card" onclick="autoLeads()">
+        <div class="agent-emoji">🎯</div>
+        <div class="agent-card-name">Lead Generation</div>
+        <div class="agent-card-desc">Generate lead strategies and lists</div>
+        <button class="agent-run-btn">Run →</button>
+      </div>
+      <div class="agent-card" onclick="navigate_tasks()">
+        <div class="agent-emoji">⏰</div>
+        <div class="agent-card-name">Scheduled Tasks</div>
+        <div class="agent-card-desc">Automate recurring AI tasks</div>
+        <button class="agent-run-btn">View →</button>
+      </div>
+      <div class="agent-card" onclick="navigate_queue()">
+        <div class="agent-emoji">📋</div>
+        <div class="agent-card-name">Job Queue</div>
+        <div class="agent-card-desc">Monitor background AI jobs</div>
+        <button class="agent-run-btn">View →</button>
+      </div>
+      <div class="agent-card" onclick="navigate_logs()">
+        <div class="agent-emoji">📊</div>
+        <div class="agent-card-name">Automation Logs</div>
+        <div class="agent-card-desc">Track all automation activity</div>
+        <button class="agent-run-btn">View →</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function autoEmail(){
+  const subject=prompt('Email subject topic:');if(!subject)return;
+  const body=prompt('Email body/purpose:');if(!body)return;
+  const tone=prompt('Tone (professional/friendly/formal):',)||'professional';
+  document.getElementById('tool-label').textContent='📧 Email Generator';
+  document.getElementById('messages').innerHTML='';
+  addMsg({role:'user',text:`Generate email:\nSubject: ${subject}\nBody: ${body}\nTone: ${tone}`});showTyping();
+  try{
+    const d=await api('/api/automation/email',{method:'POST',body:{subject_prompt:subject,body_prompt:body,tone}});
+    hideTyping();
+    addMsg({role:'assistant',text:`**📧 Generated Email:**\n\n**Subject:** ${d.subject}\n\n**Body:**\n${d.body}`});
+  }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+}
+
+async function autoSocial(){
+  const topic=prompt('Topic for social media posts:');if(!topic)return;
+  addMsg({role:'user',text:`Create social media posts about: ${topic}`});showTyping();
+  try{
+    const d=await api('/api/automation/social',{method:'POST',body:{topic,platforms:['twitter','linkedin','instagram','tiktok']}});
+    hideTyping();
+    let text='**📱 Social Media Posts:**\n\n';
+    for(const [platform,post] of Object.entries(d.posts)){
+      text+=`**${platform.toUpperCase()}:**\n${post}\n\n`;
+    }
+    addMsg({role:'assistant',text});
+  }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+}
+
+async function autoCRM(){
+  const lead=prompt('Describe the lead (name, company, role, context):');if(!lead)return;
+  const action=prompt('Action (qualify/email/followup/proposal):',)||'qualify';
+  addMsg({role:'user',text:`CRM: ${action} lead: ${lead}`});showTyping();
+  try{
+    const d=await api('/api/automation/crm',{method:'POST',body:{lead_info:lead,action}});
+    hideTyping();addMsg({role:'assistant',text:`**💼 CRM ${action}:**\n\n${d.result}`});
+  }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+}
+
+async function autoScrape(){
+  const url=prompt('Website URL to scrape:');if(!url)return;
+  const extract=prompt('What to extract:','main content')||'main content';
+  addMsg({role:'user',text:`🕷️ Scrape: ${url}\nExtract: ${extract}`});showTyping();
+  try{
+    const d=await api('/api/automation/scrape',{method:'POST',body:{url,extract}});
+    hideTyping();addMsg({role:'assistant',text:`**🕷️ Extracted from ${url}:**\n\n${d.extracted}`});
+  }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+}
+
+async function autoLeads(){
+  const industry=prompt('Industry:');if(!industry)return;
+  const target=prompt('Target audience:','decision makers')||'decision makers';
+  addMsg({role:'user',text:`🎯 Lead generation for ${industry} targeting ${target}`});showTyping();
+  try{
+    const d=await api('/api/automation/leads',{method:'POST',body:{industry,target}});
+    hideTyping();addMsg({role:'assistant',text:`**🎯 Lead Generation Strategy:**\n\n${d.strategy}`});
+  }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+}
+
+async function navigate_tasks(){
+  S.page='tasks';
+  document.getElementById('messages').innerHTML='<div class="page-wrap"><div class="page-title">⏰ Scheduled Tasks</div><div style="color:var(--t2)">Loading...</div></div>';
+  try{
+    const {tasks=[]}=await api('/api/tasks');
+    document.getElementById('messages').innerHTML=`<div class="page-wrap">
+      <div class="page-title">⏰ Scheduled Tasks</div>
+      <button onclick="createTask()" style="background:var(--grad);color:#000;border:none;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:16px">+ Create Task</button>
+      ${tasks.length?tasks.map(t=>`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:8px;display:flex;align-items:center;gap:12px">
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:500">${esc(t.name)}</div>
+          <div style="font-size:11px;color:var(--t3)">${t.task_type} · ${t.schedule} · ${t.status}</div>
+        </div>
+        <span style="font-size:11px;padding:3px 8px;border-radius:99px;background:${t.status==='active'?'#c6f13520':'var(--bg3)'};color:${t.status==='active'?'var(--a1)':'var(--t3)'}">${t.status}</span>
+      </div>`).join(''):'<div style="color:var(--t2);padding:40px;text-align:center">No scheduled tasks yet.</div>'}
+    </div>`;
+  }catch(e){toast(e.message,'error');}
+}
+
+async function createTask(){
+  const name=prompt('Task name:');if(!name)return;
+  const type=prompt('Task type (ai_chat/summarize/translate):','ai_chat')||'ai_chat';
+  const schedule=prompt('Schedule (daily/weekly/hourly):','daily')||'daily';
+  const input=prompt('Task input/prompt:');if(!input)return;
+  await api('/api/tasks',{method:'POST',body:{name,task_type:type,config:{input},schedule}});
+  toast('Task created! ✅','success');navigate_tasks();
+}
+
+async function navigate_queue(){
+  S.page='queue';
+  document.getElementById('messages').innerHTML='<div class="page-wrap"><div class="page-title">📋 Job Queue</div><div style="color:var(--t2)">Loading...</div></div>';
+  try{
+    const {jobs=[]}=await api('/api/queue');
+    document.getElementById('messages').innerHTML=`<div class="page-wrap">
+      <div class="page-title">📋 Background Jobs</div>
+      ${jobs.length?jobs.map(j=>`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:12px">
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:500">${j.job_type}</div>
+          <div style="font-size:11px;color:var(--t3)">${j.status} · ${new Date(j.created_at).toLocaleString()}</div>
+          ${j.result?`<div style="font-size:12px;color:var(--t2);margin-top:4px">${esc(j.result.slice(0,80))}</div>`:''}
+        </div>
+        <span style="font-size:11px;padding:3px 8px;border-radius:99px;background:${j.status==='done'?'#c6f13520':j.status==='failed'?'#f8717120':'var(--bg3)'};color:${j.status==='done'?'var(--a1)':j.status==='failed'?'#f87171':'var(--t3)'}">${j.status}</span>
+        ${j.status==='failed'?`<button onclick="retryJob(${j.id})" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:5px;cursor:pointer;background:none;color:var(--t2)">Retry</button>`:''}
+      </div>`).join(''):'<div style="color:var(--t2);padding:40px;text-align:center">No jobs yet.</div>'}
+    </div>`;
+  }catch(e){toast(e.message,'error');}
+}
+
+async function retryJob(id){
+  await api('/api/queue/'+id+'/retry',{method:'POST'});
+  toast('Job retrying...','success');navigate_queue();
+}
+
+async function navigate_logs(){
+  S.page='logs';
+  document.getElementById('messages').innerHTML='<div class="page-wrap"><div class="page-title">📊 Automation Logs</div><div style="color:var(--t2)">Loading...</div></div>';
+  try{
+    const {logs=[]}=await api('/api/logs');
+    document.getElementById('messages').innerHTML=`<div class="page-wrap">
+      <div class="page-title">📊 Automation Logs</div>
+      ${logs.length?logs.map(l=>`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:11px;background:var(--bg3);padding:2px 8px;border-radius:99px;color:var(--a2);flex-shrink:0">${l.event}</span>
+        <span style="font-size:12px;color:var(--t2);flex:1">${esc(l.details||'')}</span>
+        <span style="font-size:11px;color:var(--t3)">${new Date(l.created_at).toLocaleTimeString()}</span>
+      </div>`).join(''):'<div style="color:var(--t2);padding:40px;text-align:center">No automation logs yet.</div>'}
+    </div>`;
+  }catch(e){toast(e.message,'error');}
+}
+
 function toggleCatGrid(){
   const overlay = document.getElementById('cat-overlay');
   const btn = document.getElementById('cat-grid-btn');
