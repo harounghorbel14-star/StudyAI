@@ -348,6 +348,69 @@ db.prepare(`CREATE TABLE IF NOT EXISTS favorites (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`).run();
 
+// ── Knowledge Base ─────────────────────────────
+db.prepare(`CREATE TABLE IF NOT EXISTS knowledge_base (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  content TEXT NOT NULL,
+  tags TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`).run();
+
+// ── API Keys ──────────────────────────────────
+db.prepare(`CREATE TABLE IF NOT EXISTS api_keys (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  key_hash TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  last_used TEXT,
+  requests INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`).run();
+
+// ── Teams ─────────────────────────────────────
+db.prepare(`CREATE TABLE IF NOT EXISTS teams (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  invite_code TEXT UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`).run();
+
+db.prepare(`CREATE TABLE IF NOT EXISTS team_members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'member',
+  joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(team_id, user_id)
+)`).run();
+
+// ── Webhooks ──────────────────────────────────
+db.prepare(`CREATE TABLE IF NOT EXISTS webhooks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  events TEXT NOT NULL DEFAULT 'all',
+  active INTEGER DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`).run();
+
+// ── Message versions ──────────────────────────
+db.prepare(`CREATE TABLE IF NOT EXISTS message_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  session_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  version INTEGER DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`).run();
+
+// ── Pay-as-you-go credits ─────────────────────
+try{db.prepare(`ALTER TABLE users ADD COLUMN credits INTEGER DEFAULT 0`).run();}catch(_){}
+try{db.prepare(`ALTER TABLE users ADD COLUMN api_enabled INTEGER DEFAULT 0`).run();}catch(_){}
+
 // ─────────────────────────────────────────────
 // 📁 UPLOAD CONFIG
 // ─────────────────────────────────────────────
@@ -851,6 +914,176 @@ app.get("/api/analytics", requireAuth, wrap(async (req,res)=>{
   const streak = db.prepare(`SELECT COUNT(DISTINCT date(created_at)) as days FROM conversations WHERE user_id=? AND created_at >= datetime('now','-7 days')`).get(userId);
   const total = db.prepare(`SELECT COUNT(*) as count FROM conversations WHERE user_id=? AND role='user'`).get(userId);
   res.json({daily, tools, streak:streak.days, total:total.count});
+}));
+
+// ─────────────────────────────────────────────
+// 📚 KNOWLEDGE BASE
+// ─────────────────────────────────────────────
+app.get("/api/kb", requireAuth, wrap(async (req,res)=>{
+  const items = db.prepare(`SELECT id,title,tags,created_at FROM knowledge_base WHERE user_id=? ORDER BY created_at DESC`).all(req.user.id);
+  res.json({items});
+}));
+app.post("/api/kb", requireAuth, wrap(async (req,res)=>{
+  const {title,content,tags} = req.body;
+  if(!title||!content) return res.status(400).json({error:"Missing title or content."});
+  const id = db.prepare(`INSERT INTO knowledge_base (user_id,title,content,tags) VALUES (?,?,?,?)`).run(req.user.id, title, content, tags||'').lastInsertRowid;
+  res.json({ok:true,id});
+}));
+app.get("/api/kb/search", requireAuth, wrap(async (req,res)=>{
+  const q = req.query.q?.trim();
+  if(!q) return res.json({results:[]});
+  const items = db.prepare(`SELECT * FROM knowledge_base WHERE user_id=? AND (title LIKE ? OR content LIKE ? OR tags LIKE ?) LIMIT 10`).all(req.user.id,`%${q}%`,`%${q}%`,`%${q}%`);
+  res.json({results:items});
+}));
+app.post("/api/kb/:id/ask", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  const item = db.prepare(`SELECT * FROM knowledge_base WHERE id=? AND user_id=?`).get(Number(req.params.id), req.user.id);
+  if(!item) return res.status(404).json({error:"Not found."});
+  const answer = await chatComplete(`You are a helpful assistant. Answer questions based on this knowledge base entry:\n\nTitle: ${item.title}\n\nContent: ${item.content}`, req.body.question||'Summarize this', "gpt-4o");
+  res.json({answer});
+}));
+app.delete("/api/kb/:id", requireAuth, wrap(async (req,res)=>{
+  db.prepare(`DELETE FROM knowledge_base WHERE id=? AND user_id=?`).run(Number(req.params.id), req.user.id);
+  res.json({ok:true});
+}));
+
+// ─────────────────────────────────────────────
+// 🔑 API ACCESS (Pro/Elite only)
+// ─────────────────────────────────────────────
+const crypto = require('crypto');
+
+app.get("/api/keys", requireAuth, wrap(async (req,res)=>{
+  const user = db.prepare(`SELECT plan FROM users WHERE id=?`).get(req.user.id);
+  if(!['pro','elite'].includes(user?.plan) && !VIP_EMAILS.includes(req.user.email))
+    return res.status(403).json({error:"API access requires Pro or Elite plan."});
+  const keys = db.prepare(`SELECT id,name,last_used,requests,created_at FROM api_keys WHERE user_id=?`).all(req.user.id);
+  res.json({keys});
+}));
+
+app.post("/api/keys", requireAuth, wrap(async (req,res)=>{
+  const user = db.prepare(`SELECT plan FROM users WHERE id=?`).get(req.user.id);
+  if(!['pro','elite'].includes(user?.plan) && !VIP_EMAILS.includes(req.user.email))
+    return res.status(403).json({error:"API access requires Pro or Elite plan."});
+  const rawKey = 'nex_'+crypto.randomBytes(24).toString('hex');
+  const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
+  const name = req.body.name||'My API Key';
+  db.prepare(`INSERT INTO api_keys (user_id,key_hash,name) VALUES (?,?,?)`).run(req.user.id, keyHash, name);
+  res.json({key: rawKey, name, note:"Save this key — it won't be shown again."});
+}));
+
+app.delete("/api/keys/:id", requireAuth, wrap(async (req,res)=>{
+  db.prepare(`DELETE FROM api_keys WHERE id=? AND user_id=?`).run(Number(req.params.id), req.user.id);
+  res.json({ok:true});
+}));
+
+// External API endpoint (authenticated by API key)
+app.post("/v1/chat", async (req,res)=>{
+  const authHeader = req.headers.authorization||'';
+  const rawKey = authHeader.replace('Bearer ','').trim();
+  if(!rawKey.startsWith('nex_')) return res.status(401).json({error:"Invalid API key."});
+  const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
+  const keyRecord = db.prepare(`SELECT * FROM api_keys WHERE key_hash=?`).get(keyHash);
+  if(!keyRecord) return res.status(401).json({error:"Invalid API key."});
+  const user = db.prepare(`SELECT * FROM users WHERE id=?`).get(keyRecord.user_id);
+  if(!user) return res.status(401).json({error:"User not found."});
+  db.prepare(`UPDATE api_keys SET last_used=datetime('now'), requests=requests+1 WHERE id=?`).run(keyRecord.id);
+  const {message, system} = req.body;
+  if(!message) return res.status(400).json({error:"Missing message."});
+  const reply = await chatComplete(system||"You are NexusAI, a helpful assistant.", message, "gpt-4o");
+  res.json({reply, model:"gpt-4o", provider:"NexusAI"});
+});
+
+// ─────────────────────────────────────────────
+// 💳 PAY-AS-YOU-GO CREDITS
+// ─────────────────────────────────────────────
+app.get("/api/credits", requireAuth, wrap(async (req,res)=>{
+  const user = db.prepare(`SELECT credits FROM users WHERE id=?`).get(req.user.id);
+  res.json({credits: user?.credits||0});
+}));
+
+app.post("/api/credits/add", requireAuth, wrap(async (req,res)=>{
+  // In production: verify payment first
+  const {amount=100} = req.body;
+  db.prepare(`UPDATE users SET credits=credits+? WHERE id=?`).run(Number(amount), req.user.id);
+  const user = db.prepare(`SELECT credits FROM users WHERE id=?`).get(req.user.id);
+  res.json({ok:true, credits:user.credits});
+}));
+
+// ─────────────────────────────────────────────
+// 👥 TEAM COLLABORATION
+// ─────────────────────────────────────────────
+app.post("/api/teams", requireAuth, wrap(async (req,res)=>{
+  const {name} = req.body;
+  if(!name) return res.status(400).json({error:"Missing team name."});
+  const invite = Math.random().toString(36).slice(2,10).toUpperCase();
+  const id = db.prepare(`INSERT INTO teams (owner_id,name,invite_code) VALUES (?,?,?)`).run(req.user.id, name, invite).lastInsertRowid;
+  db.prepare(`INSERT OR IGNORE INTO team_members (team_id,user_id,role) VALUES (?,?,'owner')`).run(id, req.user.id);
+  res.json({ok:true, id, invite_code:invite});
+}));
+
+app.get("/api/teams", requireAuth, wrap(async (req,res)=>{
+  const teams = db.prepare(`SELECT t.*,tm.role FROM teams t JOIN team_members tm ON t.id=tm.team_id WHERE tm.user_id=?`).all(req.user.id);
+  res.json({teams});
+}));
+
+app.post("/api/teams/join", requireAuth, wrap(async (req,res)=>{
+  const {invite_code} = req.body;
+  const team = db.prepare(`SELECT * FROM teams WHERE invite_code=?`).get(invite_code?.toUpperCase());
+  if(!team) return res.status(404).json({error:"Invalid invite code."});
+  db.prepare(`INSERT OR IGNORE INTO team_members (team_id,user_id,role) VALUES (?,?,'member')`).run(team.id, req.user.id);
+  res.json({ok:true, team_name:team.name});
+}));
+
+app.get("/api/teams/:id/members", requireAuth, wrap(async (req,res)=>{
+  const members = db.prepare(`SELECT u.email,tm.role,tm.joined_at FROM team_members tm JOIN users u ON tm.user_id=u.id WHERE tm.team_id=?`).all(Number(req.params.id));
+  res.json({members});
+}));
+
+// ─────────────────────────────────────────────
+// 🔔 WEBHOOKS
+// ─────────────────────────────────────────────
+app.get("/api/webhooks", requireAuth, wrap(async (req,res)=>{
+  const hooks = db.prepare(`SELECT * FROM webhooks WHERE user_id=?`).all(req.user.id);
+  res.json({webhooks:hooks});
+}));
+
+app.post("/api/webhooks", requireAuth, wrap(async (req,res)=>{
+  const {url,events='all'} = req.body;
+  if(!url) return res.status(400).json({error:"Missing URL."});
+  const id = db.prepare(`INSERT INTO webhooks (user_id,url,events) VALUES (?,?,?)`).run(req.user.id, url, events).lastInsertRowid;
+  res.json({ok:true, id});
+}));
+
+app.delete("/api/webhooks/:id", requireAuth, wrap(async (req,res)=>{
+  db.prepare(`DELETE FROM webhooks WHERE id=? AND user_id=?`).run(Number(req.params.id), req.user.id);
+  res.json({ok:true});
+}));
+
+async function triggerWebhooks(userId, event, data){
+  const hooks = db.prepare(`SELECT url FROM webhooks WHERE user_id=? AND active=1`).all(userId);
+  for(const hook of hooks){
+    fetch(hook.url,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({event, data, timestamp:new Date().toISOString()}),
+    }).catch(()=>{});
+  }
+}
+
+// ─────────────────────────────────────────────
+// 📝 VERSION HISTORY
+// ─────────────────────────────────────────────
+app.get("/api/history/versions/:session_id", requireAuth, wrap(async (req,res)=>{
+  const versions = db.prepare(`SELECT * FROM message_versions WHERE user_id=? AND session_id=? ORDER BY created_at DESC LIMIT 20`).all(req.user.id, req.params.session_id);
+  res.json({versions});
+}));
+
+app.post("/api/history/versions", requireAuth, wrap(async (req,res)=>{
+  const {session_id, content} = req.body;
+  if(!session_id||!content) return res.status(400).json({error:"Missing fields."});
+  const last = db.prepare(`SELECT MAX(version) as v FROM message_versions WHERE user_id=? AND session_id=?`).get(req.user.id, session_id);
+  const version = (last?.v||0)+1;
+  db.prepare(`INSERT INTO message_versions (user_id,session_id,content,version) VALUES (?,?,?,?)`).run(req.user.id, session_id, content, version);
+  res.json({ok:true, version});
 }));
 
 app.post("/api/agent", requireAuth, requireQuota, aiLimiter, wrap(async (req,res) => {

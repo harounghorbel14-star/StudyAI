@@ -105,7 +105,10 @@
       <button class="sb-nav-btn" onclick="navigate('pdf')">📄 PDF Chat</button>
       <button class="sb-nav-btn" onclick="navigate_agents()">🤖 AI Agents</button>
       <button class="sb-nav-btn" onclick="navigate_workflow()">🔄 Workflows</button>
+      <button class="sb-nav-btn" onclick="navigate_kb()">📚 Knowledge Base</button>
       <button class="sb-nav-btn" onclick="navigate_referral()">🔗 Referral</button>
+      <button class="sb-nav-btn" onclick="navigate_apikeys()">🔑 API Access</button>
+      <button class="sb-nav-btn" onclick="navigate_teams()">👥 Teams</button>
       <button class="sb-nav-btn" onclick="navigate_admin()">👑 Admin</button>
       <button class="sb-nav-btn" onclick="openCommandPalette()">⌨️ Ctrl+K</button>
 
@@ -187,6 +190,9 @@
       </div>
       <div class="topbar-right">
         <div class="usage-pill" id="usage-pill">0/10</div>
+        <button class="top-btn" onclick="showVersionHistory()" title="Version history">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </button>
         <button class="top-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">☀️</button>
         <button class="top-btn" onclick="exportChat()" title="Export chat">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
