@@ -229,37 +229,52 @@
         </div>
         <!-- Input bar -->
         <div id="input-wrap">
+          <!-- Quick Tools Menu (+ button) -->
+          <div id="quick-tools-menu" style="display:none;position:absolute;bottom:80px;left:12px;right:12px;background:var(--bg2);border:1px solid var(--border2);border-radius:16px;padding:12px;z-index:50;box-shadow:0 -8px 40px #0008;max-height:60vh;overflow-y:auto">
+            <div style="font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;padding:0 4px">Quick Tools</div>
+            <div id="quick-tools-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px"></div>
+          </div>
           <div id="input-bar">
             <div id="attach-preview" style="display:none"></div>
             <div id="input-row">
+              <!-- + Quick Tools -->
+              <button class="input-btn" id="plus-btn" onclick="toggleQuickTools()" title="All Tools" style="font-size:18px;font-weight:300;color:var(--a1)">+</button>
+              <!-- Web Search -->
               <button class="input-btn" id="search-btn" onclick="toggleSearch()" title="Web Search" style="position:relative">
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 <span id="search-dot" style="display:none;position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:#c6f135"></span>
               </button>
+              <!-- Image attach -->
               <button class="input-btn" onclick="document.getElementById('img-picker').click()" title="Attach image">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
               </button>
               <input type="file" id="img-picker" accept="image/*" style="display:none" onchange="handleImageAttach(this)"/>
               <!-- File analysis -->
-              <button class="input-btn" onclick="document.getElementById('file-picker').click()" title="Analyze file (CSV, Excel, PDF)">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              <button class="input-btn" onclick="document.getElementById('file-picker').click()" title="Analyze file">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
               </button>
               <input type="file" id="file-picker" accept=".csv,.xlsx,.xls,.pdf,.txt,.json,.docx,.pptx" style="display:none" onchange="handleFileAnalysis(this)"/>
-              <textarea id="msg-input" placeholder="Message NexusAI..." rows="1" oninput="autoGrow(this)" onkeydown="onKey(event)"></textarea>
-              <button class="input-btn" id="voice-btn" onclick="toggleVoice()" title="Voice message">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+              <!-- Voice -->
+              <button class="input-btn" id="voice-btn" onclick="toggleVoice()" title="Voice">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
               </button>
-              <button class="input-btn" onclick="startDebate()" title="AI Debate">🥊</button>
-              <button class="input-btn" onclick="decomposeInChat()" title="Decompose task">🔧</button>
-              <button class="input-btn" onclick="analyzeDecisionInChat()" title="Decision analysis">⚖️</button>
-              <button class="input-btn" onclick="parallelThinkingInChat()" title="Perspectives">🧩</button>
-              <button class="input-btn" onclick="simulateScenarioInChat()" title="Simulate scenario">🎲</button>
+              <!-- Textarea -->
+              <textarea id="msg-input" placeholder="Message NexusAI..." rows="1" oninput="autoGrow(this)" onkeydown="onKey(event)"></textarea>
+              <!-- Intelligence buttons (desktop only) -->
+              <span class="desktop-only-btns">
+                <button class="input-btn" onclick="startDebate()" title="Debate">🥊</button>
+                <button class="input-btn" onclick="decomposeInChat()" title="Decompose">🔧</button>
+                <button class="input-btn" onclick="analyzeDecisionInChat()" title="Decision">⚖️</button>
+                <button class="input-btn" onclick="parallelThinkingInChat()" title="Perspectives">🧩</button>
+                <button class="input-btn" onclick="simulateScenarioInChat()" title="Simulate">🎲</button>
+              </span>
+              <!-- Send -->
               <button class="send-btn" id="send-btn" onclick="sendMessage()" title="Send">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
               </button>
             </div>
           </div>
-          <div id="input-hint">Press Enter to send · Shift+Enter for new line</div>
+          <div id="input-hint">Press Enter to send · Shift+Enter for new line · <span style="color:var(--a1)">+</span> for all tools</div>
         </div>
       </div>
 

@@ -213,6 +213,9 @@ const TOOLS = [
   {id:'video-luma-ray2',cat:'video',e:'🌙',name:'Luma Ray 2'},
   {id:'video-luma-modify',cat:'video',e:'✏️',name:'Luma Modify Video'},
   {id:'video-luma-reframe',cat:'video',e:'🔄',name:'Luma Reframe'},
+  {id:'video-kling',cat:'video',e:'🎬',name:'Kling v2.1 Master'},
+  {id:'video-wan25',cat:'video',e:'🌊',name:'WAN 2.5 Video'},
+  {id:'video-kling-img',cat:'video',e:'📸',name:'Kling Animate Photo'},
 
   // ── 3D ────────────────────────────────────────
   {id:'3d-generate',cat:'media',e:'🧊',name:'3D from Text'},
@@ -277,7 +280,10 @@ const S = {
   webSearch: false,
   persona: 'default',
   personaPrompt: 'You are NexusAI, a helpful AI assistant created by Haroun Ghorbel.',
-  tone: 50, // 0=very formal, 100=very casual
+  tone: 50,
+  writingStyle: localStorage.getItem('nx_style')||'default',
+  thinkingMode: localStorage.getItem('nx_think')||'fast',
+  rememberedEmail: localStorage.getItem('nx_email')||'',
 };
 
 // ── PERSONAS ──────────────────────────────────
@@ -492,7 +498,10 @@ async function handleAuth(){
       toast('Account created!','success');
     }
     const d=await api('/api/login',{method:'POST',body:{email,password}});
-    S.token=d.token;localStorage.setItem('nx_t',d.token);
+    S.token=d.token;
+    localStorage.setItem('nx_t',d.token);
+    localStorage.setItem('nx_email',email); // ✅ remember email
+    S.rememberedEmail=email;
     await init();
   }catch(e){err.textContent=e.message;}
   finally{btn.disabled=false;btn.textContent=S.authMode==='login'?'Continue':'Create account';}
@@ -514,15 +523,18 @@ async function init(){
   const email=S.user?.email||'';
   const plan=S.user?.plan||'free';
   const used=S.user?.requests_today||0;
-  const limit=S.user?.limit??10;
+  const limit=plan==='elite'?'∞':plan==='pro'?500:10;
   document.getElementById('sb-av').textContent=email[0]?.toUpperCase()||'U';
   document.getElementById('sb-email').textContent=email;
-  document.getElementById('sb-plan').textContent=`${plan.charAt(0).toUpperCase()+plan.slice(1)} · ${used}/${limit===null?'∞':limit}`;
-  document.getElementById('usage-pill').textContent=`${used}/${limit===null?'∞':limit}`;
+  document.getElementById('sb-plan').textContent=`${plan.charAt(0).toUpperCase()+plan.slice(1)} · ${used}/${limit}`;
+  document.getElementById('usage-pill').textContent=`${used}/${limit}`;
+  // Remember email for next visit
+  localStorage.setItem('nx_email',email);
   renderToolList('');
   loadHistory();
   renderTemplates();
   showEmpty();
+  updateUsage();
   startOnboarding();
 
   // Auto greeting
@@ -984,7 +996,9 @@ async function sendMessage(){
       const isFaceSwap = tool.id==='face-swap';
       const isRestore = tool.id==='restore-img';
       const isMusicSong = tool.id==='music-song';
-      const isLumaPhoton = tool.id==='image-luma-photon';
+      const isKling = tool.id==='video-kling';
+      const isWan25 = tool.id==='video-wan25';
+      const isKlingImg = tool.id==='video-kling-img';
       const isLumaRay2 = tool.id==='video-luma-ray2';
       const isLumaModify = tool.id==='video-luma-modify';
       const isLumaReframe = tool.id==='video-luma-reframe';
@@ -1148,6 +1162,31 @@ async function sendMessage(){
         showTyping();
         try{const r=await api('/api/image/luma-photon',{method:'POST',body:{prompt:text}});
           hideTyping();addMsg({role:'assistant',text:'⚡ Generated with Luma Photon:',type:'image',data:r.url});}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isKling){
+        toast('🎬 Generating with Kling v2.1 Master...','success');showTyping();
+        try{const r=await api('/api/video/kling',{method:'POST',body:{prompt:text}});
+          hideTyping();addMsg({role:'assistant',text:`🎬 **Kling v2.1 Master** — Cinematic Quality!\n\n[▶ Watch](${r.url})`});notify('NexusAI','Kling video ready! 🎬');}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isWan25){
+        toast('🌊 Generating with WAN 2.5...','success');showTyping();
+        try{const r=await api('/api/video/wan25',{method:'POST',body:{prompt:text}});
+          hideTyping();addMsg({role:'assistant',text:`🌊 **WAN 2.5 Video** ready!\n\n[▶ Watch](${r.url})`});notify('NexusAI','WAN 2.5 video ready! 🌊');}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isKlingImg){
+        if(!img){toast('Attach a photo first!','error');hideTyping();return;}
+        toast('📸 Animating with Kling v2.1...','success');showTyping();
+        const kf=new FormData();const kb=atob(img.base64);const ka=new Uint8Array(kb.length);
+        for(let i=0;i<kb.length;i++)ka[i]=kb.charCodeAt(i);
+        kf.append('image',new Blob([ka],{type:'image/png'}),'image.png');
+        if(text)kf.append('prompt',text);
+        try{const r=await fetch(API+'/api/video/kling-img',{method:'POST',headers:{Authorization:'Bearer '+S.token},body:kf});
+          const d=await r.json();if(!r.ok)throw new Error(d.error);
+          hideTyping();addMsg({role:'assistant',text:`📸 **Kling Animated!**\n\n[▶ Watch](${d.url})`});
+          S.attachedImg=null;clearAttachPreview();notify('NexusAI','Kling animation ready! 📸');}
         catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
 
       } else if(isLumaRay2){
@@ -3449,15 +3488,145 @@ function startOnboarding(){
 
 // cursor blink
 const _cs=document.createElement('style');
-_cs.textContent='@keyframes cursorBlink{0%,100%{opacity:1}50%{opacity:0}}';
+_cs.textContent='@keyframes cursorBlink{0%,100%{opacity:1}50%{opacity:0}} @keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(6px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}';
 document.head?.appendChild(_cs);
 
-// ── BOOT ─────────────────────────────────────
+// ── ➕ QUICK TOOLS MENU ───────────────────────
+let quickToolsOpen=false;
+
+function toggleQuickTools(){
+  quickToolsOpen=!quickToolsOpen;
+  const menu=document.getElementById('quick-tools-menu');
+  if(!menu)return;
+  menu.style.display=quickToolsOpen?'block':'none';
+  const btn=document.getElementById('plus-btn');
+  if(btn)btn.style.color=quickToolsOpen?'var(--a2)':'var(--a1)';
+  if(quickToolsOpen){
+    renderQuickToolsGrid('');
+    // Add search input if not exists
+    if(!document.getElementById('qt-search')){
+      const s=document.createElement('div');
+      s.style.cssText='margin-bottom:10px';
+      s.innerHTML=`<input id="qt-search" placeholder="🔍 Search tools..." autofocus
+        style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--text);outline:none"
+        oninput="renderQuickToolsGrid(this.value)"/>`;
+      menu.insertBefore(s,menu.querySelector('#quick-tools-grid'));
+      setTimeout(()=>document.getElementById('qt-search')?.focus(),50);
+    }
+  }
+}
+
+function renderQuickToolsGrid(q){
+  const grid=document.getElementById('quick-tools-grid');if(!grid)return;
+  const lq=q.toLowerCase();
+  const tools=lq?TOOLS.filter(t=>t.name.toLowerCase().includes(lq)||(t.cat||'').includes(lq)):TOOLS;
+  grid.innerHTML=tools.slice(0,30).map(t=>`
+    <button class="quick-tool-btn" onclick="selectQuickTool('${t.id}')">
+      <span class="qt-emoji">${t.e}</span>
+      <span class="qt-name">${esc(t.name)}</span>
+    </button>`).join('');
+}
+
+function selectQuickTool(id){
+  selectTool(id);
+  quickToolsOpen=false;
+  const menu=document.getElementById('quick-tools-menu');
+  if(menu)menu.style.display='none';
+  const btn=document.getElementById('plus-btn');
+  if(btn)btn.style.color='var(--a1)';
+  showActiveToolBar();
+  document.getElementById('msg-input')?.focus();
+}
+
+function showActiveToolBar(){
+  let bar=document.getElementById('active-tool-bar');
+  if(!bar){
+    bar=document.createElement('div');bar.id='active-tool-bar';
+    bar.style.cssText='display:none;align-items:center;gap:8px;padding:5px 10px;background:var(--a1)15;border:1px solid var(--a1)30;border-radius:8px;margin:0 12px 6px;font-size:12px;color:var(--a1)';
+    document.getElementById('input-wrap')?.insertBefore(bar,document.getElementById('input-bar'));
+  }
+  if(!S.tool){bar.style.display='none';return;}
+  bar.style.display='flex';
+  bar.innerHTML=`<span>${S.tool.e||'🔧'} Using: <strong>${S.tool.name}</strong></span><button onclick="clearActiveTool()" style="margin-left:auto;background:none;border:none;color:var(--t3);font-size:14px;cursor:pointer">✕</button>`;
+}
+
+function clearActiveTool(){
+  S.tool=null;
+  const bar=document.getElementById('active-tool-bar');
+  if(bar)bar.style.display='none';
+  document.getElementById('tool-label').textContent='NexusAI';
+}
+
+// Close on outside click
+document.addEventListener('click',e=>{
+  if(quickToolsOpen&&!e.target.closest('#quick-tools-menu')&&!e.target.closest('#plus-btn')){
+    quickToolsOpen=false;
+    const menu=document.getElementById('quick-tools-menu');
+    if(menu)menu.style.display='none';
+    const btn=document.getElementById('plus-btn');
+    if(btn)btn.style.color='var(--a1)';
+  }
+});
+
+// ── AUTO TOOL DETECTION ───────────────────────
+function autoDetectTool(input){
+  if(S.tool)return; // already has tool
+  const lower=input.toLowerCase();
+  const map=[
+    {keys:['generate image','create image','draw','make image','imagine'],id:'dalle3'},
+    {keys:['generate video','make video','create video'],id:'video-gen'},
+    {keys:['generate music','create song','make music'],id:'music-gen'},
+    {keys:['remove background','remove bg','transparent background'],id:'remove-bg'},
+    {keys:['translate to','translate this','in arabic','in french','in english'],id:'translator'},
+    {keys:['write email','draft email','compose email'],id:'email-writer'},
+    {keys:['fix code','debug','syntax error','bug in'],id:'code-fixer'},
+    {keys:['summarize','tldr','summary of this'],id:'summarizer'},
+  ];
+  for(const {keys,id} of map){
+    if(keys.some(k=>lower.includes(k))){
+      const tool=TOOLS.find(t=>t.id===id);
+      if(tool){
+        // Show soft suggestion bubble
+        showToolSuggestion(tool);
+        break;
+      }
+    }
+  }
+}
+
+function showToolSuggestion(tool){
+  document.getElementById('tool-suggestion')?.remove();
+  const el=document.createElement('div');
+  el.id='tool-suggestion';
+  el.style.cssText='position:absolute;bottom:76px;left:50%;transform:translateX(-50%);background:var(--bg2);border:1px solid var(--a1)50;border-radius:99px;padding:5px 14px;font-size:12px;color:var(--a1);cursor:pointer;white-space:nowrap;z-index:40;animation:fadeIn .2s ease;box-shadow:0 4px 20px #0006';
+  el.innerHTML=`${tool.e} Switch to <strong>${tool.name}</strong>? <span style="color:var(--t3);margin-left:6px">Tap to use</span>`;
+  el.onclick=()=>{selectTool(tool.id);showActiveToolBar();el.remove();};
+  document.getElementById('input-wrap')?.appendChild(el);
+  setTimeout(()=>el?.remove(),4000);
+}
+
+// Hook into input for auto-detect
 document.addEventListener('DOMContentLoaded',()=>{
-  document.getElementById('auth-email')?.addEventListener('keydown',e=>{if(e.key==='Enter')handleAuth();});
-  document.getElementById('auth-password')?.addEventListener('keydown',e=>{if(e.key==='Enter')handleAuth();});
+  const inp=document.getElementById('msg-input');
+  if(inp){
+    let t;
+    inp.addEventListener('input',()=>{clearTimeout(t);t=setTimeout(()=>autoDetectTool(inp.value),700);});
+  }
+  // ✅ Auto-fill remembered email
+  const savedEmail=localStorage.getItem('nx_email');
+  if(savedEmail){
+    const emailInput=document.getElementById('auth-email');
+    if(emailInput){
+      emailInput.value=savedEmail;
+      setTimeout(()=>document.getElementById('auth-password')?.focus(),100);
+    }
+  }
   initTheme();
   if(S.token)init();
 });
+
+function selectToolFromGrid(id){
+  selectTool(id);closeCatGrid();showActiveToolBar();
+}
 }
 }

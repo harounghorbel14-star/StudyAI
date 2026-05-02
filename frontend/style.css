@@ -1262,3 +1262,100 @@ input,textarea{font-family:inherit;color:inherit}
   text-align:center;color:var(--a1);font-size:18px;
   margin:4px 0;padding-left:12px;
 }
+
+/* ── QUICK TOOLS MENU ────────────────────────── */
+.quick-tool-btn{
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  padding:10px 6px;background:var(--bg3);border:1px solid var(--border);
+  border-radius:10px;cursor:pointer;transition:.15s;
+  font-size:11px;color:var(--t2);text-align:center;
+}
+.quick-tool-btn:hover{background:var(--bg4);border-color:var(--a1);color:var(--text);}
+.quick-tool-btn .qt-emoji{font-size:18px;line-height:1;}
+.quick-tool-btn .qt-name{font-size:10px;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+
+/* ── MOBILE IMPROVEMENTS ─────────────────────── */
+.desktop-only-btns{display:contents;}
+
+@media(max-width:600px){
+  /* Hide non-essential buttons on mobile */
+  .desktop-only-btns{display:none;}
+
+  /* Bigger touch targets */
+  .input-btn{min-width:36px;min-height:36px;padding:6px;}
+  .send-btn{width:40px;height:40px;}
+
+  /* Full-width input */
+  #msg-input{font-size:16px;} /* prevents iOS zoom */
+
+  /* Sidebar full-screen on mobile */
+  #sidebar{width:100%!important;}
+
+  /* Messages padding */
+  .msg{padding:8px 10px;}
+  .msg-bubble{max-width:100%;}
+
+  /* Input bar */
+  #input-bar{padding:8px;}
+  #input-row{gap:4px;}
+
+  /* Plus button bigger */
+  #plus-btn{font-size:22px;min-width:40px;}
+
+  /* Quick tools grid 2 cols on mobile */
+  #quick-tools-grid{grid-template-columns:repeat(2,1fr)!important;}
+  #quick-tools-menu{bottom:72px;left:8px;right:8px;}
+
+  /* Topbar */
+  #topbar{padding:8px 10px;}
+  .top-btn{min-width:32px;min-height:32px;}
+
+  /* Hide tool label on small screens */
+  #tool-sub{display:none;}
+}
+
+/* ── ACTIVE TOOL INDICATOR ───────────────────── */
+#active-tool-bar{
+  display:none;
+  align-items:center;gap:8px;
+  padding:6px 12px;
+  background:var(--a1)15;
+  border:1px solid var(--a1)30;
+  border-radius:8px;
+  margin:0 12px 6px;
+  font-size:12px;color:var(--a1);
+}
+#active-tool-bar.visible{display:flex;}
+#active-tool-bar button{
+  margin-left:auto;background:none;border:none;
+  color:var(--t3);font-size:14px;cursor:pointer;
+}
+
+/* ── TOOL ALWAYS ACTIVE PILL ─────────────────── */
+.tool-active-pill{
+  display:inline-flex;align-items:center;gap:5px;
+  background:var(--a1)20;border:1px solid var(--a1)40;
+  border-radius:99px;padding:3px 10px 3px 6px;
+  font-size:12px;color:var(--a1);cursor:pointer;
+  margin-bottom:8px;
+}
+.tool-active-pill .tap{font-size:14px;}
+.tool-active-pill .tap-x{color:var(--t3);font-size:14px;margin-left:2px;}
+
+/* ── SM BUTTON ───────────────────────────────── */
+.sm-btn{
+  font-size:11px;padding:4px 10px;
+  border:1px solid var(--border);border-radius:6px;
+  color:var(--t2);background:none;cursor:pointer;
+  transition:.1s;
+}
+.sm-btn:hover{background:var(--bg3);color:var(--text);}
+
+/* ── VIDEO BADGE ─────────────────────────────── */
+.video-quality-badge{
+  display:inline-block;
+  background:linear-gradient(135deg,#7c3aed,#06b6d4);
+  color:#fff;font-size:10px;font-weight:700;
+  padding:2px 6px;border-radius:4px;margin-left:4px;
+  text-transform:uppercase;letter-spacing:.3px;
+}

@@ -2816,6 +2816,48 @@ app.post("/api/video/grok", requireAuth, requireQuota, aiLimiter, wrap(async (re
   res.json({url: Array.isArray(output)?output[0]:output});
 }));
 
+// ── 🎬 STRONGEST VIDEO MODELS ─────────────────
+
+// Kling v2.1 Master — best cinematic quality
+app.post("/api/video/kling", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {prompt, duration=5, aspect_ratio='16:9'} = req.body;
+  if(!prompt) return res.status(400).json({error:"Missing prompt."});
+  const output = await replicateRun('kwaivgi/kling-v2.1-master',{
+    prompt, duration, aspect_ratio, negative_prompt:'blurry, low quality',
+  });
+  res.json({url: Array.isArray(output)?output[0]:output, model:'Kling v2.1 Master'});
+}));
+
+// WAN 2.5 — open source best quality
+app.post("/api/video/wan25", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {prompt, resolution='720p'} = req.body;
+  if(!prompt) return res.status(400).json({error:"Missing prompt."});
+  const output = await replicateRun('wan-video/wan-2.5-t2v-fast',{
+    prompt, resolution, num_frames:81,
+  });
+  res.json({url: Array.isArray(output)?output[0]:output, model:'WAN 2.5'});
+}));
+
+// Kling v2 from image — animate any photo
+app.post("/api/video/kling-img", requireAuth, requireQuota, aiLimiter,
+  clipdropUpload.single("image"),
+  wrap(async (req,res)=>{
+    if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+    if(!req.file) return res.status(400).json({error:"No image uploaded."});
+    const prompt = req.body.prompt?.trim()||'animate this image naturally';
+    const filePath = req.file.path;
+    try{
+      const base64=`data:${req.file.mimetype};base64,${fs.readFileSync(filePath).toString('base64')}`;
+      const output = await replicateRun('kwaivgi/kling-v2.1',{
+        prompt, start_image:base64, duration:5,
+      });
+      res.json({url: Array.isArray(output)?output[0]:output, model:'Kling v2.1'});
+    }finally{fs.unlink(filePath,()=>{});}
+  })
+);
+
 // ─────────────────────────────────────────────
 // 🎬 LUMA AI MODELS
 // ─────────────────────────────────────────────
