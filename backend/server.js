@@ -1111,16 +1111,18 @@ function memoriesAsContext(memories) {
 }
 
 async function extractAndSaveMemories(userId, userInput, aiResponse) {
-  // Ask AI to extract memorable facts from this conversation turn
   try {
     const extraction = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      max_tokens: 200,
+      max_tokens: 300,
       messages: [{
         role: "user",
-        content: `Extract any personal facts about the USER from this conversation turn. Only extract clear facts (name, job, location, interests, goals, etc). Return JSON array like: [{"key":"name","value":"John"},{"key":"job","value":"developer"}]. If nothing memorable, return [].
+        content: `Extract ALL memorable facts about the USER from this conversation. Be thorough - capture: name, job, location, interests, goals, projects, preferences, skills, family, problems they have, decisions they're making, tools they use, etc.
 
-User said: "${userInput.slice(0,300)}"
+Return JSON array: [{"key":"fact_name","value":"fact_value"}]
+If nothing memorable, return [].
+
+User said: "${userInput.slice(0,400)}"
 AI responded: "${aiResponse.slice(0,200)}"
 
 JSON only, no explanation:`
@@ -1128,12 +1130,22 @@ JSON only, no explanation:`
     });
     const text = extraction.choices[0]?.message?.content?.trim() || '[]';
     const facts = JSON.parse(text.replace(/```json|```/g,'').trim());
-    if (Array.isArray(facts)) {
-      for (const f of facts) {
-        if (f.key && f.value) setMemory(userId, f.key, f.value);
+    if(!Array.isArray(facts)) return;
+    for(const f of facts.slice(0,10)){
+      if(f.key && f.value && String(f.value).length < 500){
+        db.prepare(`INSERT INTO user_memories (user_id,key,value,updated_at)
+          VALUES (?,?,?,datetime('now'))
+          ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at`
+        ).run(userId, String(f.key).slice(0,100), String(f.value).slice(0,500));
       }
     }
-  } catch(_) {} // non-fatal
+    // Also extract goals
+    extractGoals(userId, userInput);
+    // Track intent
+    detectIntent(userInput).then(intent => trackIntent(userId, intent));
+  } catch(e) {
+    // Silently fail
+  }
 }
 
 // ── Memory API routes ─────────────────────────

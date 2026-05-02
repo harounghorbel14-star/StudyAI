@@ -263,6 +263,16 @@ const TOOLS = [
   {id:'hr-policy',cat:'hr',e:'📋',name:'HR Policy Writer'},
 ];
 
+// ── STYLES ────────────────────────────────────
+const STYLES = {
+  default:    '',
+  formal:     'Write in a formal, professional tone. Use proper grammar and structure.',
+  casual:     'Write in a casual, friendly, conversational tone. Use simple language.',
+  academic:   'Write in an academic style with citations approach, structured arguments, and scholarly language.',
+  persuasive: 'Write in a persuasive, compelling style. Use rhetorical techniques and strong arguments.',
+  simple:     'Write as simply as possible. Use short sentences. Avoid jargon. ELI5 approach.',
+};
+
 // ── STATE ─────────────────────────────────────
 const S = {
   token: localStorage.getItem('nx_t')||'',
@@ -2486,7 +2496,7 @@ async function codingSnippets(){
   addMsg({role:'assistant',text});
 }
 
-function toggleCatGrid(){
+// ── 📂 DOCUMENTS UI ──────────────────────────
 async function navigate_docs(){
   S.page='docs';closeSidebar();
   document.getElementById('tool-label').textContent='📂 Documents';
@@ -2775,8 +2785,7 @@ async function navigate_metrics(){
   }catch(e){toast(e.message,'error');}
 }
 
-function toggleCatGrid(){
-
+// ── ⚡ AUTOMATION UI ──────────────────────────
 async function navigate_automation(){
   S.page='automation';closeSidebar();
   document.getElementById('tool-label').textContent='⚡ Automation';
@@ -3007,9 +3016,10 @@ function showCatTools(cat, name){
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
       All Categories
     </button>
+    <div style="font-size:12px;color:var(--t3);padding:4px 8px 8px">${tools.length} tools — tap to activate instantly</div>
     <div class="tools-grid-panel">
       ${tools.map(t=>`
-        <button class="tool-grid-card" onclick="selectToolFromGrid('${t.id}')">
+        <button class="tool-grid-card ${S.tool?.id===t.id?'active':''}" onclick="selectToolFromGrid('${t.id}')">
           <span class="tool-grid-emoji">${t.e}</span>
           <div class="tool-grid-name">${t.name}</div>
         </button>`).join('')}
@@ -3019,6 +3029,10 @@ function showCatTools(cat, name){
 function selectToolFromGrid(id){
   closeCatGrid();
   selectTool(id);
+  showActiveToolBar();
+  // Auto focus input
+  setTimeout(()=>document.getElementById('msg-input')?.focus(),100);
+  toast(`✅ ${S.tool?.name||'Tool'} activated — start typing!`,'success');
 }
 
 // Close when clicking overlay background
@@ -3057,18 +3071,10 @@ function notify(title, body){
   // Always show toast too
   toast(`🔔 ${title}: ${body}`, 'success');
 }
-const STYLES = {
-  default:    '',
-  formal:     'Write in a formal, professional tone. Use proper grammar and structure.',
-  casual:     'Write in a casual, friendly, conversational tone. Use simple language.',
-  academic:   'Write in an academic style with citations approach, structured arguments, and scholarly language.',
-  persuasive: 'Write in a persuasive, compelling style. Use rhetorical techniques and strong arguments.',
-  simple:     'Write as simply as possible. Use short sentences. Avoid jargon. ELI5 approach.',
-};
-S.writingStyle = 'default';
 
 function setStyle(btn, style){
   S.writingStyle = style;
+  localStorage.setItem('nx_style', style);
   document.querySelectorAll('.style-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
   toast(`Style: ${btn.textContent.trim()}`, 'success');
@@ -3627,6 +3633,4 @@ document.addEventListener('DOMContentLoaded',()=>{
 
 function selectToolFromGrid(id){
   selectTool(id);closeCatGrid();showActiveToolBar();
-}
-}
 }
