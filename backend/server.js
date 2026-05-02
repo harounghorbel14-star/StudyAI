@@ -1744,6 +1744,93 @@ app.post("/api/video/grok", requireAuth, requireQuota, aiLimiter, wrap(async (re
   res.json({url: Array.isArray(output)?output[0]:output});
 }));
 
+// ─────────────────────────────────────────────
+// 🎬 LUMA AI MODELS
+// ─────────────────────────────────────────────
+
+// Luma Ray 2 - video from text or image
+app.post("/api/video/luma-ray2", requireAuth, requireQuota, aiLimiter,
+  clipdropUpload.single("image"),
+  wrap(async (req,res)=>{
+    if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+    const prompt = req.body.prompt?.trim();
+    if(!prompt) return res.status(400).json({error:"Missing prompt."});
+    const input = {prompt, duration:5, resolution:"720p"};
+    if(req.file){
+      const base64 = `data:${req.file.mimetype};base64,${fs.readFileSync(req.file.path).toString('base64')}`;
+      input.keyframes = {frame0:{type:"image",url:base64}};
+      fs.unlink(req.file.path,()=>{});
+    }
+    const output = await replicateRun('luma/ray-2',input);
+    res.json({url: Array.isArray(output)?output[0]:output});
+  })
+);
+
+// Luma Photon - fast image generation
+app.post("/api/image/luma-photon", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {prompt, aspect_ratio='1:1'} = req.body;
+  if(!prompt) return res.status(400).json({error:"Missing prompt."});
+  const output = await replicateRun('luma/photon',{prompt, aspect_ratio});
+  res.json({url: Array.isArray(output)?output[0]:output});
+}));
+
+// Luma Modify Video
+app.post("/api/video/luma-modify", requireAuth, requireQuota, aiLimiter,
+  clipdropUpload.single("video"),
+  wrap(async (req,res)=>{
+    if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+    if(!req.file) return res.status(400).json({error:"No video uploaded."});
+    const prompt = req.body.prompt?.trim();
+    if(!prompt) return res.status(400).json({error:"Missing prompt."});
+    const filePath = req.file.path;
+    try{
+      const base64 = `data:video/mp4;base64,${fs.readFileSync(filePath).toString('base64')}`;
+      const output = await replicateRun('luma/modify-video',{prompt, video:base64});
+      res.json({url: Array.isArray(output)?output[0]:output});
+    }finally{fs.unlink(filePath,()=>{});}
+  })
+);
+
+// Luma Reframe Video
+app.post("/api/video/luma-reframe", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {prompt, video_url} = req.body;
+  if(!prompt||!video_url) return res.status(400).json({error:"Missing prompt or video_url."});
+  const output = await replicateRun('luma/reframe-video',{prompt, video_url});
+  res.json({url: Array.isArray(output)?output[0]:output});
+}));
+
+// ─────────────────────────────────────────────
+// 🧊 3D GENERATION
+// ─────────────────────────────────────────────
+
+// Hunyuan 3D from text
+app.post("/api/3d/generate", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+  const {prompt} = req.body;
+  if(!prompt) return res.status(400).json({error:"Missing prompt."});
+  const output = await replicateRun('tencent/hunyuan-3d-1',{prompt});
+  const meshUrl = Array.isArray(output)?output[0]:output;
+  res.json({url:meshUrl, type:'3d'});
+}));
+
+// 3D from image
+app.post("/api/3d/from-image", requireAuth, requireQuota, aiLimiter,
+  clipdropUpload.single("image"),
+  wrap(async (req,res)=>{
+    if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});
+    if(!req.file) return res.status(400).json({error:"No image uploaded."});
+    const filePath = req.file.path;
+    try{
+      const base64 = `data:${req.file.mimetype};base64,${fs.readFileSync(filePath).toString('base64')}`;
+      const output = await replicateRun('tencent/hunyuan-3d-1',{image:base64});
+      const meshUrl = Array.isArray(output)?output[0]:output;
+      res.json({url:meshUrl, type:'3d'});
+    }finally{fs.unlink(filePath,()=>{});}
+  })
+);
+
 // Gemini 3.1 Flash TTS - Google fast TTS 70+ languages
 app.post("/api/tts/gemini", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
   if(!process.env.REPLICATE_API_KEY) return res.status(500).json({error:"REPLICATE_API_KEY not set."});

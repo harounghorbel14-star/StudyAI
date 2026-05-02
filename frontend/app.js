@@ -207,6 +207,16 @@ const TOOLS = [
   {id:'video-grok',cat:'video',e:'⚡',name:'Grok Video (xAI)'},
   {id:'image-nanobanana',cat:'media',e:'🍌',name:'Nano Banana 2'},
   {id:'image-seedream5',cat:'media',e:'✨',name:'Seedream 5 Lite'},
+  {id:'image-luma-photon',cat:'media',e:'⚡',name:'Luma Photon'},
+
+  // ── LUMA AI ───────────────────────────────────
+  {id:'video-luma-ray2',cat:'video',e:'🌙',name:'Luma Ray 2'},
+  {id:'video-luma-modify',cat:'video',e:'✏️',name:'Luma Modify Video'},
+  {id:'video-luma-reframe',cat:'video',e:'🔄',name:'Luma Reframe'},
+
+  // ── 3D ────────────────────────────────────────
+  {id:'3d-generate',cat:'media',e:'🧊',name:'3D from Text'},
+  {id:'3d-from-image',cat:'media',e:'📦',name:'3D from Image'},
 
   // ── CLIPDROP POWERED ──────────────────────────
   {id:'remove-bg',cat:'media',e:'✂️',name:'Remove Background'},
@@ -537,11 +547,36 @@ async function init(){
 
 function updateUsage(){
   if(!S.user)return;
-  const used=S.user.requests_today||0;
-  const limit=S.user.limit??10;
-  const txt=`${used}/${limit===null?'∞':limit}`;
-  document.getElementById('usage-pill').textContent=txt;
-  document.getElementById('sb-plan').textContent=`${(S.user.plan||'free').charAt(0).toUpperCase()+(S.user.plan||'free').slice(1)} · ${txt}`;
+  const plan = S.user.plan||'free';
+  const used = S.user.requests_today||0;
+  const limit = plan==='elite'?null:plan==='pro'?500:10;
+  const txt = plan==='elite'?'Elite ∞':`${used}/${limit}`;
+  const pill = document.getElementById('usage-pill');
+  if(pill){
+    pill.textContent=txt;
+    pill.style.color=limit&&used>=limit*0.8?'#f87171':'';
+  }
+  const sbPlan = document.getElementById('sb-plan');
+  if(sbPlan) sbPlan.textContent=`${plan.charAt(0).toUpperCase()+plan.slice(1)} · ${txt}`;
+
+  // Upgrade banner for free users
+  const existing = document.getElementById('upgrade-banner');
+  if(plan==='free'){
+    if(!existing){
+      const banner = document.createElement('div');
+      banner.id='upgrade-banner';
+      banner.style.cssText='background:linear-gradient(90deg,#c6f13515,#35f1c615);border-bottom:1px solid #c6f13530;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-size:13px;flex-shrink:0;';
+      banner.innerHTML=`
+        <span style="color:var(--t2)">⚡ Free plan · <strong style="color:var(--text)">${used}/${limit}</strong> requests used today</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button onclick="navigate('pricing')" style="background:var(--grad);color:#000;border:none;padding:5px 14px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer">Upgrade →</button>
+          <button onclick="document.getElementById('upgrade-banner').remove()" style="color:var(--t3);font-size:16px;cursor:pointer;background:none;border:none">✕</button>
+        </div>`;
+      document.getElementById('topbar')?.after(banner);
+    }
+  } else {
+    existing?.remove();
+  }
 }
 
 // ── SIDEBAR ───────────────────────────────────
@@ -945,7 +980,12 @@ async function sendMessage(){
       const isFaceSwap = tool.id==='face-swap';
       const isRestore = tool.id==='restore-img';
       const isMusicSong = tool.id==='music-song';
-      const isGrokTTS = tool.id==='grok-tts';
+      const isLumaPhoton = tool.id==='image-luma-photon';
+      const isLumaRay2 = tool.id==='video-luma-ray2';
+      const isLumaModify = tool.id==='video-luma-modify';
+      const isLumaReframe = tool.id==='video-luma-reframe';
+      const is3DGen = tool.id==='3d-generate';
+      const is3DFromImg = tool.id==='3d-from-image';
       const isGeminiTTS = tool.id==='gemini-tts';
       const isPixverse = tool.id==='video-pixverse';
       const isVideoFromImg = tool.id==='video-from-image';
@@ -1098,6 +1138,53 @@ async function sendMessage(){
         showTyping();
         try{const r=await api('/api/tts/grok',{method:'POST',body:{text}});
           hideTyping();addMsg({role:'assistant',text:'🔊 Grok TTS:',type:'audio',data:`data:audio/mp3;base64,${r.audio}`});}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isLumaPhoton){
+        showTyping();
+        try{const r=await api('/api/image/luma-photon',{method:'POST',body:{prompt:text}});
+          hideTyping();addMsg({role:'assistant',text:'⚡ Generated with Luma Photon:',type:'image',data:r.url});}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isLumaRay2){
+        toast('🌙 Generating with Luma Ray 2...','success');showTyping();
+        const lf=new FormData();
+        if(img){const lb=atob(img.base64);const la=new Uint8Array(lb.length);for(let i=0;i<lb.length;i++)la[i]=lb.charCodeAt(i);lf.append('image',new Blob([la],{type:'image/png'}),'image.png');}
+        if(text)lf.append('prompt',text);
+        try{const r=await fetch(API+'/api/video/luma-ray2',{method:'POST',headers:{Authorization:'Bearer '+S.token},body:lf});
+          const d=await r.json();if(!r.ok)throw new Error(d.error);
+          hideTyping();addMsg({role:'assistant',text:`🌙 **Luma Ray 2 Video!**\n\n[▶ Watch](${d.url})`});
+          S.attachedImg=null;clearAttachPreview();notify('NexusAI','Luma video ready! 🌙');}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isLumaModify){
+        toast('✏️ Modifying video with Luma...','success');showTyping();
+        try{const r=await api('/api/video/luma-modify',{method:'POST',body:{prompt:text}});
+          hideTyping();addMsg({role:'assistant',text:`✏️ **Modified Video!**\n\n[▶ Watch](${r.url})`});}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(isLumaReframe){
+        showTyping();
+        try{const r=await api('/api/video/luma-reframe',{method:'POST',body:{prompt:text,video_url:img?.url||''}});
+          hideTyping();addMsg({role:'assistant',text:`🔄 **Reframed Video!**\n\n[▶ Watch](${r.url})`});}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(is3DGen){
+        toast('🧊 Generating 3D model... ~2 minutes','success');showTyping();
+        try{const r=await api('/api/3d/generate',{method:'POST',body:{prompt:text}});
+          hideTyping();addMsg({role:'assistant',text:`🧊 **3D Model Ready!**\n\n[⬇ Download 3D Model](${r.url})`});notify('NexusAI','3D model ready! 🧊');}
+        catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+
+      } else if(is3DFromImg){
+        if(!img){toast('Attach an image first!','error');hideTyping();return;}
+        toast('📦 Converting image to 3D...','success');showTyping();
+        const tf=new FormData();const tb=atob(img.base64);const ta=new Uint8Array(tb.length);
+        for(let i=0;i<tb.length;i++)ta[i]=tb.charCodeAt(i);
+        tf.append('image',new Blob([ta],{type:'image/png'}),'image.png');
+        try{const r=await fetch(API+'/api/3d/from-image',{method:'POST',headers:{Authorization:'Bearer '+S.token},body:tf});
+          const d=await r.json();if(!r.ok)throw new Error(d.error);
+          hideTyping();addMsg({role:'assistant',text:`📦 **3D Model from Image!**\n\n[⬇ Download 3D Model](${d.url})`});
+          S.attachedImg=null;clearAttachPreview();notify('NexusAI','3D model ready! 📦');}
         catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
 
       } else if(isGeminiTTS){
