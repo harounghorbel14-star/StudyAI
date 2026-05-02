@@ -708,11 +708,149 @@ IMPORTANT: Always respond in the SAME language the user writes in. If they write
   const reply = await chatComplete(systemPrompt, input, model, history);
   saveMessage(req.user.id, sessionId, "user", input, "chat");
   saveMessage(req.user.id, sessionId, "assistant", reply, "chat");
-
-  // Extract and save new memories in background
   extractAndSaveMemories(req.user.id, input, reply);
-
   res.json({ reply, session_id:sessionId });
+}));
+
+// ─────────────────────────────────────────────
+// ⚡ STREAMING CHAT
+// ─────────────────────────────────────────────
+app.post("/api/chat/stream", requireAuth, requireQuota, aiLimiter, wrap(async (req,res) => {
+  const err = validateBody(req.body, ["input"]);
+  if (err) return res.status(400).json({ error:err });
+  const sessionId = req.body.session_id || newSessionId();
+  const input = req.body.input.trim();
+  const history = getHistory(req.user.id, sessionId);
+  const memories = getUserMemories(req.user.id);
+  const memContext = memoriesAsContext(memories);
+  const customAbout = db.prepare(`SELECT value FROM user_memories WHERE user_id=? AND key='__custom_about'`).get(req.user.id);
+  const customStyle = db.prepare(`SELECT value FROM user_memories WHERE user_id=? AND key='__custom_style'`).get(req.user.id);
+  const customContext = (customAbout?.value || customStyle?.value)
+    ? `\n\n[Custom Instructions:\nAbout user: ${customAbout?.value||'N/A'}\nResponse style: ${customStyle?.value||'N/A'}]` : '';
+  const systemPrompt = `You are NexusAI, a helpful AI assistant created by Haroun Ghorbel. Always respond in the SAME language the user writes in.${memContext}${customContext}`;
+
+  // SSE headers
+  res.setHeader('Content-Type','text/event-stream');
+  res.setHeader('Cache-Control','no-cache');
+  res.setHeader('Connection','keep-alive');
+  res.flushHeaders();
+
+  let fullReply = '';
+  try{
+    const stream = await openai.chat.completions.create({
+      model: req.body.deep_think?'o1-mini':'gpt-4o',
+      stream: true,
+      messages:[
+        {role:'system',content:systemPrompt},
+        ...history.map(h=>({role:h.role,content:h.content})),
+        {role:'user',content:input}
+      ]
+    });
+    for await(const chunk of stream){
+      const token = chunk.choices[0]?.delta?.content||'';
+      if(token){
+        fullReply += token;
+        res.write(`data: ${JSON.stringify({token})}\n\n`);
+      }
+    }
+    res.write(`data: ${JSON.stringify({done:true, session_id:sessionId})}\n\n`);
+    res.end();
+    saveMessage(req.user.id, sessionId, "user", input, "chat");
+    saveMessage(req.user.id, sessionId, "assistant", fullReply, "chat");
+    extractAndSaveMemories(req.user.id, input, fullReply);
+  }catch(e){
+    res.write(`data: ${JSON.stringify({error:e.message})}\n\n`);
+    res.end();
+  }
+}));
+
+// ─────────────────────────────────────────────
+// 👑 ADMIN PANEL
+// ─────────────────────────────────────────────
+const ADMIN_EMAILS = ['haroun.ghorbel@gmail.com','harounghorbel14@gmail.com','ghorbelharoun16@gmail.com'];
+
+function requireAdmin(req,res,next){
+  if(!ADMIN_EMAILS.includes(req.user?.email?.toLowerCase()))
+    return res.status(403).json({error:"Admin access required."});
+  next();
+}
+
+app.get("/api/admin/users", requireAuth, requireAdmin, wrap(async (req,res)=>{
+  const page = Number(req.query.page)||1;
+  const limit = 50;
+  const offset = (page-1)*limit;
+  const users = db.prepare(`SELECT id,email,plan,requests_today,created_at FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(limit,offset);
+  const total = db.prepare(`SELECT COUNT(*) as count FROM users`).get();
+  const stats = {
+    total: total.count,
+    free: db.prepare(`SELECT COUNT(*) as c FROM users WHERE plan='free'`).get().c,
+    pro: db.prepare(`SELECT COUNT(*) as c FROM users WHERE plan='pro'`).get().c,
+    elite: db.prepare(`SELECT COUNT(*) as c FROM users WHERE plan='elite'`).get().c,
+    today: db.prepare(`SELECT COUNT(*) as c FROM users WHERE date(created_at)=date('now')`).get().c,
+    totalMessages: db.prepare(`SELECT COUNT(*) as c FROM conversations`).get().c,
+  };
+  res.json({users, stats, page, total:total.count});
+}));
+
+app.patch("/api/admin/users/:id", requireAuth, requireAdmin, wrap(async (req,res)=>{
+  const {plan} = req.body;
+  if(!['free','pro','elite'].includes(plan)) return res.status(400).json({error:"Invalid plan."});
+  db.prepare(`UPDATE users SET plan=? WHERE id=?`).run(plan, Number(req.params.id));
+  res.json({ok:true});
+}));
+
+app.delete("/api/admin/users/:id", requireAuth, requireAdmin, wrap(async (req,res)=>{
+  db.prepare(`DELETE FROM users WHERE id=?`).run(Number(req.params.id));
+  res.json({ok:true});
+}));
+
+app.get("/api/admin/stats", requireAuth, requireAdmin, wrap(async (req,res)=>{
+  const daily = db.prepare(`SELECT date(created_at) as day, COUNT(*) as users FROM users WHERE created_at >= datetime('now','-30 days') GROUP BY day ORDER BY day`).all();
+  const messages = db.prepare(`SELECT date(created_at) as day, COUNT(*) as count FROM conversations WHERE created_at >= datetime('now','-7 days') GROUP BY day ORDER BY day`).all();
+  const topTools = db.prepare(`SELECT feature, COUNT(*) as count FROM conversations WHERE feature!='chat' GROUP BY feature ORDER BY count DESC LIMIT 10`).all();
+  res.json({daily, messages, topTools});
+}));
+
+// ─────────────────────────────────────────────
+// 🔗 REFERRAL SYSTEM
+// ─────────────────────────────────────────────
+// Add referral columns if not exist
+try{
+  db.prepare(`ALTER TABLE users ADD COLUMN referral_code TEXT`).run();
+  db.prepare(`ALTER TABLE users ADD COLUMN referred_by TEXT`).run();
+  db.prepare(`ALTER TABLE users ADD COLUMN referral_credits INTEGER DEFAULT 0`).run();
+}catch(_){}
+
+function generateReferralCode(email){
+  return email.split('@')[0].slice(0,6).replace(/[^a-z0-9]/gi,'') + Math.random().toString(36).slice(2,6).toUpperCase();
+}
+
+app.get("/api/referral", requireAuth, wrap(async (req,res)=>{
+  let user = db.prepare(`SELECT referral_code, referral_credits FROM users WHERE id=?`).get(req.user.id);
+  if(!user.referral_code){
+    const code = generateReferralCode(req.user.email);
+    db.prepare(`UPDATE users SET referral_code=? WHERE id=?`).run(code, req.user.id);
+    user.referral_code = code;
+  }
+  const referrals = db.prepare(`SELECT COUNT(*) as count FROM users WHERE referred_by=?`).get(user.referral_code);
+  res.json({
+    code: user.referral_code,
+    credits: user.referral_credits||0,
+    referrals: referrals.count,
+    link: `${process.env.APP_URL||'https://nexusai-rust.vercel.app'}/?ref=${user.referral_code}`
+  });
+}));
+
+// ─────────────────────────────────────────────
+// 📊 ADVANCED ANALYTICS
+// ─────────────────────────────────────────────
+app.get("/api/analytics", requireAuth, wrap(async (req,res)=>{
+  const userId = req.user.id;
+  const daily = db.prepare(`SELECT date(created_at) as day, COUNT(*) as count FROM conversations WHERE user_id=? AND role='user' AND created_at >= datetime('now','-30 days') GROUP BY day ORDER BY day`).all(userId);
+  const tools = db.prepare(`SELECT feature, COUNT(*) as count FROM conversations WHERE user_id=? AND role='user' GROUP BY feature ORDER BY count DESC LIMIT 10`).all(userId);
+  const streak = db.prepare(`SELECT COUNT(DISTINCT date(created_at)) as days FROM conversations WHERE user_id=? AND created_at >= datetime('now','-7 days')`).get(userId);
+  const total = db.prepare(`SELECT COUNT(*) as count FROM conversations WHERE user_id=? AND role='user'`).get(userId);
+  res.json({daily, tools, streak:streak.days, total:total.count});
 }));
 
 app.post("/api/agent", requireAuth, requireQuota, aiLimiter, wrap(async (req,res) => {

@@ -523,6 +523,7 @@ async function init(){
   loadHistory();
   renderTemplates();
   showEmpty();
+  startOnboarding();
 
   // Auto greeting
   setTimeout(()=>{
@@ -1269,31 +1270,73 @@ async function sendMessage(){
       }
 
     } else {
-      // General chat — include style + thinking mode
+      // General chat — streaming mode
       const stylePrompt = STYLES[S.writingStyle]||'';
       const deepThink = S.thinkingMode === 'deep';
 
-      // Show thinking badge if deep mode
       if(deepThink){
         const msgs = document.getElementById('messages');
         const badge = document.createElement('div');
         badge.className='thinking-badge';badge.id='think-badge';
         badge.innerHTML='🧠 Thinking deeply...';
-        msgs.appendChild(badge);
-        scrollBottom();
+        msgs.appendChild(badge);scrollBottom();
+        result=await api('/api/chat',{method:'POST',body:{
+          input:text+(stylePrompt?`\n\n[Style: ${stylePrompt}]`:''),
+          session_id:S.sessionId||undefined,deep_think:true,
+        }});
+        document.getElementById('think-badge')?.remove();
+        S.sessionId=result.session_id;hideTyping();
+        addMsg({role:'assistant',text:result.reply});
+        renderLatex();notify('NexusAI','Deep thinking complete! ✅');
+      } else {
+        // STREAMING
+        hideTyping();
+        S.msgs.push({role:'assistant',text:'',_streaming:true});
+        renderAllMsgs();
+        let streamText='';
+        try{
+          const resp = await fetch(API+'/api/chat/stream',{
+            method:'POST',
+            headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.token},
+            body:JSON.stringify({input:text+(stylePrompt?`\n\n[Style: ${stylePrompt}]`:''),session_id:S.sessionId||undefined})
+          });
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          while(true){
+            const {done,value} = await reader.read();
+            if(done) break;
+            const lines = decoder.decode(value).split('\n');
+            for(const line of lines){
+              if(!line.startsWith('data: '))continue;
+              try{
+                const d = JSON.parse(line.slice(6));
+                if(d.token){
+                  streamText+=d.token;
+                  const last=S.msgs[S.msgs.length-1];
+                  if(last?._streaming)last.text=streamText;
+                  const msgEls=document.querySelectorAll('.msg.assistant');
+                  const lastEl=msgEls[msgEls.length-1];
+                  if(lastEl){
+                    const bubble=lastEl.querySelector('.msg-bubble');
+                    if(bubble)bubble.innerHTML=fmt(streamText)+'<span style="animation:cursorBlink 1s infinite;color:var(--a1)">▋</span>';
+                  }
+                  scrollBottom();
+                }
+                if(d.done){
+                  S.sessionId=d.session_id;
+                  const last=S.msgs[S.msgs.length-1];
+                  if(last?._streaming){last.text=streamText;delete last._streaming;}
+                  renderAllMsgs();renderLatex();
+                }
+              }catch(_){}
+            }
+          }
+        }catch(e){
+          const last=S.msgs[S.msgs.length-1];
+          if(last?._streaming){last.text='❌ '+e.message;delete last._streaming;}
+          renderAllMsgs();
+        }
       }
-
-      result=await api('/api/chat',{method:'POST',body:{
-        input: text + (stylePrompt?`\n\n[Style: ${stylePrompt}]`:''),
-        session_id:S.sessionId||undefined,
-        deep_think: deepThink,
-      }});
-      document.getElementById('think-badge')?.remove();
-      S.sessionId=result.session_id;
-      hideTyping();
-      addMsg({role:'assistant',text:result.reply});
-      renderLatex();
-      if(deepThink) notify('NexusAI', 'Deep thinking complete! ✅');
     }
 
     // Refresh user
@@ -2201,6 +2244,152 @@ async function saveInstructions(){
     toast('✅ Instructions saved!','success');
   }catch(e){toast(e.message,'error');}
 }
+
+// ── ADMIN PANEL ───────────────────────────────
+async function navigate_admin(){
+  S.page='admin';closeSidebar();
+  document.getElementById('tool-label').textContent='👑 Admin Panel';
+  document.getElementById('messages').innerHTML='<div class="page-wrap"><div class="page-title">👑 Admin Panel</div><div style="color:var(--t2)">Loading...</div></div>';
+  try{
+    const {users=[],stats={}}=await api('/api/admin/users');
+    document.getElementById('messages').innerHTML=`<div class="page-wrap">
+      <div class="page-title">👑 Admin Panel</div>
+      <div class="dash-stats" style="margin-bottom:20px">
+        <div class="dash-card"><div class="dash-num">${stats.total||0}</div><div class="dash-lbl">Total Users</div></div>
+        <div class="dash-card"><div class="dash-num">${stats.today||0}</div><div class="dash-lbl">New Today</div></div>
+        <div class="dash-card"><div class="dash-num">${stats.pro||0}</div><div class="dash-lbl">Pro</div></div>
+        <div class="dash-card"><div class="dash-num">${stats.elite||0}</div><div class="dash-lbl">Elite</div></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${users.map(u=>`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;display:flex;align-items:center;gap:12px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:500">${esc(u.email)}</div>
+            <div style="font-size:11px;color:var(--t3)">${u.plan} · ${u.requests_today} today · ${new Date(u.created_at).toLocaleDateString()}</div>
+          </div>
+          <select onchange="adminSetPlan(${u.id},this.value)" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px;color:var(--text)">
+            <option ${u.plan==='free'?'selected':''}>free</option>
+            <option ${u.plan==='pro'?'selected':''}>pro</option>
+            <option ${u.plan==='elite'?'selected':''}>elite</option>
+          </select>
+        </div>`).join('')}
+      </div>
+    </div>`;
+  }catch(e){toast('Admin access denied','error');}
+}
+
+async function adminSetPlan(id,plan){
+  try{await api('/api/admin/users/'+id,{method:'PATCH',body:{plan}});toast('Plan updated ✅','success');}
+  catch(e){toast(e.message,'error');}
+}
+
+// ── REFERRAL ──────────────────────────────────
+async function navigate_referral(){
+  S.page='referral';closeSidebar();
+  document.getElementById('tool-label').textContent='🔗 Referral';
+  document.getElementById('messages').innerHTML='<div class="page-wrap"><div class="page-title">🔗 Referral</div><div style="color:var(--t2)">Loading...</div></div>';
+  try{
+    const d=await api('/api/referral');
+    document.getElementById('messages').innerHTML=`<div class="page-wrap">
+      <div class="page-title">🔗 Referral Program</div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:24px;margin-bottom:16px">
+        <div style="font-size:13px;color:var(--t2);margin-bottom:8px">Your referral link</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;word-break:break-all">${d.link}</div>
+          <button onclick="navigator.clipboard.writeText('${d.link}');toast('Copied!','success')" style="background:var(--grad);color:#000;border:none;padding:10px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Copy</button>
+        </div>
+      </div>
+      <div class="dash-stats">
+        <div class="dash-card"><div class="dash-num">${d.referrals}</div><div class="dash-lbl">Friends invited</div></div>
+        <div class="dash-card"><div class="dash-num">${d.credits}</div><div class="dash-lbl">Bonus requests</div></div>
+      </div>
+      <div style="font-size:13px;color:var(--t2);margin-top:16px;padding:14px;background:var(--bg2);border-radius:10px;border:1px solid var(--border)">
+        💡 For every friend who signs up, you both get <strong style="color:var(--a1)">+50 free requests</strong>!
+      </div>
+    </div>`;
+  }catch(e){toast(e.message,'error');}
+}
+
+// ── COMMAND PALETTE (Ctrl+K) ──────────────────
+let cmdOpen=false;
+function openCommandPalette(){
+  if(cmdOpen)return;cmdOpen=true;
+  const overlay=document.createElement('div');
+  overlay.id='cmd-overlay';
+  overlay.style.cssText='position:fixed;inset:0;z-index:300;background:#00000080;backdrop-filter:blur(4px);display:flex;align-items:flex-start;justify-content:center;padding-top:80px';
+  overlay.innerHTML=`<div style="background:var(--bg2);border:1px solid var(--border2);border-radius:16px;width:100%;max-width:560px;overflow:hidden;box-shadow:0 24px 80px #000">
+    <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--t2)" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="cmd-input" placeholder="Search tools, pages..." autofocus style="flex:1;background:none;border:none;outline:none;font-size:15px;color:var(--text)" oninput="filterCmd(this.value)" onkeydown="if(event.key==='Escape')closeCommandPalette()"/>
+      <kbd style="font-size:11px;color:var(--t3);background:var(--bg3);padding:2px 6px;border-radius:4px">ESC</kbd>
+    </div>
+    <div id="cmd-results" style="max-height:360px;overflow-y:auto;padding:6px"></div>
+  </div>`;
+  overlay.onclick=e=>{if(e.target===overlay)closeCommandPalette();};
+  document.body.appendChild(overlay);
+  filterCmd('');
+  document.getElementById('cmd-input')?.focus();
+}
+function closeCommandPalette(){cmdOpen=false;document.getElementById('cmd-overlay')?.remove();}
+function filterCmd(q){
+  const el=document.getElementById('cmd-results');if(!el)return;
+  const lq=q.toLowerCase();
+  const pages=[
+    {e:'➕',n:'New Chat',fn:'newChat()'},
+    {e:'📊',n:'Dashboard',fn:"navigate('dashboard')"},
+    {e:'⭐',n:'Favorites',fn:"navigate('favorites')"},
+    {e:'📁',n:'Projects',fn:"navigate('projects')"},
+    {e:'📄',n:'PDF Chat',fn:"navigate('pdf')"},
+    {e:'🤖',n:'AI Agents',fn:'navigate_agents()'},
+    {e:'🔄',n:'Workflows',fn:'navigate_workflow()'},
+    {e:'👑',n:'Admin Panel',fn:'navigate_admin()'},
+    {e:'🔗',n:'Referral',fn:'navigate_referral()'},
+    {e:'🌙',n:'Toggle Theme',fn:'toggleTheme()'},
+    {e:'⚙️',n:'Custom Instructions',fn:'openInstructions()'},
+  ];
+  const tools=TOOLS.filter(t=>!lq||t.name.toLowerCase().includes(lq)).slice(0,8);
+  const filteredPages=pages.filter(p=>!lq||p.n.toLowerCase().includes(lq));
+  const all=[...filteredPages,...tools.map(t=>({e:t.e,n:t.name,fn:`selectToolFromGrid('${t.id}')`,type:'tool'}))];
+  el.innerHTML=all.slice(0,12).map(item=>`
+    <button onclick="${item.fn};closeCommandPalette()" style="width:100%;display:flex;align-items:center;gap:10px;padding:9px 14px;border:none;background:none;color:var(--text);text-align:left;border-radius:8px;cursor:pointer;transition:.1s" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='none'">
+      <span style="font-size:16px;width:22px;text-align:center">${item.e}</span>
+      <span style="font-size:14px">${item.n}</span>
+      <span style="margin-left:auto;font-size:11px;color:var(--t3)">${item.type==='tool'?'Tool':'Page'}</span>
+    </button>`).join('');
+}
+document.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openCommandPalette();}
+  if((e.ctrlKey||e.metaKey)&&e.key==='n'){e.preventDefault();newChat();}
+});
+
+// ── ONBOARDING TOUR ───────────────────────────
+function startOnboarding(){
+  if(localStorage.getItem('nx_onboarded'))return;
+  const steps=[
+    {sel:'#cat-grid-btn',text:'🔍 Browse 180+ AI tools by category'},
+    {sel:'#search-btn',text:'🌐 Enable web search for real-time info'},
+    {sel:'#send-btn',text:'⚡ Powered by GPT-4o with streaming'},
+  ];
+  let i=0;
+  function show(idx){
+    document.querySelector('.onboard-tip')?.remove();
+    if(idx>=steps.length){localStorage.setItem('nx_onboarded','1');return;}
+    const el=document.querySelector(steps[idx].sel);
+    if(!el){show(idx+1);return;}
+    const rect=el.getBoundingClientRect();
+    const tip=document.createElement('div');
+    tip.className='onboard-tip';
+    tip.style.cssText=`position:fixed;z-index:500;background:var(--grad);color:#000;padding:12px 16px;border-radius:12px;font-size:13px;font-weight:500;max-width:220px;box-shadow:0 8px 30px #0008;left:${Math.min(rect.left,window.innerWidth-240)}px;top:${rect.bottom+10}px`;
+    tip.innerHTML=`${steps[idx].text}<br/><button onclick="document.querySelector('.onboard-tip')?.remove();show(${idx+1})" style="margin-top:8px;background:#0003;border:none;padding:4px 10px;border-radius:6px;color:#000;font-size:12px;cursor:pointer">${idx<steps.length-1?'Next →':'Done ✓'}</button>`;
+    document.body.appendChild(tip);
+    i=idx;
+  }
+  setTimeout(()=>show(0),2000);
+}
+
+// cursor blink
+const _cs=document.createElement('style');
+_cs.textContent='@keyframes cursorBlink{0%,100%{opacity:1}50%{opacity:0}}';
+document.head?.appendChild(_cs);
 
 // ── BOOT ─────────────────────────────────────
 document.addEventListener('DOMContentLoaded',()=>{
