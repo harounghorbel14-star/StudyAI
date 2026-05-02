@@ -348,13 +348,44 @@ db.prepare(`CREATE TABLE IF NOT EXISTS favorites (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`).run();
 
-// ── Knowledge Base ─────────────────────────────
+// ── Knowledge base (existing) ─────────────────
 db.prepare(`CREATE TABLE IF NOT EXISTS knowledge_base (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   content TEXT NOT NULL,
   tags TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`).run();
+
+// ── Intelligence Features ─────────────────────
+// Goal tracking
+db.prepare(`CREATE TABLE IF NOT EXISTS user_goals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  goal TEXT NOT NULL,
+  status TEXT DEFAULT 'active',
+  progress TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`).run();
+
+// Intent memory — track what user frequently asks
+db.prepare(`CREATE TABLE IF NOT EXISTS intent_memory (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  intent TEXT NOT NULL,
+  count INTEGER DEFAULT 1,
+  last_seen TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(user_id, intent)
+)`).run();
+
+// Feedback learning
+db.prepare(`CREATE TABLE IF NOT EXISTS feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL,
+  message_index INTEGER NOT NULL,
+  rating INTEGER NOT NULL CHECK(rating IN (1,-1)),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`).run();
 
@@ -681,8 +712,226 @@ app.delete("/api/pdf/:id", requireAuth, wrap(async (req,res) => {
 }));
 
 // ─────────────────────────────────────────────
-// 🧠 LONG-TERM MEMORY HELPERS
+// 🧠 INTELLIGENCE CORE — 25 Features
 // ─────────────────────────────────────────────
+
+// 1. Context stitching — merge history into coherent context
+function stitchContext(history, maxTokens=3000){
+  let tokens=0;const stitched=[];
+  for(let i=history.length-1;i>=0;i--){
+    const t=Math.ceil((history[i].content||'').length/4);
+    if(tokens+t>maxTokens)break;
+    tokens+=t;stitched.unshift(history[i]);
+  }
+  return stitched;
+}
+
+// 2. Context compression — summarize old history
+async function compressHistory(history){
+  if(history.length<=6)return history;
+  const old=history.slice(0,-4);
+  const recent=history.slice(-4);
+  const summary=await openai.chat.completions.create({
+    model:'gpt-4o-mini',max_tokens:200,
+    messages:[{role:'user',content:`Summarize this conversation history in 2-3 sentences:\n${old.map(h=>`${h.role}: ${h.content}`).join('\n')}`}]
+  });
+  const compressed=[{role:'system',content:`[Earlier conversation summary: ${summary.choices[0]?.message?.content||''}]`},...recent];
+  return compressed;
+}
+
+// 3. Hallucination detection — flag uncertain responses
+function detectHallucination(text){
+  const flags=['I think','I believe','I\'m not sure','might be','could be','approximately','around','roughly'];
+  const found=flags.filter(f=>text.toLowerCase().includes(f.toLowerCase()));
+  return {hasUncertainty:found.length>0, flags:found};
+}
+
+// 4. Confidence scoring — score response confidence
+function scoreConfidence(text){
+  const confident=['definitely','certainly','always','never','exactly','precisely'];
+  const uncertain=['maybe','perhaps','might','could','possibly','approximately'];
+  const c=confident.filter(w=>text.toLowerCase().includes(w)).length;
+  const u=uncertain.filter(w=>text.toLowerCase().includes(w)).length;
+  return Math.round(Math.max(0,Math.min(100,(c*15-u*10+70))));
+}
+
+// 5. Citation generation — extract and format citations
+async function generateCitations(text, query){
+  if(!text.includes('http')&&!text.includes('www'))return null;
+  const urls=text.match(/https?:\/\/[^\s]+/g)||[];
+  return urls.slice(0,3).map((url,i)=>({index:i+1,url,title:`Source ${i+1}`}));
+}
+
+// 6. Knowledge grounding — check KB before answering
+async function groundWithKnowledge(userId, query){
+  const items=db.prepare(`SELECT title,content FROM knowledge_base WHERE user_id=? AND (title LIKE ? OR content LIKE ?) LIMIT 3`).all(userId,`%${query.slice(0,30)}%`,`%${query.slice(0,30)}%`);
+  if(!items.length)return '';
+  return `\n\n[Knowledge Base Context:\n${items.map(i=>`${i.title}: ${i.content.slice(0,200)}`).join('\n')}]`;
+}
+
+// 7. RAG System — Retrieval Augmented Generation
+async function ragRetrieve(userId, query){
+  const kbContext = await groundWithKnowledge(userId, query);
+  const memContext = memoriesAsContext(getUserMemories(userId));
+  return kbContext+memContext;
+}
+
+// 8. Prompt rewriting — auto-improve user prompts
+async function rewritePrompt(input){
+  if(input.length>200||input.includes('?')||input.includes('\n'))return input;
+  try{
+    const r=await openai.chat.completions.create({
+      model:'gpt-4o-mini',max_tokens:100,
+      messages:[{role:'user',content:`Improve this prompt to be clearer and more specific (return ONLY the improved prompt, nothing else): "${input}"`}]
+    });
+    const rewritten=r.choices[0]?.message?.content?.trim()||input;
+    return rewritten.length>input.length*3?input:rewritten;
+  }catch(_){return input;}
+}
+
+// 9. Intent detection — classify user intent
+async function detectIntent(input){
+  const intents={
+    'create':['write','generate','create','make','build','design'],
+    'analyze':['analyze','review','check','evaluate','assess','audit'],
+    'explain':['explain','what is','how does','why','teach me','help me understand'],
+    'fix':['fix','debug','error','problem','issue','wrong'],
+    'translate':['translate','in arabic','in french','in english'],
+    'summarize':['summarize','summary','tldr','shorten','brief'],
+    'search':['search','find','look up','latest','current','today'],
+    'code':['code','function','class','script','program'],
+  };
+  const lower=input.toLowerCase();
+  for(const [intent,keywords] of Object.entries(intents)){
+    if(keywords.some(k=>lower.includes(k)))return intent;
+  }
+  return 'general';
+}
+
+// 10. Track intent memory
+function trackIntent(userId, intent){
+  try{
+    db.prepare(`INSERT INTO intent_memory (user_id,intent) VALUES (?,?)
+      ON CONFLICT(user_id,intent) DO UPDATE SET count=count+1, last_seen=datetime('now')`).run(userId,intent);
+  }catch(_){}
+}
+
+// 11. Goal tracking — extract and save user goals
+async function extractGoals(userId, input){
+  const goalWords=['want to','need to','goal is','trying to','planning to','I want','I need','I\'m building'];
+  if(!goalWords.some(w=>input.toLowerCase().includes(w)))return;
+  try{
+    const r=await openai.chat.completions.create({
+      model:'gpt-4o-mini',max_tokens:80,
+      messages:[{role:'user',content:`Extract the user's goal from this message. Return ONLY the goal as a short phrase or "none": "${input.slice(0,200)}"`}]
+    });
+    const goal=r.choices[0]?.message?.content?.trim()||'';
+    if(goal&&goal!=='none'&&goal.length>5&&goal.length<100){
+      db.prepare(`INSERT INTO user_goals (user_id,goal) VALUES (?,?)`).run(userId,goal);
+    }
+  }catch(_){}
+}
+
+// 12. Task decomposition — break complex tasks into steps
+async function decomposeTask(input){
+  const complex=['build','create a full','develop','implement','make a system','design a'];
+  if(!complex.some(w=>input.toLowerCase().includes(w)))return null;
+  try{
+    const r=await openai.chat.completions.create({
+      model:'gpt-4o-mini',max_tokens:200,
+      messages:[{role:'user',content:`Break this task into 3-5 clear steps. Return as JSON array: ["step1","step2",...]\n\nTask: ${input.slice(0,200)}`}]
+    });
+    const text=r.choices[0]?.message?.content?.trim()||'';
+    return JSON.parse(text.replace(/```json|```/g,'').trim());
+  }catch(_){return null;}
+}
+
+// 13. Clarification detection — know when to ask for more info
+function needsClarification(input){
+  const vague=['it','this','that','thing','stuff','something','anything','do it'];
+  const tooShort=input.trim().split(' ').length<3;
+  const hasVague=vague.some(w=>input.toLowerCase().split(' ').includes(w));
+  return tooShort&&hasVague;
+}
+
+// 14. Scenario simulation — "what if" detection
+function isScenarioQuery(input){
+  return /what if|suppose|imagine|scenario|simulate|pretend|hypothetical/i.test(input);
+}
+
+// 15. Predictive responses — pre-suggest next questions
+async function predictNextQuestions(response, intent){
+  try{
+    const r=await openai.chat.completions.create({
+      model:'gpt-4o-mini',max_tokens:100,
+      messages:[{role:'user',content:`Based on this AI response, predict 3 follow-up questions the user might ask. Return JSON array only: ["q1","q2","q3"]\n\nResponse: ${response.slice(0,300)}`}]
+    });
+    return JSON.parse(r.choices[0]?.message?.content?.trim().replace(/```json|```/g,'')||'[]');
+  }catch(_){return[];}
+}
+
+// 16. Feedback learning — use ratings to improve
+function getFeedbackContext(userId){
+  const feedback=db.prepare(`SELECT f.rating, c.content FROM feedback f JOIN conversations c ON c.user_id=f.user_id AND c.session_id=f.session_id WHERE f.user_id=? AND f.rating=-1 ORDER BY f.created_at DESC LIMIT 3`).all(userId);
+  if(!feedback.length)return'';
+  return`\n\n[User previously disliked responses that: ${feedback.map(f=>f.content.slice(0,50)).join('; ')}. Avoid similar patterns.]`;
+}
+
+// 17. Decision reasoning — structured decision analysis
+async function analyzeDecision(input){
+  if(!/should i|which is better|compare|decision|choose|pick|select/i.test(input))return null;
+  try{
+    const r=await openai.chat.completions.create({
+      model:'gpt-4o-mini',max_tokens:300,
+      messages:[{role:'user',content:`Provide a structured decision analysis for: "${input}"\nFormat: {"pros":[],"cons":[],"recommendation":"","confidence":0-100}`}]
+    });
+    return JSON.parse(r.choices[0]?.message?.content?.trim().replace(/```json|```/g,'')||'null');
+  }catch(_){return null;}
+}
+
+// 18. Build MASTER intelligence system prompt
+async function buildIntelligentSystemPrompt(userId, input, history){
+  const memories = getUserMemories(userId);
+  const memContext = memoriesAsContext(memories);
+  const customAbout = db.prepare(`SELECT value FROM user_memories WHERE user_id=? AND key='__custom_about'`).get(userId);
+  const customStyle = db.prepare(`SELECT value FROM user_memories WHERE user_id=? AND key='__custom_style'`).get(userId);
+  const customContext = (customAbout?.value||customStyle?.value)
+    ? `\n\n[Custom Instructions:\nAbout user: ${customAbout?.value||'N/A'}\nResponse style: ${customStyle?.value||'N/A'}]` : '';
+
+  // RAG — retrieve relevant knowledge
+  const ragContext = await ragRetrieve(userId, input);
+
+  // Goals context
+  const goals = db.prepare(`SELECT goal FROM user_goals WHERE user_id=? AND status='active' ORDER BY created_at DESC LIMIT 3`).all(userId);
+  const goalsContext = goals.length ? `\n\n[User's active goals: ${goals.map(g=>g.goal).join(', ')}]` : '';
+
+  // Feedback learning
+  const feedbackContext = getFeedbackContext(userId);
+
+  // Frequent intents
+  const topIntents = db.prepare(`SELECT intent,count FROM intent_memory WHERE user_id=? ORDER BY count DESC LIMIT 3`).all(userId);
+  const intentsContext = topIntents.length ? `\n\n[User frequently asks about: ${topIntents.map(i=>i.intent).join(', ')}]` : '';
+
+  // Clarification hint
+  const clarifyHint = needsClarification(input) ? '\n\n[Note: The user\'s request is vague. Ask ONE clarifying question before answering.]' : '';
+
+  // Scenario hint
+  const scenarioHint = isScenarioQuery(input) ? '\n\n[Note: This is a hypothetical/scenario question. Engage creatively with the premise.]' : '';
+
+  return `You are NexusAI, an advanced AI assistant created by Haroun Ghorbel. You have full intelligence capabilities including:
+- Long-term memory about the user
+- Context awareness across the conversation
+- Goal tracking and task decomposition
+- Knowledge base access
+- Feedback learning from past interactions
+
+Core rules:
+1. Always respond in the SAME language the user writes in
+2. If asked who created you: "I was created by Haroun Ghorbel"
+3. Be concise but complete
+4. Use structured responses when appropriate (lists, headers, code blocks)
+5. Cite confidence level when uncertain${memContext}${customContext}${ragContext}${goalsContext}${intentsContext}${feedbackContext}${clarifyHint}${scenarioHint}`;
+}
 function getUserMemories(userId) {
   return db.prepare(`SELECT key, value FROM user_memories WHERE user_id=? ORDER BY updated_at DESC LIMIT 20`).all(userId);
 }
@@ -747,32 +996,45 @@ app.post("/api/chat", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)
   const err = validateBody(req.body, ["input"]);
   if (err) return res.status(400).json({ error:err });
   const sessionId = req.body.session_id || newSessionId();
-  const input = req.body.input.trim();
+  let input = req.body.input.trim();
   const history = getHistory(req.user.id, sessionId);
 
-  // Load long-term memories + custom instructions
-  const memories = getUserMemories(req.user.id);
-  const memContext = memoriesAsContext(memories);
+  // Intelligence features
+  const intent = await detectIntent(input);
+  trackIntent(req.user.id, intent);
+  extractGoals(req.user.id, input);
 
-  // Custom instructions
-  const customAbout = db.prepare(`SELECT value FROM user_memories WHERE user_id=? AND key='__custom_about'`).get(req.user.id);
-  const customStyle = db.prepare(`SELECT value FROM user_memories WHERE user_id=? AND key='__custom_style'`).get(req.user.id);
-  const customContext = (customAbout?.value || customStyle?.value)
-    ? `\n\n[Custom Instructions:\nAbout user: ${customAbout?.value||'N/A'}\nResponse style: ${customStyle?.value||'N/A'}]`
-    : '';
+  // Auto rewrite simple prompts
+  if(input.length<100 && !req.body.no_rewrite) input = await rewritePrompt(input);
 
-  const systemPrompt = `You are NexusAI, a helpful AI assistant created by Haroun Ghorbel. If anyone asks who created you, say: 'I was created by Haroun Ghorbel.' You have memory of the current conversation and long-term memory about the user.
+  // Compress long history
+  const compressedHistory = await compressHistory(history);
 
-IMPORTANT: Always respond in the SAME language the user writes in. If they write in Arabic, respond in Arabic. If they write in French, respond in French. If they write in Tunisian dialect (franco/darija), respond in the same Tunisian dialect. Never switch languages unless the user switches first.${memContext}${customContext}`;
+  // Build intelligent system prompt
+  const systemPrompt = await buildIntelligentSystemPrompt(req.user.id, input, compressedHistory);
 
   const deepThink = req.body.deep_think === true;
   const model = deepThink ? "o1-mini" : "gpt-4o";
 
-  const reply = await chatComplete(systemPrompt, input, model, history);
+  const reply = await chatComplete(systemPrompt, input, model, compressedHistory);
+
+  // Post-processing intelligence
+  const confidence = scoreConfidence(reply);
+  const hallucination = detectHallucination(reply);
+
   saveMessage(req.user.id, sessionId, "user", input, "chat");
   saveMessage(req.user.id, sessionId, "assistant", reply, "chat");
   extractAndSaveMemories(req.user.id, input, reply);
-  res.json({ reply, session_id:sessionId });
+
+  res.json({
+    reply,
+    session_id: sessionId,
+    meta: {
+      confidence,
+      hasUncertainty: hallucination.hasUncertainty,
+      intent,
+    }
+  });
 }));
 
 // ─────────────────────────────────────────────
@@ -782,15 +1044,16 @@ app.post("/api/chat/stream", requireAuth, requireQuota, aiLimiter, wrap(async (r
   const err = validateBody(req.body, ["input"]);
   if (err) return res.status(400).json({ error:err });
   const sessionId = req.body.session_id || newSessionId();
-  const input = req.body.input.trim();
+  let input = req.body.input.trim();
   const history = getHistory(req.user.id, sessionId);
-  const memories = getUserMemories(req.user.id);
-  const memContext = memoriesAsContext(memories);
-  const customAbout = db.prepare(`SELECT value FROM user_memories WHERE user_id=? AND key='__custom_about'`).get(req.user.id);
-  const customStyle = db.prepare(`SELECT value FROM user_memories WHERE user_id=? AND key='__custom_style'`).get(req.user.id);
-  const customContext = (customAbout?.value || customStyle?.value)
-    ? `\n\n[Custom Instructions:\nAbout user: ${customAbout?.value||'N/A'}\nResponse style: ${customStyle?.value||'N/A'}]` : '';
-  const systemPrompt = `You are NexusAI, a helpful AI assistant created by Haroun Ghorbel. Always respond in the SAME language the user writes in.${memContext}${customContext}`;
+
+  // Intelligence features
+  const intent = await detectIntent(input);
+  trackIntent(req.user.id, intent);
+  extractGoals(req.user.id, input);
+  if(input.length<100) input = await rewritePrompt(input);
+  const compressedHistory = await compressHistory(history);
+  const systemPrompt = await buildIntelligentSystemPrompt(req.user.id, input, compressedHistory);
 
   // SSE headers
   res.setHeader('Content-Type','text/event-stream');
@@ -805,7 +1068,7 @@ app.post("/api/chat/stream", requireAuth, requireQuota, aiLimiter, wrap(async (r
       stream: true,
       messages:[
         {role:'system',content:systemPrompt},
-        ...history.map(h=>({role:h.role,content:h.content})),
+        ...compressedHistory.map(h=>({role:h.role,content:h.content})),
         {role:'user',content:input}
       ]
     });
@@ -816,7 +1079,8 @@ app.post("/api/chat/stream", requireAuth, requireQuota, aiLimiter, wrap(async (r
         res.write(`data: ${JSON.stringify({token})}\n\n`);
       }
     }
-    res.write(`data: ${JSON.stringify({done:true, session_id:sessionId})}\n\n`);
+    const confidence = scoreConfidence(fullReply);
+    res.write(`data: ${JSON.stringify({done:true, session_id:sessionId, meta:{confidence,intent}})}\n\n`);
     res.end();
     saveMessage(req.user.id, sessionId, "user", input, "chat");
     saveMessage(req.user.id, sessionId, "assistant", fullReply, "chat");
@@ -828,8 +1092,106 @@ app.post("/api/chat/stream", requireAuth, requireQuota, aiLimiter, wrap(async (r
 }));
 
 // ─────────────────────────────────────────────
-// 👑 ADMIN PANEL
+// 🧠 INTELLIGENCE API ROUTES
 // ─────────────────────────────────────────────
+
+// Goal tracking
+app.get("/api/goals", requireAuth, wrap(async (req,res)=>{
+  const goals = db.prepare(`SELECT * FROM user_goals WHERE user_id=? AND status='active' ORDER BY created_at DESC`).all(req.user.id);
+  res.json({goals});
+}));
+app.post("/api/goals", requireAuth, wrap(async (req,res)=>{
+  const {goal} = req.body;
+  if(!goal) return res.status(400).json({error:"Missing goal."});
+  const id = db.prepare(`INSERT INTO user_goals (user_id,goal) VALUES (?,?)`).run(req.user.id, goal).lastInsertRowid;
+  res.json({ok:true,id});
+}));
+app.patch("/api/goals/:id", requireAuth, wrap(async (req,res)=>{
+  db.prepare(`UPDATE user_goals SET status=?,progress=? WHERE id=? AND user_id=?`).run(req.body.status||'active', req.body.progress||'', Number(req.params.id), req.user.id);
+  res.json({ok:true});
+}));
+
+// Feedback (thumbs up/down)
+app.post("/api/feedback", requireAuth, wrap(async (req,res)=>{
+  const {session_id, message_index, rating} = req.body;
+  if(!session_id||rating===undefined) return res.status(400).json({error:"Missing fields."});
+  db.prepare(`INSERT OR REPLACE INTO feedback (user_id,session_id,message_index,rating) VALUES (?,?,?,?)`).run(req.user.id, session_id, message_index||0, rating>0?1:-1);
+  res.json({ok:true});
+}));
+
+// Task decomposition
+app.post("/api/decompose", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  const {task} = req.body;
+  if(!task) return res.status(400).json({error:"Missing task."});
+  const steps = await decomposeTask(task)||[];
+  if(!steps.length){
+    const r = await openai.chat.completions.create({
+      model:'gpt-4o-mini',max_tokens:300,
+      messages:[{role:'user',content:`Break this task into 5 clear, actionable steps. Return JSON array only: ["step1","step2","step3","step4","step5"]\n\nTask: ${task}`}]
+    });
+    try{
+      const parsed=JSON.parse(r.choices[0]?.message?.content?.trim().replace(/```json|```/g,'')||'[]');
+      return res.json({steps:parsed});
+    }catch(_){}
+  }
+  res.json({steps});
+}));
+
+// Decision analysis
+app.post("/api/decision", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  const {question} = req.body;
+  if(!question) return res.status(400).json({error:"Missing question."});
+  const analysis = await analyzeDecision(question);
+  if(analysis) return res.json(analysis);
+  const r = await openai.chat.completions.create({
+    model:'gpt-4o',max_tokens:500,
+    messages:[{role:'user',content:`Provide a structured decision analysis for: "${question}"\nReturn JSON: {"pros":["..."],"cons":["..."],"recommendation":"...","confidence":75,"alternatives":["..."]}`}]
+  });
+  try{
+    const d=JSON.parse(r.choices[0]?.message?.content?.trim().replace(/```json|```/g,'')||'{}');
+    res.json(d);
+  }catch(_){res.json({error:"Could not analyze."});}
+}));
+
+// Scenario simulation
+app.post("/api/simulate", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  const {scenario, variables} = req.body;
+  if(!scenario) return res.status(400).json({error:"Missing scenario."});
+  const prompt = `Simulate this scenario with realistic outcomes:\n\nScenario: ${scenario}\n${variables?`Variables: ${JSON.stringify(variables)}`:''}\n\nProvide: 1) Most likely outcome, 2) Best case, 3) Worst case, 4) Key factors that affect the outcome`;
+  const reply = await chatComplete("You are an expert scenario simulator. Provide detailed, realistic analysis.", prompt, "gpt-4o");
+  res.json({simulation:reply});
+}));
+
+// Tradeoff analysis
+app.post("/api/tradeoff", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  const {options, criteria} = req.body;
+  if(!options||!options.length) return res.status(400).json({error:"Missing options."});
+  const prompt = `Analyze the tradeoffs between these options:\n\nOptions: ${options.join(', ')}\n${criteria?`Criteria: ${criteria}`:'Criteria: cost, time, quality, risk'}\n\nReturn a structured comparison with scores and recommendation.`;
+  const reply = await chatComplete("You are an expert decision analyst.", prompt, "gpt-4o");
+  res.json({analysis:reply});
+}));
+
+// Parallel thinking — multiple perspectives
+app.post("/api/perspectives", requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
+  const {topic} = req.body;
+  if(!topic) return res.status(400).json({error:"Missing topic."});
+  const [optimist, pessimist, realist, creative] = await Promise.all([
+    chatComplete("You are an optimist. See the best possible outcomes.", topic, "gpt-4o-mini"),
+    chatComplete("You are a pessimist. See the risks and downsides.", topic, "gpt-4o-mini"),
+    chatComplete("You are a realist. Give balanced practical view.", topic, "gpt-4o-mini"),
+    chatComplete("You are a creative thinker. Find unconventional angles.", topic, "gpt-4o-mini"),
+  ]);
+  res.json({perspectives:{optimist, pessimist, realist, creative}});
+}));
+
+// Intent insights
+app.get("/api/insights", requireAuth, wrap(async (req,res)=>{
+  const intents = db.prepare(`SELECT intent,count FROM intent_memory WHERE user_id=? ORDER BY count DESC LIMIT 10`).all(req.user.id);
+  const goals = db.prepare(`SELECT * FROM user_goals WHERE user_id=? ORDER BY created_at DESC LIMIT 5`).all(req.user.id);
+  const feedback = db.prepare(`SELECT COUNT(*) as pos FROM feedback WHERE user_id=? AND rating=1`).get(req.user.id);
+  const negFeedback = db.prepare(`SELECT COUNT(*) as neg FROM feedback WHERE user_id=? AND rating=-1`).get(req.user.id);
+  res.json({intents, goals, positiveRatings:feedback?.pos||0, negativeRatings:negFeedback?.neg||0});
+}));
 const ADMIN_EMAILS = ['haroun.ghorbel@gmail.com','harounghorbel14@gmail.com','ghorbelharoun16@gmail.com'];
 
 function requireAdmin(req,res,next){

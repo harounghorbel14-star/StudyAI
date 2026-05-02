@@ -740,6 +740,9 @@ function renderAllMsgs(){
             <button class="msg-act-btn" onclick="copyMsg(${i})">Copy</button>
             <button class="msg-act-btn star" onclick="saveToFavorites('${(m.text||'').replace(/'/g,"\\'").replace(/\n/g,'\\n')}','${S.tool?.name||''}')" title="Save">⭐</button>
             <button class="msg-act-btn" onclick="speakResponse('${(m.text||'').slice(0,200).replace(/'/g,"\\'")}')" title="Listen">🔊</button>
+            <button class="msg-act-btn" onclick="enableInlineEdit(${i})" title="Edit">✏️</button>
+            <button class="msg-act-btn" onclick="sendFeedback(${i},1)" title="Good response">👍</button>
+            <button class="msg-act-btn" onclick="sendFeedback(${i},-1)" title="Bad response">👎</button>
             ${m.text?.includes('```')?`<button class="msg-act-btn" onclick="extractAndRunCode(${i})" title="Run code">▶ Run</button>`:''}
             ${m.data&&m.type==='audio'?`<a class="msg-act-btn" href="${m.data}" download>⬇ Download</a>`:''}
           </div>
@@ -2051,6 +2054,113 @@ const CAT_META = {
   hr:          {e:'👥', name:'HR & People'},
 };
 
+// ── 🧠 INTELLIGENCE FEATURES UI ──────────────
+
+async function sendFeedback(msgIndex, rating){
+  if(!S.sessionId)return;
+  try{
+    await api('/api/feedback',{method:'POST',body:{session_id:S.sessionId,message_index:msgIndex,rating}});
+    toast(rating>0?'👍 Thanks!':'👎 We\'ll improve!','success');
+  }catch(_){}
+}
+
+async function navigate_goals(){
+  S.page='goals';closeSidebar();
+  document.getElementById('tool-label').textContent='🎯 Goals';
+  document.getElementById('messages').innerHTML='<div class="page-wrap"><div class="page-title">🎯 Goals</div><div style="color:var(--t2)">Loading...</div></div>';
+  try{
+    const {goals=[]}=await api('/api/goals');
+    document.getElementById('messages').innerHTML=`<div class="page-wrap">
+      <div class="page-title">🎯 My Goals</div>
+      <button onclick="addGoal()" style="background:var(--grad);color:#000;border:none;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:16px">+ Add Goal</button>
+      ${goals.length?goals.map(g=>`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:8px;display:flex;align-items:center;gap:12px">
+        <div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(g.goal)}</div><div style="font-size:11px;color:var(--t3)">${g.status} · ${new Date(g.created_at).toLocaleDateString()}</div></div>
+        <button onclick="completeGoal(${g.id})" style="font-size:11px;padding:4px 8px;border:1px solid var(--a1);border-radius:5px;color:var(--a1);background:none;cursor:pointer">✓ Done</button>
+      </div>`).join(''):'<div style="color:var(--t2);padding:40px;text-align:center">No goals yet. AI auto-detects your goals from conversations!</div>'}
+    </div>`;
+  }catch(e){toast(e.message,'error');}
+}
+
+async function addGoal(){
+  const goal=prompt('What is your goal?');if(!goal)return;
+  await api('/api/goals',{method:'POST',body:{goal}});
+  toast('Goal added! ✅','success');navigate_goals();
+}
+
+async function completeGoal(id){
+  await api('/api/goals/'+id,{method:'PATCH',body:{status:'completed'}});
+  toast('Goal completed! 🎉','success');navigate_goals();
+}
+
+async function decomposeInChat(){
+  const input=document.getElementById('msg-input')?.value?.trim();
+  if(!input){toast('Enter a task first','error');return;}
+  document.getElementById('msg-input').value='';
+  addMsg({role:'user',text:`🔧 Decompose: ${input}`});showTyping();
+  try{
+    const d=await api('/api/decompose',{method:'POST',body:{task:input}});
+    hideTyping();
+    addMsg({role:'assistant',text:`**📋 Task Breakdown:**\n\n${(d.steps||[]).map((s,i)=>`${i+1}. ${s}`).join('\n')}`});
+  }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+}
+
+async function analyzeDecisionInChat(){
+  const input=document.getElementById('msg-input')?.value?.trim();
+  if(!input){toast('Enter your decision question','error');return;}
+  document.getElementById('msg-input').value='';
+  addMsg({role:'user',text:`⚖️ Decision: ${input}`});showTyping();
+  try{
+    const d=await api('/api/decision',{method:'POST',body:{question:input}});
+    hideTyping();
+    addMsg({role:'assistant',text:`**⚖️ Decision Analysis**\n\n**✅ Pros:**\n${(d.pros||[]).map(p=>`• ${p}`).join('\n')}\n\n**❌ Cons:**\n${(d.cons||[]).map(c=>`• ${c}`).join('\n')}\n\n**💡 Recommendation:** ${d.recommendation||''}\n\n**Confidence:** ${d.confidence||0}%`});
+  }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+}
+
+async function parallelThinkingInChat(){
+  const input=document.getElementById('msg-input')?.value?.trim();
+  if(!input){toast('Enter a topic','error');return;}
+  document.getElementById('msg-input').value='';
+  addMsg({role:'user',text:`🧩 Perspectives: ${input}`});showTyping();
+  try{
+    const d=await api('/api/perspectives',{method:'POST',body:{topic:input}});
+    hideTyping();
+    addMsg({role:'assistant',text:`**🧩 Multiple Perspectives**\n\n😊 **Optimist:**\n${d.perspectives.optimist}\n\n😟 **Pessimist:**\n${d.perspectives.pessimist}\n\n🎯 **Realist:**\n${d.perspectives.realist}\n\n💡 **Creative:**\n${d.perspectives.creative}`});
+  }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+}
+
+async function simulateScenarioInChat(){
+  const input=document.getElementById('msg-input')?.value?.trim();
+  if(!input){toast('Describe your scenario','error');return;}
+  document.getElementById('msg-input').value='';
+  addMsg({role:'user',text:`🎲 Simulate: ${input}`});showTyping();
+  try{
+    const d=await api('/api/simulate',{method:'POST',body:{scenario:input}});
+    hideTyping();addMsg({role:'assistant',text:`**🎲 Scenario Simulation:**\n\n${d.simulation}`});
+  }catch(e){hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});}
+}
+
+async function navigate_insights(){
+  S.page='insights';closeSidebar();
+  document.getElementById('tool-label').textContent='🧠 Insights';
+  document.getElementById('messages').innerHTML='<div class="page-wrap"><div class="page-title">🧠 Insights</div><div style="color:var(--t2)">Loading...</div></div>';
+  try{
+    const d=await api('/api/insights');
+    document.getElementById('messages').innerHTML=`<div class="page-wrap">
+      <div class="page-title">🧠 AI Insights About You</div>
+      <div class="dash-stats" style="margin-bottom:20px">
+        <div class="dash-card"><div class="dash-num">${d.positiveRatings||0}</div><div class="dash-lbl">👍 Good</div></div>
+        <div class="dash-card"><div class="dash-num">${d.negativeRatings||0}</div><div class="dash-lbl">👎 Improved</div></div>
+        <div class="dash-card"><div class="dash-num">${d.goals?.length||0}</div><div class="dash-lbl">🎯 Goals</div></div>
+        <div class="dash-card"><div class="dash-num">${d.intents?.length||0}</div><div class="dash-lbl">💡 Topics</div></div>
+      </div>
+      ${(d.intents||[]).map(i=>`<div style="display:flex;align-items:center;gap:10px;padding:8px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
+        <span style="font-size:13px;flex:1">${i.intent}</span>
+        <span style="font-size:12px;color:var(--a1);font-weight:600">${i.count}x</span>
+      </div>`).join('')}
+    </div>`;
+  }catch(e){toast(e.message,'error');}
+}
+
 function toggleCatGrid(){
   const overlay = document.getElementById('cat-overlay');
   const btn = document.getElementById('cat-grid-btn');
@@ -2245,7 +2355,195 @@ async function saveInstructions(){
   }catch(e){toast(e.message,'error');}
 }
 
-// ── ADMIN PANEL ───────────────────────────────
+// ── KNOWLEDGE BASE ────────────────────────────
+async function navigate_kb(){
+  S.page='kb';closeSidebar();
+  document.getElementById('tool-label').textContent='📚 Knowledge Base';
+  document.getElementById('messages').innerHTML='<div class="page-wrap"><div class="page-title">📚 Knowledge Base</div><div style="color:var(--t2)">Loading...</div></div>';
+  try{
+    const {items=[]}=await api('/api/kb');
+    document.getElementById('messages').innerHTML=`<div class="page-wrap">
+      <div class="page-title">📚 Knowledge Base</div>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <input id="kb-search" placeholder="Search..." style="flex:1;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--text);outline:none" oninput="searchKB(this.value)"/>
+        <button onclick="addKBItem()" style="background:var(--grad);color:#000;border:none;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">+ Add</button>
+      </div>
+      <div id="kb-list">
+        ${items.length?items.map(i=>`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:8px;display:flex;align-items:center;gap:12px">
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:500">${esc(i.title)}</div>
+            <div style="font-size:11px;color:var(--t3)">${i.tags||''} · ${new Date(i.created_at).toLocaleDateString()}</div>
+          </div>
+          <button onclick="askKB(${i.id},'${esc(i.title)}')" style="font-size:12px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;color:var(--t2);cursor:pointer;background:none">Ask AI</button>
+          <button onclick="deleteKBItem(${i.id})" style="color:var(--t3);font-size:14px;background:none;border:none;cursor:pointer">✕</button>
+        </div>`).join(''):'<div style="color:var(--t2);padding:40px;text-align:center">No knowledge base items yet.<br/>Add documents, notes, or any text you want AI to remember.</div>'}
+      </div>
+    </div>`;
+  }catch(e){toast(e.message,'error');}
+}
+
+async function addKBItem(){
+  const title=prompt('Title:');if(!title)return;
+  const content=prompt('Content (paste your text):');if(!content)return;
+  const tags=prompt('Tags (optional, comma-separated):');
+  try{
+    await api('/api/kb',{method:'POST',body:{title,content,tags}});
+    toast('✅ Added to knowledge base!','success');
+    navigate_kb();
+  }catch(e){toast(e.message,'error');}
+}
+
+async function deleteKBItem(id){
+  if(!confirm('Delete?'))return;
+  await api('/api/kb/'+id,{method:'DELETE'});
+  toast('Deleted','success');navigate_kb();
+}
+
+function askKB(id,title){
+  const question=prompt(`Ask a question about "${title}":`);
+  if(!question)return;
+  S.page='chat';
+  document.getElementById('tool-label').textContent='📚 '+title;
+  document.getElementById('messages').innerHTML='';
+  addMsg({role:'user',text:question});showTyping();
+  api('/api/kb/'+id+'/ask',{method:'POST',body:{question}}).then(r=>{
+    hideTyping();addMsg({role:'assistant',text:r.answer});
+  }).catch(e=>{hideTyping();addMsg({role:'assistant',text:'❌ '+e.message});});
+}
+
+// ── API KEYS PAGE ──────────────────────────────
+async function navigate_apikeys(){
+  S.page='apikeys';closeSidebar();
+  document.getElementById('tool-label').textContent='🔑 API Access';
+  document.getElementById('messages').innerHTML='<div class="page-wrap"><div class="page-title">🔑 API Access</div><div style="color:var(--t2)">Loading...</div></div>';
+  try{
+    const {keys=[]}=await api('/api/keys');
+    document.getElementById('messages').innerHTML=`<div class="page-wrap">
+      <div class="page-title">🔑 API Access</div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;font-size:13px;color:var(--t2)">
+        Use NexusAI in your own apps.<br/>
+        <code style="background:var(--bg3);padding:4px 8px;border-radius:5px;color:var(--a2)">POST https://nexusai-production-6504.up.railway.app/v1/chat</code><br/>
+        <code style="background:var(--bg3);padding:4px 8px;border-radius:5px;color:var(--a2);display:block;margin-top:6px">Authorization: Bearer YOUR_KEY</code>
+      </div>
+      <button onclick="createApiKey()" style="background:var(--grad);color:#000;border:none;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:16px">+ Create API Key</button>
+      <div>
+        ${keys.length?keys.map(k=>`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:12px">
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:500">${esc(k.name)}</div>
+            <div style="font-size:11px;color:var(--t3)">${k.requests} requests · Last used: ${k.last_used?new Date(k.last_used).toLocaleDateString():'Never'}</div>
+          </div>
+          <button onclick="deleteApiKey(${k.id})" style="color:var(--t3);font-size:14px;background:none;border:none;cursor:pointer">✕</button>
+        </div>`).join(''):'<div style="color:var(--t2);font-size:13px">No API keys yet.</div>'}
+      </div>
+    </div>`;
+  }catch(e){
+    document.getElementById('messages').innerHTML=`<div class="page-wrap"><div class="page-title">🔑 API Access</div><div style="color:var(--t2);padding:20px;background:var(--bg2);border-radius:10px">API access requires <strong style="color:var(--a1)">Pro or Elite</strong> plan. <button onclick="navigate('pricing')" style="background:var(--grad);color:#000;border:none;padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;margin-left:8px">Upgrade →</button></div></div>`;
+  }
+}
+
+async function createApiKey(){
+  const name=prompt('Key name (e.g. "My App"):');if(!name)return;
+  try{
+    const d=await api('/api/keys',{method:'POST',body:{name}});
+    alert(`✅ Your API Key:\n\n${d.key}\n\nSave this — it won't be shown again!`);
+    navigate_apikeys();
+  }catch(e){toast(e.message,'error');}
+}
+
+async function deleteApiKey(id){
+  if(!confirm('Delete API key?'))return;
+  await api('/api/keys/'+id,{method:'DELETE'});
+  toast('Deleted','success');navigate_apikeys();
+}
+
+// ── TEAMS PAGE ────────────────────────────────
+async function navigate_teams(){
+  S.page='teams';closeSidebar();
+  document.getElementById('tool-label').textContent='👥 Teams';
+  document.getElementById('messages').innerHTML='<div class="page-wrap"><div class="page-title">👥 Teams</div><div style="color:var(--t2)">Loading...</div></div>';
+  try{
+    const {teams=[]}=await api('/api/teams');
+    document.getElementById('messages').innerHTML=`<div class="page-wrap">
+      <div class="page-title">👥 Team Collaboration</div>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button onclick="createTeam()" style="background:var(--grad);color:#000;border:none;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">+ Create Team</button>
+        <button onclick="joinTeam()" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:8px;font-size:13px;cursor:pointer">Join with Code</button>
+      </div>
+      ${teams.length?teams.map(t=>`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:8px">
+        <div style="font-size:14px;font-weight:500;margin-bottom:4px">${esc(t.name)}</div>
+        <div style="font-size:12px;color:var(--t3)">Role: ${t.role} · Invite code: <code style="background:var(--bg3);padding:2px 6px;border-radius:4px;color:var(--a1)">${t.invite_code}</code></div>
+        <button onclick="navigator.clipboard.writeText('${t.invite_code}');toast('Code copied!','success')" style="margin-top:8px;font-size:12px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;color:var(--t2);background:none;cursor:pointer">Copy Invite Code</button>
+      </div>`).join(''):'<div style="color:var(--t2);font-size:13px">No teams yet. Create one or join with an invite code.</div>'}
+    </div>`;
+  }catch(e){toast(e.message,'error');}
+}
+
+async function createTeam(){
+  const name=prompt('Team name:');if(!name)return;
+  try{
+    const d=await api('/api/teams',{method:'POST',body:{name}});
+    toast(`Team created! Invite code: ${d.invite_code}`,'success');navigate_teams();
+  }catch(e){toast(e.message,'error');}
+}
+
+async function joinTeam(){
+  const code=prompt('Enter invite code:');if(!code)return;
+  try{
+    const d=await api('/api/teams/join',{method:'POST',body:{invite_code:code}});
+    toast(`Joined "${d.team_name}"! ✅`,'success');navigate_teams();
+  }catch(e){toast(e.message,'error');}
+}
+
+// ── INLINE EDITING ────────────────────────────
+function enableInlineEdit(msgIndex){
+  const msgEls=document.querySelectorAll('.msg.assistant');
+  const el=msgEls[msgIndex];if(!el)return;
+  const bubble=el.querySelector('.msg-bubble');if(!bubble)return;
+  const original=S.msgs[msgIndex]?.text||'';
+  bubble.contentEditable='true';
+  bubble.style.outline='1px solid var(--a1)';
+  bubble.style.borderRadius='8px';
+  bubble.style.padding='8px';
+  bubble.focus();
+  // Save on blur
+  bubble.onblur=()=>{
+    bubble.contentEditable='false';
+    bubble.style.outline='';
+    const newText=bubble.innerText;
+    if(S.msgs[msgIndex])S.msgs[msgIndex].text=newText;
+    toast('✅ Edited','success');
+  };
+}
+
+// ── VERSION HISTORY ───────────────────────────
+async function showVersionHistory(){
+  if(!S.sessionId){toast('No session to show history for','error');return;}
+  try{
+    const {versions=[]}=await api('/api/history/versions/'+S.sessionId);
+    if(!versions.length){toast('No version history yet','error');return;}
+    const modal=document.createElement('div');
+    modal.style.cssText='position:fixed;inset:0;z-index:200;background:#00000090;display:flex;align-items:center;justify-content:center;padding:20px';
+    modal.innerHTML=`<div style="background:var(--bg2);border:1px solid var(--border2);border-radius:16px;width:100%;max-width:500px;max-height:80vh;overflow:auto;padding:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div style="font-size:15px;font-weight:600">🕐 Version History</div>
+        <button onclick="this.closest('div[style]').remove()" style="color:var(--t2);font-size:18px;background:none;border:none;cursor:pointer">✕</button>
+      </div>
+      ${versions.map(v=>`<div style="background:var(--bg3);border-radius:8px;padding:12px;margin-bottom:8px;font-size:12px">
+        <div style="color:var(--t3);margin-bottom:6px">v${v.version} · ${new Date(v.created_at).toLocaleString()}</div>
+        <div style="color:var(--t2);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">${esc(v.content.slice(0,200))}</div>
+      </div>`).join('')}
+    </div>`;
+    modal.onclick=e=>{if(e.target===modal)modal.remove();};
+    document.body.appendChild(modal);
+  }catch(e){toast(e.message,'error');}
+}
+
+// Auto-save version when session changes
+async function autoSaveVersion(){
+  if(!S.sessionId||!S.msgs.length)return;
+  const content=S.msgs.map(m=>`${m.role}: ${m.text||''}`).join('\n').slice(0,5000);
+  api('/api/history/versions',{method:'POST',body:{session_id:S.sessionId,content}}).catch(()=>{});
+}
 async function navigate_admin(){
   S.page='admin';closeSidebar();
   document.getElementById('tool-label').textContent='👑 Admin Panel';
