@@ -3029,6 +3029,27 @@ app.use((err,_req,res,_next) => {
 });
 
 // ─────────────────────────────────────────────
+// 📦 ROUTE MODULES
+// ─────────────────────────────────────────────
+try{
+  const filesRoute = require('./routes/files');
+  app.use('/api/docs', filesRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete, uploadDir));
+  console.log('✅ Files & Knowledge routes loaded');
+}catch(e){console.warn('⚠️ Files routes:', e.message);}
+
+try{
+  const devRoute = require('./routes/devtools');
+  app.use('/api/dev', devRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete));
+  console.log('✅ Dev Tools routes loaded');
+}catch(e){console.warn('⚠️ Dev routes:', e.message);}
+
+try{
+  const uxRoute = require('./routes/ux-saas');
+  app.use('/api/ux', uxRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete, VIP_EMAILS));
+  console.log('✅ UX & SaaS routes loaded');
+}catch(e){console.warn('⚠️ UX routes:', e.message);}
+
+// ─────────────────────────────────────────────
 // 🚀 START
 // ─────────────────────────────────────────────
 app.listen(PORT, () => {

@@ -2161,7 +2161,296 @@ async function navigate_insights(){
   }catch(e){toast(e.message,'error');}
 }
 
-// ── 🤖 AGENTS & AUTOMATION UI ─────────────────
+// ── 📂 DOCUMENTS UI ──────────────────────────
+async function navigate_docs(){
+  S.page='docs';closeSidebar();
+  document.getElementById('tool-label').textContent='📂 Documents';
+  document.getElementById('messages').innerHTML='<div class="page-wrap"><div class="page-title">📂 Documents</div><div style="color:var(--t2)">Loading...</div></div>';
+  try{
+    const {docs=[]}=await api('/api/docs/list');
+    document.getElementById('messages').innerHTML=`<div class="page-wrap">
+      <div class="page-title">📂 Documents & Knowledge</div>
+      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+        <button onclick="document.getElementById('doc-upload').click()" style="background:var(--grad);color:#000;border:none;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">+ Upload</button>
+        <input id="doc-upload" type="file" style="display:none" accept=".txt,.md,.pdf,.json,.csv" onchange="uploadDoc(this)"/>
+        <input id="doc-search" placeholder="Semantic search..." style="flex:1;min-width:150px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--text);outline:none" onkeydown="if(event.key==='Enter')searchDocs(this.value)"/>
+        <button onclick="searchDocs(document.getElementById('doc-search').value)" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer">Search</button>
+      </div>
+      <div id="docs-list">
+        ${docs.length?docs.map(d=>`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:8px;display:flex;align-items:center;gap:12px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:500">${esc(d.title)}</div>
+            <div style="font-size:11px;color:var(--t3)">${d.doc_type} · v${d.version} · ${new Date(d.created_at).toLocaleDateString()}</div>
+            <div style="font-size:11px;color:var(--a2);margin-top:2px">${JSON.parse(d.tags||'[]').join(', ')}</div>
+          </div>
+          <button onclick="askDoc('${d.doc_id}','${esc(d.title)}')" style="font-size:12px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;color:var(--t2);background:none;cursor:pointer">Ask AI</button>
+          <button onclick="compareDoc('${d.doc_id}')" style="font-size:12px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;color:var(--t2);background:none;cursor:pointer">Compare</button>
+          <button onclick="deleteDoc('${d.doc_id}')" style="color:var(--t3);font-size:14px;background:none;border:none;cursor:pointer">✕</button>
+        </div>`).join(''):'<div style="color:var(--t2);padding:40px;text-align:center">No documents yet. Upload to enable semantic search and AI analysis.</div>'}
+      </div>
+    </div>`;
+  }catch(e){toast(e.message,'error');}
+}
+
+async function uploadDoc(input){
+  const file=input.files[0];if(!file)return;input.value='';
+  toast('Uploading and indexing...','success');
+  const form=new FormData();form.append('file',file);
+  try{
+    const r=await fetch(API+'/api/docs/upload',{method:'POST',headers:{Authorization:'Bearer '+S.token},body:form});
+    const d=await r.json();if(!r.ok)throw new Error(d.error);
+    toast(`✅ "${d.title}" indexed with ${d.tags?.join(', ')||'no tags'}`,'success');
+    navigate_docs();
+  }catch(e){toast(e.message,'error');}
+}
+
+async function searchDocs(q){
+  if(!q)return;
+  try{
+    const {results=[]}=await api('/api/docs/search?q='+encodeURIComponent(q));
+    const el=document.getElementById('docs-list');
+    if(!el)return;
+    el.innerHTML=`<div style="font-size:12px;color:var(--t3);margin-bottom:8px">🔍 Semantic search results for "${q}"</div>`+
+    (results.length?results.map(r=>`<div style="background:var(--bg2);border:1px solid var(--a1)30;border-radius:10px;padding:14px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <div style="font-size:13px;font-weight:500">${esc(r.title)}</div>
+        <div style="font-size:11px;color:var(--a1)">Score: ${r.score}</div>
+      </div>
+      <div style="font-size:12px;color:var(--t2)">${esc(r.preview)}</div>
+      <button onclick="askDoc('${r.doc_id}','${esc(r.title)}')" style="margin-top:8px;font-size:11px;padding:4px 10px;border:1px solid var(--border);border-radius:5px;color:var(--t2);background:none;cursor:pointer">Ask AI</button>
+    </div>`).join(''):'<div style="color:var(--t2);padding:20px;text-align:center">No results found.</div>');
+  }catch(e){toast(e.message,'error');}
+}
+
+async function askDoc(docId, title){
+  const q=prompt(`Ask about "${title}":`);if(!q)return;
+  S.page='chat';
+  document.getElementById('messages').innerHTML='';
+  addMsg({role:'user',text:q});showTyping();
+  api('/api/docs/'+docId+'/ask',{method:'POST',body:{question:q}}).then(r=>{
+    hideTyping();addMsg({role:'assistant',text:r.answer});
+  }).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function deleteDoc(docId){
+  if(!confirm('Delete document?'))return;
+  await api('/api/docs/'+docId,{method:'DELETE'});
+  toast('Deleted','success');navigate_docs();
+}
+
+async function compareDoc(docId){
+  const other=prompt('Enter second doc ID to compare with:');if(!other)return;
+  const q=prompt('What to compare?','Compare main themes and differences')||'Compare main themes and differences';
+  addMsg({role:'user',text:`📊 Compare documents`});showTyping();
+  api('/api/docs/compare',{method:'POST',body:{doc_ids:[docId,other],question:q}}).then(r=>{
+    hideTyping();addMsg({role:'assistant',text:`**📊 Document Comparison:**\n\n${r.answer}`});
+  }).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+// ── 💻 DEV TOOLS UI ───────────────────────────
+async function navigate_devtools(){
+  S.page='devtools';closeSidebar();
+  document.getElementById('tool-label').textContent='💻 Dev Tools';
+  document.getElementById('messages').innerHTML=`<div class="page-wrap">
+    <div class="page-title">💻 Dev Tools</div>
+    <div class="agents-grid">
+      ${[
+        {e:'▶',n:'Code Executor',d:'Run code in sandbox',fn:'devExecute()'},
+        {e:'🐛',n:'Debugger',d:'Find and fix bugs',fn:'devDebug()'},
+        {e:'🔒',n:'Security Scan',d:'Audit for vulnerabilities',fn:'devSecurity()'},
+        {e:'📝',n:'Git Commit',d:'AI commit messages',fn:'devCommit()'},
+        {e:'🗄️',n:'DB Designer',d:'Design database schemas',fn:'devDB()'},
+        {e:'⚡',n:'Scaffolding',d:'Full-stack code generator',fn:'devScaffold()'},
+        {e:'🚀',n:'CI/CD',d:'Generate pipelines',fn:'devCICD()'},
+        {e:'🐳',n:'Docker',d:'Containerize your app',fn:'devDocker()'},
+        {e:'⚙️',n:'Optimizer',d:'Improve performance',fn:'devOptimize()'},
+        {e:'🔄',n:'Refactor',d:'Clean up your code',fn:'devRefactor()'},
+        {e:'🧪',n:'API Tester',d:'Test any endpoint',fn:'devAPITest()'},
+        {e:'🎨',n:'UI Preview',d:'Generate UI from description',fn:'devUIPreview()'},
+      ].map(t=>`<div class="agent-card" onclick="${t.fn}">
+        <div class="agent-emoji">${t.e}</div>
+        <div class="agent-card-name">${t.n}</div>
+        <div class="agent-card-desc">${t.d}</div>
+        <button class="agent-run-btn">Run →</button>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+async function devExecute(){
+  const code=prompt('Paste code to execute:');if(!code)return;
+  const lang=prompt('Language:','javascript')||'javascript';
+  addMsg({role:'user',text:`▶ Execute ${lang} code`});showTyping();
+  api('/api/dev/execute',{method:'POST',body:{code,language:lang}}).then(r=>{
+    hideTyping();addMsg({role:'assistant',text:`**▶ Output:**\n\`\`\`\n${r.output}\n\`\`\``});
+  }).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function devDebug(){
+  const code=document.getElementById('msg-input')?.value||prompt('Paste code with bug:');
+  if(!code)return;
+  const error=prompt('Error message (optional):');
+  addMsg({role:'user',text:`🐛 Debug code`});showTyping();
+  api('/api/dev/debug',{method:'POST',body:{code,error,language:'javascript'}}).then(r=>{
+    hideTyping();addMsg({role:'assistant',text:r.debug});
+  }).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function devSecurity(){
+  const code=prompt('Paste code to audit:');if(!code)return;
+  addMsg({role:'user',text:'🔒 Security audit'});showTyping();
+  api('/api/dev/security',{method:'POST',body:{code}}).then(r=>{
+    hideTyping();
+    const text=`**🔒 Security Audit Score: ${r.score}/100**\n\n${r.summary}\n\n${(r.vulnerabilities||[]).map(v=>`**${v.severity?.toUpperCase()} - ${v.type}:**\n${v.description}\n**Fix:** ${v.fix}`).join('\n\n')}`;
+    addMsg({role:'assistant',text});
+  }).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function devCommit(){
+  const diff=prompt('Paste git diff:');if(!diff)return;
+  const r=await api('/api/dev/git/commit-message',{method:'POST',body:{diff}});
+  addMsg({role:'assistant',text:`**📝 Commit Message:**\n\`${r.message}\``});
+}
+
+async function devDB(){
+  const desc=prompt('Describe your database needs:');if(!desc)return;
+  addMsg({role:'user',text:`🗄️ Design DB for: ${desc}`});showTyping();
+  api('/api/dev/db/design',{method:'POST',body:{description:desc}}).then(r=>{
+    hideTyping();addMsg({role:'assistant',text:r.design});
+  }).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function devScaffold(){
+  const desc=prompt('Describe your app:');if(!desc)return;
+  const stack=prompt('Stack (react+express+sqlite):','react+express+sqlite')||'react+express+sqlite';
+  addMsg({role:'user',text:`🚀 Scaffold: ${desc}`});showTyping();
+  api('/api/dev/scaffold/fullstack',{method:'POST',body:{description:desc,stack}}).then(r=>{
+    hideTyping();addMsg({role:'assistant',text:`**Frontend:**\n${r.frontend}\n\n**Backend:**\n${r.backend}\n\n**Deployment:**\n${r.deployment}`});
+  }).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function devCICD(){
+  const lang=prompt('Language/framework:','node')||'node';
+  const target=prompt('Deploy target:','vercel')||'vercel';
+  addMsg({role:'user',text:`🚀 CI/CD for ${lang} → ${target}`});showTyping();
+  api('/api/dev/cicd',{method:'POST',body:{language:lang,deploy_target:target}}).then(r=>{
+    hideTyping();addMsg({role:'assistant',text:r.pipeline});
+  }).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function devDocker(){
+  const desc=prompt('Describe your app:');if(!desc)return;
+  const lang=prompt('Language:','node')||'node';
+  addMsg({role:'user',text:`🐳 Docker for: ${desc}`});showTyping();
+  api('/api/dev/docker',{method:'POST',body:{description:desc,language:lang}}).then(r=>{
+    hideTyping();addMsg({role:'assistant',text:r.docker});
+  }).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function devOptimize(){
+  const code=prompt('Paste code to optimize:');if(!code)return;
+  addMsg({role:'user',text:'⚙️ Optimize code'});showTyping();
+  api('/api/dev/optimize',{method:'POST',body:{code}}).then(r=>{
+    hideTyping();addMsg({role:'assistant',text:r.optimized});
+  }).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function devRefactor(){
+  const code=prompt('Paste code to refactor:');if(!code)return;
+  addMsg({role:'user',text:'🔄 Refactor code'});showTyping();
+  api('/api/dev/refactor',{method:'POST',body:{code}}).then(r=>{
+    hideTyping();addMsg({role:'assistant',text:r.refactored});
+  }).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function devAPITest(){
+  const url=prompt('API endpoint URL:');if(!url)return;
+  const method=prompt('Method:','GET')||'GET';
+  addMsg({role:'user',text:`🧪 Test: ${method} ${url}`});showTyping();
+  api('/api/dev/api-test',{method:'POST',body:{endpoint:url,method}}).then(r=>{
+    hideTyping();
+    const text=`**🧪 API Test Result:**\n\nStatus: ${r.status} ${r.statusText}\nTime: ${r.elapsed_ms}ms\n\n\`\`\`json\n${JSON.stringify(r.data,null,2).slice(0,1000)}\n\`\`\``;
+    addMsg({role:'assistant',text});
+  }).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function devUIPreview(){
+  const desc=prompt('Describe the UI you want:');if(!desc)return;
+  addMsg({role:'user',text:`🎨 Generate UI: ${desc}`});showTyping();
+  api('/api/dev/ui-preview',{method:'POST',body:{description:desc}}).then(r=>{
+    hideTyping();
+    addMsg({role:'assistant',text:`🎨 UI generated! Open in Canvas to preview.`,type:'text'});
+    // Open in canvas
+    const htmlMatch=r.html.match(/```html\n?([\s\S]*?)```/);
+    openCanvas(htmlMatch?htmlMatch[1]:r.html, 'UI Preview');
+  }).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+// ── 💳 BILLING UI ─────────────────────────────
+async function navigate_billing(){
+  S.page='billing';closeSidebar();
+  document.getElementById('tool-label').textContent='💳 Billing';
+  document.getElementById('messages').innerHTML='<div class="page-wrap"><div class="page-title">💳 Billing</div><div style="color:var(--t2)">Loading...</div></div>';
+  try{
+    const d=await api('/api/ux/billing');
+    document.getElementById('messages').innerHTML=`<div class="page-wrap">
+      <div class="page-title">💳 Billing & Usage</div>
+      <div class="dash-stats" style="margin-bottom:20px">
+        <div class="dash-card"><div class="dash-num" style="-webkit-text-fill-color:var(--a1)">${d.plan}</div><div class="dash-lbl">Current Plan</div></div>
+        <div class="dash-card"><div class="dash-num">$${d.price}</div><div class="dash-lbl">Per Month</div></div>
+        <div class="dash-card"><div class="dash-num">${d.usage?.today||0}</div><div class="dash-lbl">Requests Today</div></div>
+        <div class="dash-card"><div class="dash-num">${d.usage?.total||0}</div><div class="dash-lbl">Total Requests</div></div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px">
+        <div style="font-size:13px;font-weight:500;margin-bottom:10px">Plan Features</div>
+        ${(d.features||[]).map(f=>`<div style="font-size:13px;color:var(--t2);padding:4px 0">✅ ${f}</div>`).join('')}
+      </div>
+      ${d.plan!=='elite'?`<button onclick="navigate('pricing')" style="width:100%;padding:12px;background:var(--grad);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">⚡ Upgrade Plan →</button>`:'<div style="text-align:center;color:var(--a1);font-size:13px;padding:12px">✨ You\'re on the best plan!</div>'}
+    </div>`;
+  }catch(e){toast(e.message,'error');}
+}
+
+// ── 📈 METRICS UI ─────────────────────────────
+async function navigate_metrics(){
+  S.page='metrics';closeSidebar();
+  document.getElementById('tool-label').textContent='📈 Metrics';
+  document.getElementById('messages').innerHTML='<div class="page-wrap"><div class="page-title">📈 Metrics</div><div style="color:var(--t2)">Loading...</div></div>';
+  try{
+    const {metrics={},scope}=await api('/api/ux/metrics');
+    if(scope==='admin'){
+      document.getElementById('messages').innerHTML=`<div class="page-wrap">
+        <div class="page-title">📈 Platform Metrics</div>
+        <div class="dash-stats" style="margin-bottom:20px">
+          <div class="dash-card"><div class="dash-num">${metrics.total_users||0}</div><div class="dash-lbl">Total Users</div></div>
+          <div class="dash-card"><div class="dash-num">${metrics.active_today||0}</div><div class="dash-lbl">Active Today</div></div>
+          <div class="dash-card"><div class="dash-num">$${metrics.mrr||0}</div><div class="dash-lbl">MRR</div></div>
+          <div class="dash-card"><div class="dash-num">${metrics.new_users_today||0}</div><div class="dash-lbl">New Today</div></div>
+          <div class="dash-card"><div class="dash-num">${metrics.pro_users||0}</div><div class="dash-lbl">Pro Users</div></div>
+          <div class="dash-card"><div class="dash-num">${metrics.elite_users||0}</div><div class="dash-lbl">Elite Users</div></div>
+          <div class="dash-card"><div class="dash-num">${metrics.total_messages||0}</div><div class="dash-lbl">Total Messages</div></div>
+          <div class="dash-card"><div class="dash-num">${metrics.growth_7d||0}</div><div class="dash-lbl">New (7 days)</div></div>
+        </div>
+        <div style="font-size:13px;font-weight:500;margin-bottom:10px">Top Tools</div>
+        ${(metrics.top_tools||[]).map(t=>`<div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
+          <span style="font-size:13px">${t.feature}</span>
+          <span style="font-size:12px;color:var(--a1);font-weight:600">${t.uses}x</span>
+        </div>`).join('')}
+      </div>`;
+    } else {
+      document.getElementById('messages').innerHTML=`<div class="page-wrap">
+        <div class="page-title">📈 My Usage Stats</div>
+        <div class="dash-stats">
+          <div class="dash-card"><div class="dash-num">${metrics.total_requests||0}</div><div class="dash-lbl">Total Requests</div></div>
+          <div class="dash-card"><div class="dash-num">${metrics.tools_used||0}</div><div class="dash-lbl">Tools Used</div></div>
+          <div class="dash-card"><div class="dash-num">${metrics.member_days||0}</div><div class="dash-lbl">Days as Member</div></div>
+          <div class="dash-card"><div class="dash-num" style="font-size:14px">${metrics.favorite_tool||'-'}</div><div class="dash-lbl">Fav Tool</div></div>
+        </div>
+      </div>`;
+    }
+  }catch(e){toast(e.message,'error');}
+}
+
+function toggleCatGrid(){
 
 async function navigate_automation(){
   S.page='automation';closeSidebar();
@@ -2884,3 +3173,4 @@ document.addEventListener('DOMContentLoaded',()=>{
   initTheme();
   if(S.token)init();
 });
+}
