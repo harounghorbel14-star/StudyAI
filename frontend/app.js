@@ -2161,7 +2161,293 @@ async function navigate_insights(){
   }catch(e){toast(e.message,'error');}
 }
 
-// ── 📂 DOCUMENTS UI ──────────────────────────
+// ── 🚀 MEGA AGENT UI ─────────────────────────
+async function navigate_mega(){
+  S.page='mega';closeSidebar();
+  document.getElementById('tool-label').textContent='🚀 Mega Agent';
+  document.getElementById('messages').innerHTML=`<div class="page-wrap">
+    <div class="page-title">🚀 Mega Agent</div>
+    <p style="color:var(--t2);font-size:14px;margin-bottom:24px">Tell AI what you want to build — it handles everything automatically.</p>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:24px">
+      <div style="font-size:13px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Your idea</div>
+      <textarea id="mega-idea" placeholder="e.g. A SaaS platform for remote team management with time tracking and invoicing" rows="4"
+        style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;color:var(--text);outline:none;resize:none;margin-bottom:16px"></textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="runMegaAgent('startup')" style="flex:1;min-width:140px;padding:12px;background:var(--grad);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">
+          🚀 Build Startup
+        </button>
+        <button onclick="runMegaAgent('saas')" style="flex:1;min-width:140px;padding:12px;background:linear-gradient(135deg,#7c3aed,#06b6d4);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">
+          ⚡ Build SaaS
+        </button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-top:20px">
+      ${[
+        {e:'💡',t:'Startup Kit',d:'Full startup in 8 steps',ex:'AI writing assistant SaaS'},
+        {e:'🏗️',t:'SaaS Builder',d:'Complete SaaS codebase',ex:'Project management tool'},
+        {e:'🎨',t:'Landing Page',d:'Beautiful HTML page',ex:'My new product'},
+        {e:'📊',t:'Business Plan',d:'Investor-ready plan',ex:'Food delivery app'},
+      ].map(c=>`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px;cursor:pointer" onclick="document.getElementById('mega-idea').value='${c.ex}';document.getElementById('mega-idea').focus()">
+        <div style="font-size:20px;margin-bottom:6px">${c.e}</div>
+        <div style="font-size:13px;font-weight:500">${c.t}</div>
+        <div style="font-size:11px;color:var(--t3)">${c.d}</div>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+async function runMegaAgent(type){
+  const idea = document.getElementById('mega-idea')?.value?.trim();
+  if(!idea){toast('Enter your idea first!','error');return;}
+
+  S.page='chat';
+  document.getElementById('messages').innerHTML='';
+  addMsg({role:'user',text:`🚀 ${type==='saas'?'Build SaaS':'Build Startup'}: ${idea}`});
+
+  // Show steps container
+  const stepsEl=document.createElement('div');
+  stepsEl.className='msg assistant';stepsEl.id='mega-steps';
+  stepsEl.innerHTML=`<div class="ai-avatar-wrap">${AI_AVATAR_SVG}</div>
+    <div class="msg-body"><div class="msg-bubble">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">🚀 ${idea}</div>
+      <div id="mega-steps-list" style="display:flex;flex-direction:column;gap:8px"></div>
+    </div></div>`;
+  document.getElementById('messages').appendChild(stepsEl);
+  scrollBottom();
+
+  const results={};
+
+  try{
+    const resp=await fetch(API+'/api/mega/'+type,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.token},
+      body:JSON.stringify(type==='saas'?{description:idea}:{idea}),
+    });
+
+    const reader=resp.body.getReader();
+    const decoder=new TextDecoder();
+
+    while(true){
+      const {done,value}=await reader.read();
+      if(done)break;
+      const lines=decoder.decode(value).split('\n');
+      for(const line of lines){
+        if(!line.startsWith('data: '))continue;
+        try{
+          const d=JSON.parse(line.slice(6));
+          if(d.step==='step'){
+            const list=document.getElementById('mega-steps-list');
+            if(list){
+              // Update or add step
+              let stepEl=document.getElementById('mega-step-'+d.id);
+              if(!stepEl){
+                stepEl=document.createElement('div');
+                stepEl.id='mega-step-'+d.id;
+                list.appendChild(stepEl);
+              }
+              stepEl.innerHTML=`<div style="display:flex;align-items:center;gap:8px;font-size:13px">
+                <span>${d.status==='done'?'✅':d.status==='running'?'⏳':'⭕'}</span>
+                <span style="color:${d.status==='done'?'var(--a4)':d.status==='running'?'var(--a1)':'var(--t2)'}">${d.label}</span>
+              </div>`;
+              if(d.data)results[d.id]=d.data;
+              scrollBottom();
+            }
+          }
+          if(d.step==='done'){
+            stepsEl.remove();
+            // Show results
+            let finalText=`# 🚀 ${idea}\n\n`;
+            finalText+=`**✅ ${d.steps_completed} steps completed!**\n\n---\n\n`;
+            if(results[2]?.plan)finalText+=`## 📊 Business Plan\n${results[2].plan}\n\n---\n\n`;
+            if(results[3]?.html){
+              finalText+=`## 🎨 Landing Page\n*Click "Open in Canvas" to preview your landing page.*\n\n`;
+              window._megaHTML=results[3].html;
+            }
+            if(results[4]?.code)finalText+=`## 💻 Backend Code\n${results[4].code.slice(0,500)}...\n\n---\n\n`;
+            if(results[7]?.deck)finalText+=`## 🎯 Pitch Deck\n${results[7].deck}\n\n`;
+            addMsg({role:'assistant',text:finalText});
+            if(window._megaHTML){
+              setTimeout(()=>{openCanvas(window._megaHTML,'Landing Page Preview');},500);
+            }
+            notify('NexusAI',`🚀 "${idea}" is ready!`);
+            try{S.user=await api('/api/me');updateUsage();}catch(_){}
+          }
+          if(d.step==='error'){
+            stepsEl.remove();
+            addMsg({role:'assistant',text:'❌ Error: '+d.message});
+          }
+        }catch(_){}
+      }
+    }
+  }catch(e){
+    stepsEl.remove();
+    addMsg({role:'assistant',text:'❌ '+e.message});
+  }
+}
+
+// ── 💻 CODING ASSISTANT UI ────────────────────
+async function navigate_coding(){
+  S.page='coding';closeSidebar();
+  document.getElementById('tool-label').textContent='💻 Coding Assistant';
+  document.getElementById('messages').innerHTML=`<div class="page-wrap">
+    <div class="page-title">💻 AI Coding Assistant</div>
+    <p style="color:var(--t2);font-size:14px;margin-bottom:20px">Maximum coding power — generate, fix, review, convert, and more.</p>
+    <div class="agents-grid">
+      ${[
+        {e:'✨',n:'Generate Code',d:'Describe → get full code',fn:"codingGenerate()"},
+        {e:'🐛',n:'Fix & Debug',d:'Paste error → get fix',fn:"codingFix()"},
+        {e:'👀',n:'Code Review',d:'Deep quality analysis',fn:"codingReview()"},
+        {e:'📖',n:'Explain Code',d:'Understand any code',fn:"codingExplain()"},
+        {e:'🔄',n:'Convert Language',d:'JS→Python, etc.',fn:"codingConvert()"},
+        {e:'🧪',n:'Generate Tests',d:'Full test suite',fn:"codingTests()"},
+        {e:'📝',n:'Add Docs',d:'JSDoc, comments',fn:"codingDocs()"},
+        {e:'⚡',n:'Optimize',d:'Speed + memory',fn:"codingOptimize()"},
+        {e:'🔒',n:'Security Audit',d:'Find vulnerabilities',fn:"codingSecAudit()"},
+        {e:'🤝',n:'Pair Program',d:'Step by step build',fn:"codingPair()"},
+        {e:'🧮',n:'Algorithm',d:'Optimal solutions',fn:"codingAlgo()"},
+        {e:'📚',n:'Snippets',d:'Ready-to-use code',fn:"codingSnippets()"},
+      ].map(t=>`<div class="agent-card" onclick="${t.fn}">
+        <div class="agent-emoji">${t.e}</div>
+        <div class="agent-card-name">${t.n}</div>
+        <div class="agent-card-desc">${t.d}</div>
+        <button class="agent-run-btn">Run →</button>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+async function streamToChat(url, body, userMsg){
+  addMsg({role:'user',text:userMsg});
+  S.msgs.push({role:'assistant',text:'',_streaming:true});
+  renderAllMsgs();
+  let streamText='';
+  try{
+    const resp=await fetch(API+url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.token},body:JSON.stringify(body)});
+    const reader=resp.body.getReader();const decoder=new TextDecoder();
+    while(true){
+      const {done,value}=await reader.read();if(done)break;
+      const lines=decoder.decode(value).split('\n');
+      for(const line of lines){
+        if(!line.startsWith('data: '))continue;
+        try{
+          const d=JSON.parse(line.slice(6));
+          if(d.token){
+            streamText+=d.token;
+            const last=S.msgs[S.msgs.length-1];
+            if(last?._streaming)last.text=streamText;
+            const msgEls=document.querySelectorAll('.msg.assistant');
+            const lastEl=msgEls[msgEls.length-1];
+            if(lastEl){const bubble=lastEl.querySelector('.msg-bubble');if(bubble)bubble.innerHTML=fmt(streamText)+'<span style="animation:cursorBlink 1s infinite;color:var(--a1)">▋</span>';}
+            scrollBottom();
+          }
+          if(d.done){const last=S.msgs[S.msgs.length-1];if(last?._streaming){last.text=streamText;delete last._streaming;}renderAllMsgs();renderLatex();}
+        }catch(_){}
+      }
+    }
+  }catch(e){const last=S.msgs[S.msgs.length-1];if(last?._streaming){last.text='❌ '+e.message;delete last._streaming;}renderAllMsgs();}
+}
+
+async function codingGenerate(){
+  const desc=prompt('Describe what code you need:');if(!desc)return;
+  const lang=prompt('Language:','javascript')||'javascript';
+  S.page='chat';document.getElementById('messages').innerHTML='';
+  await streamToChat('/api/mega/code/generate',{description:desc,language:lang},`✨ Generate: ${desc}`);
+}
+
+async function codingFix(){
+  const code=prompt('Paste your code:');if(!code)return;
+  const error=prompt('Error message (optional):');
+  const lang=prompt('Language:','javascript')||'javascript';
+  S.page='chat';document.getElementById('messages').innerHTML='';
+  await streamToChat('/api/mega/code/fix',{code,error,language:lang},`🐛 Fix code`);
+}
+
+async function codingReview(){
+  const code=prompt('Paste code to review:');if(!code)return;
+  S.page='chat';document.getElementById('messages').innerHTML='';
+  addMsg({role:'user',text:'👀 Code review'});showTyping();
+  api('/api/mega/code/review',{method:'POST',body:{code}}).then(r=>{hideTyping();addMsg({role:'assistant',text:r.review});}).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function codingExplain(){
+  const code=prompt('Paste code to explain:');if(!code)return;
+  const level=prompt('Level (beginner/intermediate/expert):','intermediate')||'intermediate';
+  S.page='chat';document.getElementById('messages').innerHTML='';
+  addMsg({role:'user',text:'📖 Explain code'});showTyping();
+  api('/api/mega/code/explain',{method:'POST',body:{code,level}}).then(r=>{hideTyping();addMsg({role:'assistant',text:r.explanation});}).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function codingConvert(){
+  const code=prompt('Paste code to convert:');if(!code)return;
+  const from=prompt('From language:','javascript')||'javascript';
+  const to=prompt('To language:','python')||'python';
+  S.page='chat';document.getElementById('messages').innerHTML='';
+  addMsg({role:'user',text:`🔄 Convert ${from}→${to}`});showTyping();
+  api('/api/mega/code/convert',{method:'POST',body:{code,from,to}}).then(r=>{hideTyping();addMsg({role:'assistant',text:r.converted});}).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function codingTests(){
+  const code=prompt('Paste code to test:');if(!code)return;
+  const framework=prompt('Test framework (jest/mocha/pytest):','jest')||'jest';
+  S.page='chat';document.getElementById('messages').innerHTML='';
+  addMsg({role:'user',text:'🧪 Generate tests'});showTyping();
+  api('/api/mega/code/tests',{method:'POST',body:{code,framework}}).then(r=>{hideTyping();addMsg({role:'assistant',text:r.tests});}).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function codingDocs(){
+  const code=prompt('Paste code to document:');if(!code)return;
+  S.page='chat';document.getElementById('messages').innerHTML='';
+  addMsg({role:'user',text:'📝 Add documentation'});showTyping();
+  api('/api/mega/code/docs',{method:'POST',body:{code}}).then(r=>{hideTyping();addMsg({role:'assistant',text:r.documented});}).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function codingOptimize(){
+  const code=prompt('Paste code to optimize:');if(!code)return;
+  S.page='chat';document.getElementById('messages').innerHTML='';
+  addMsg({role:'user',text:'⚡ Optimize code'});showTyping();
+  api('/api/dev/optimize',{method:'POST',body:{code}}).then(r=>{hideTyping();addMsg({role:'assistant',text:r.optimized});}).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function codingSecAudit(){
+  const code=prompt('Paste code for security audit:');if(!code)return;
+  S.page='chat';document.getElementById('messages').innerHTML='';
+  addMsg({role:'user',text:'🔒 Security audit'});showTyping();
+  api('/api/dev/security',{method:'POST',body:{code}}).then(r=>{
+    hideTyping();
+    const text=`**🔒 Security Score: ${r.score}/100**\n\n${r.summary}\n\n${(r.vulnerabilities||[]).map(v=>`**${v.severity?.toUpperCase()} - ${v.type}:**\n${v.description}\n**Fix:** ${v.fix}`).join('\n\n')}`;
+    addMsg({role:'assistant',text});
+  }).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function codingPair(){
+  const task=prompt('What are you building?');if(!task)return;
+  S.page='chat';document.getElementById('messages').innerHTML='';
+  addMsg({role:'user',text:`🤝 Pair program: ${task}`});showTyping();
+  api('/api/mega/code/pair',{method:'POST',body:{task,step:1}}).then(r=>{
+    hideTyping();addMsg({role:'assistant',text:`**Step 1/${r.total_steps}: Planning**\n\n${r.result}\n\n${r.next_step?`*Reply "continue" for Step 2*`:''}`});
+  }).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function codingAlgo(){
+  const problem=prompt('Describe the algorithm problem:');if(!problem)return;
+  const lang=prompt('Language:','javascript')||'javascript';
+  S.page='chat';document.getElementById('messages').innerHTML='';
+  addMsg({role:'user',text:`🧮 Algorithm: ${problem}`});showTyping();
+  api('/api/mega/code/algorithm',{method:'POST',body:{problem,language:lang}}).then(r=>{hideTyping();addMsg({role:'assistant',text:r.algorithm});}).catch(e=>{hideTyping();toast(e.message,'error');});
+}
+
+async function codingSnippets(){
+  S.page='chat';document.getElementById('messages').innerHTML='';
+  const {snippets={}}=await api('/api/mega/code/snippets');
+  let text='**📚 Code Snippet Library:**\n\n';
+  for(const [cat,data] of Object.entries(snippets)){
+    text+=`**${data.label}:**\n${data.items.map(i=>`• **${i.name}** — ${i.desc}`).join('\n')}\n\n`;
+  }
+  text+='\n*Tell me which snippet you want and I\'ll generate it for you!*';
+  addMsg({role:'assistant',text});
+}
+
+function toggleCatGrid(){
 async function navigate_docs(){
   S.page='docs';closeSidebar();
   document.getElementById('tool-label').textContent='📂 Documents';
@@ -3173,4 +3459,5 @@ document.addEventListener('DOMContentLoaded',()=>{
   initTheme();
   if(S.token)init();
 });
+}
 }

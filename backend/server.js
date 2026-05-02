@@ -3032,6 +3032,18 @@ app.use((err,_req,res,_next) => {
 // 📦 ROUTE MODULES
 // ─────────────────────────────────────────────
 try{
+  const megaRoute = require('./routes/mega-agent');
+  app.use('/api/mega', megaRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete));
+  console.log('✅ Mega Agent routes loaded');
+}catch(e){console.warn('⚠️ Mega routes:', e.message);}
+
+try{
+  const megaRoute = require('./routes/mega-agent');
+  app.use('/api/mega', megaRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete));
+  console.log('✅ Mega Agent + Coding routes loaded');
+}catch(e){console.warn('⚠️ Mega routes:', e.message);}
+
+try{
   const filesRoute = require('./routes/files');
   app.use('/api/docs', filesRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete, uploadDir));
   console.log('✅ Files & Knowledge routes loaded');
