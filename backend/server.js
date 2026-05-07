@@ -3088,14 +3088,14 @@ app.use((err,_req,res,_next) => {
 try{
   const agentsRoute = require('./routes/agents-system');
   app.use('/api/agents', agentsRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete));
-  console.log('✅ Multi-Agent System loaded (CEO+Product+Dev+Design+Marketing+Deploy)');
-}catch(e){console.warn('⚠️ Agents-system routes:', e.message);}
-
-try{
-  const agentsRoute = require('./routes/agents-system');
-  app.use('/api/agents', agentsRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete));
   console.log('✅ Multi-Agent System loaded');
 }catch(e){console.warn('⚠️ Agents routes:', e.message);}
+
+try{
+  const paymentsRoute = require('./routes/payments-and-agents');
+  app.use('/api/billing', paymentsRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete));
+  console.log('✅ Stripe + 4 new agents (QA, Security, Growth, Analytics) loaded');
+}catch(e){console.warn('⚠️ Payments routes:', e.message);}
 
 try{
   const megaRoute = require('./routes/mega-agent');

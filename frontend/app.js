@@ -2210,6 +2210,192 @@ async function navigate_insights(){
   }catch(e){toast(e.message,'error');}
 }
 
+// ── 💰 PRICING PAGE ───────────────────────────
+async function navigate_pricing(){
+  S.page='pricing';closeSidebar();
+  document.getElementById('tool-label').textContent='💰 Pricing';
+  document.getElementById('tool-sub').textContent='Choose your plan';
+
+  let currentPlan='free';
+  try{const d=await api('/api/billing/subscription');currentPlan=d.current_plan;}catch(_){}
+
+  document.getElementById('messages').innerHTML=`<div class="page-wrap">
+    <div class="page-title gradient-text">Choose Your Plan</div>
+    <p style="color:var(--t2);font-size:14px;margin-bottom:32px;text-align:center">Unlock the full power of NexusAI</p>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;max-width:900px;margin:0 auto">
+      <!-- FREE -->
+      <div class="pricing-card ${currentPlan==='free'?'featured':''}">
+        <div style="font-size:13px;color:var(--t3);margin-bottom:6px">FREE</div>
+        <div style="font-size:36px;font-weight:700;margin-bottom:4px">$0</div>
+        <div style="font-size:12px;color:var(--t3);margin-bottom:20px">Forever free</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px">
+          <div style="font-size:13px">✅ 10 requests/day</div>
+          <div style="font-size:13px">✅ Basic AI tools</div>
+          <div style="font-size:13px">✅ Web search</div>
+          <div style="font-size:13px;color:var(--t3)">❌ Multi-Agent System</div>
+          <div style="font-size:13px;color:var(--t3)">❌ Auto-deploy</div>
+        </div>
+        <button onclick="${currentPlan==='free'?'':'cancelPlan()'}" style="width:100%;padding:12px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:10px;font-size:14px;font-weight:600;cursor:${currentPlan==='free'?'default':'pointer'}">${currentPlan==='free'?'✓ Current Plan':'Downgrade'}</button>
+      </div>
+
+      <!-- PRO -->
+      <div class="pricing-card ${currentPlan==='pro'?'featured':''}">
+        <div style="font-size:13px;color:var(--a2);margin-bottom:6px">PRO</div>
+        <div style="font-size:36px;font-weight:700;margin-bottom:4px">$19<span style="font-size:14px;color:var(--t3);font-weight:400">/mo</span></div>
+        <div style="font-size:12px;color:var(--t3);margin-bottom:20px">For builders</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px">
+          <div style="font-size:13px">✅ <strong>500 requests/day</strong></div>
+          <div style="font-size:13px">✅ All AI tools (200+)</div>
+          <div style="font-size:13px">✅ Mega Agent</div>
+          <div style="font-size:13px">✅ Priority support</div>
+          <div style="font-size:13px">✅ API access</div>
+        </div>
+        <button onclick="${currentPlan==='pro'?'':"upgradeTo('pro')"}" style="width:100%;padding:12px;background:${currentPlan==='pro'?'var(--bg3)':'linear-gradient(135deg,#a855f7,#6366f1)'};border:none;color:#fff;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">${currentPlan==='pro'?'✓ Current Plan':'Upgrade to Pro →'}</button>
+      </div>
+
+      <!-- ELITE -->
+      <div class="pricing-card ${currentPlan==='elite'?'featured':''}">
+        <div style="font-size:13px;background:linear-gradient(135deg,var(--a1),var(--a2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:700;margin-bottom:6px">ELITE</div>
+        <div style="font-size:36px;font-weight:700;margin-bottom:4px">$49<span style="font-size:14px;color:var(--t3);font-weight:400">/mo</span></div>
+        <div style="font-size:12px;color:var(--t3);margin-bottom:20px">For founders</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px">
+          <div style="font-size:13px">✅ <strong>Unlimited requests</strong></div>
+          <div style="font-size:13px">✅ Multi-Agent System (12 agents)</div>
+          <div style="font-size:13px">✅ Auto-deploy</div>
+          <div style="font-size:13px">✅ Custom AI personality</div>
+          <div style="font-size:13px">✅ 24/7 priority support</div>
+          <div style="font-size:13px">✅ White-label option</div>
+        </div>
+        <button onclick="${currentPlan==='elite'?'':"upgradeTo('elite')"}" style="width:100%;padding:12px;background:${currentPlan==='elite'?'var(--bg3)':'linear-gradient(135deg,var(--a1),var(--a2))'};border:none;color:#000;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">${currentPlan==='elite'?'✓ Current Plan':'Upgrade to Elite ⚡'}</button>
+      </div>
+    </div>
+
+    <div style="text-align:center;margin-top:32px;color:var(--t3);font-size:12px">
+      💳 Secure payment by Stripe · Cancel anytime · Money-back guarantee
+    </div>
+  </div>`;
+}
+
+async function upgradeTo(plan){
+  toast('🚀 Redirecting to checkout...','success');
+  try{
+    const d=await api('/api/billing/checkout',{method:'POST',body:{plan}});
+    if(d.checkout_url){
+      window.location.href=d.checkout_url;
+    } else {
+      toast('Checkout failed','error');
+    }
+  }catch(e){
+    toast('💳 Stripe not configured yet. Contact support!','error');
+  }
+}
+
+async function cancelPlan(){
+  if(!confirm('Cancel subscription? You will be downgraded to Free.'))return;
+  try{
+    await api('/api/billing/cancel',{method:'POST'});
+    toast('✅ Subscription cancelled','success');
+    setTimeout(()=>navigate_pricing(),1000);
+  }catch(e){toast(e.message,'error');}
+}
+
+// ── 🤖 4 NEW AGENTS UI ────────────────────────
+async function runQAAgent(){
+  const projectId=window._teamProjectId;
+  const code=projectId?null:prompt('Paste code to QA:');
+  if(!projectId&&!code)return;
+  addMsg({role:'user',text:'🔍 QA Analysis'});showTyping();
+  try{
+    const d=await api('/api/billing/qa-agent',{method:'POST',body:{project_id:projectId,code}});
+    hideTyping();
+    let text=`**🔍 QA Analysis — Score: ${d.quality_score}/100**\n\n**Verdict:** ${d.verdict}\n**Production Ready:** ${d.production_readiness}/100\n\n`;
+    if(d.critical_issues?.length){
+      text+=`**⚠️ Critical Issues:**\n${d.critical_issues.map(i=>`• [${i.severity?.toUpperCase()}] ${i.issue}\n  → ${i.fix}`).join('\n')}\n\n`;
+    }
+    if(d.edge_cases_missed?.length){
+      text+=`**🎯 Missing Edge Cases:**\n${d.edge_cases_missed.map(e=>'• '+e).join('\n')}\n\n`;
+    }
+    if(d.test_recommendations?.length){
+      text+=`**🧪 Tests to Add:**\n${d.test_recommendations.map(t=>'• '+t).join('\n')}`;
+    }
+    addMsg({role:'assistant',text});
+  }catch(e){hideTyping();toast(e.message,'error');}
+}
+
+async function runSecurityAgent(){
+  const projectId=window._teamProjectId;
+  const code=projectId?null:prompt('Paste code to security-audit:');
+  if(!projectId&&!code)return;
+  addMsg({role:'user',text:'🔒 Security Audit'});showTyping();
+  try{
+    const d=await api('/api/billing/security-agent',{method:'POST',body:{project_id:projectId,code}});
+    hideTyping();
+    let text=`**🔒 Security Audit — Score: ${d.security_score}/100**\n\n**Production Safe:** ${d.production_safe?'✅ YES':'❌ NO'}\n\n`;
+    if(d.critical_vulnerabilities?.length){
+      text+=`**🚨 Critical Vulnerabilities:**\n${d.critical_vulnerabilities.map(v=>`• **${v.type}** at ${v.location}\n  Impact: ${v.impact}\n  Fix: ${v.fix}`).join('\n')}\n\n`;
+    }
+    if(d.owasp_issues?.length){
+      const found=d.owasp_issues.filter(o=>o.found);
+      if(found.length){
+        text+=`**📋 OWASP Issues Found:**\n${found.map(o=>`• ${o.category}\n  ${o.details}`).join('\n')}\n\n`;
+      }
+    }
+    if(d.compliance_gaps?.length){
+      text+=`**📜 Compliance Gaps:**\n${d.compliance_gaps.map(c=>'• '+c).join('\n')}`;
+    }
+    addMsg({role:'assistant',text});
+  }catch(e){hideTyping();toast(e.message,'error');}
+}
+
+async function runGrowthAgent(){
+  const idea=document.getElementById('team-idea')?.value?.trim()||prompt('What product?');
+  if(!idea)return;
+  addMsg({role:'user',text:`📈 Growth Strategy: ${idea}`});showTyping();
+  try{
+    const d=await api('/api/billing/growth-agent',{method:'POST',body:{idea}});
+    hideTyping();
+    let text=`**📈 Growth Strategy — Score: ${d.growth_score}/100**\n\n**Viral Potential:** ${d.viral_potential?.toUpperCase()}\n**North Star:** ${d.north_star_metric}\n\n`;
+    if(d.growth_loops?.length){
+      text+=`**🔁 Growth Loops:**\n${d.growth_loops.map(l=>`• **${l.name}** (k=${l.expected_k_factor})\n  ${l.mechanism}`).join('\n')}\n\n`;
+    }
+    if(d.acquisition_channels?.length){
+      text+=`**🎯 Acquisition Channels:**\n${d.acquisition_channels.map(c=>`• **${c.channel}** — CAC: ${c.estimated_cac} · LTV: ${c.expected_ltv}\n  ${(c.tactics||[]).join(', ')}`).join('\n')}\n\n`;
+    }
+    if(d.referral_program){
+      text+=`**🎁 Referral Program:**\nReward: ${d.referral_program.reward}\nIncentive: ${d.referral_program.incentive}\nViral Coefficient: ${d.referral_program.viral_coefficient}\n\n`;
+    }
+    if(d['30_day_action_plan']?.length){
+      text+=`**📅 30-Day Action Plan:**\n${d['30_day_action_plan'].map(a=>'• '+a).join('\n')}`;
+    }
+    addMsg({role:'assistant',text});
+  }catch(e){hideTyping();toast(e.message,'error');}
+}
+
+async function runAnalyticsAgent(){
+  const idea=document.getElementById('team-idea')?.value?.trim()||prompt('What product?');
+  if(!idea)return;
+  addMsg({role:'user',text:`📊 Analytics Plan: ${idea}`});showTyping();
+  try{
+    const d=await api('/api/billing/analytics-agent',{method:'POST',body:{idea}});
+    hideTyping();
+    let text=`**📊 Analytics Strategy**\n\n**🎯 North Star:** ${d.north_star}\n\n`;
+    if(d.key_metrics?.length){
+      text+=`**📈 Key Metrics:**\n${d.key_metrics.slice(0,8).map(m=>`• **${m.metric}** → Target: ${m.target}\n  Why: ${m.why_important}`).join('\n')}\n\n`;
+    }
+    if(d.conversion_funnel?.length){
+      text+=`**🚀 Conversion Funnel:**\n${d.conversion_funnel.map(s=>`• ${s.step}: ${s.expected_conversion}`).join('\n')}\n\n`;
+    }
+    if(d.experiments_to_run?.length){
+      text+=`**🧪 Experiments to Run:**\n${d.experiments_to_run.map(e=>`• ${e.hypothesis}\n  Metric: ${e.metric} · Duration: ${e.duration}`).join('\n')}\n\n`;
+    }
+    if(d.tools_recommended?.length){
+      text+=`**🛠️ Tools:** ${d.tools_recommended.join(', ')}`;
+    }
+    addMsg({role:'assistant',text});
+  }catch(e){hideTyping();toast(e.message,'error');}
+}
+
 // ── 🤖 AI TEAM (Multi-Agent System) ───────────
 async function navigate_team(){
   S.page='team';closeSidebar();
@@ -2236,6 +2422,12 @@ async function navigate_team(){
         <button onclick="predictRevenue()" style="flex:1;min-width:140px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:10px;font-size:12px;cursor:pointer">💰 Revenue Forecast</button>
         <button onclick="detectTrends()" style="flex:1;min-width:140px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:10px;font-size:12px;cursor:pointer">📈 Detect Trends</button>
         <button onclick="autonomousMode()" style="flex:1;min-width:140px;background:linear-gradient(135deg,#7c3aed,#06b6d4);color:#fff;border:none;padding:10px 16px;border-radius:10px;font-size:12px;cursor:pointer;font-weight:600">🤖 Autonomous</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button onclick="runQAAgent()" style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:10px;font-size:12px;cursor:pointer">🔍 QA</button>
+        <button onclick="runSecurityAgent()" style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:10px;font-size:12px;cursor:pointer">🔒 Security</button>
+        <button onclick="runGrowthAgent()" style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:10px;font-size:12px;cursor:pointer">📈 Growth</button>
+        <button onclick="runAnalyticsAgent()" style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:10px;font-size:12px;cursor:pointer">📊 Analytics</button>
       </div>
     </div>
 
