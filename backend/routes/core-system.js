@@ -1,321 +1,56 @@
 // ============================================================
-// 🧠 CORE OPTIMIZATION — routes/core-system.js
-// Model Router · Smart Orchestrator · Cache · One-Prompt
+// 🧠 routes/core-system.js — Production routes using services
+// Model Router · Orchestrator · Cache · One-Prompt
 // ============================================================
 const express = require('express');
-const router = express.Router();
 const crypto = require('crypto');
 
-module.exports = (db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete) => {
+module.exports = (db, openai, services, requireAuth, requireQuota, aiLimiter, wrap) => {
+const router = express.Router();
+const { router: modelRouter, cache, memory, logger, createOrchestrator, smartCall } = services;
 
-// ═══════════════════════════════════════════════════════════
-// 🧠 INTELLIGENT MODEL ROUTER
-// ═══════════════════════════════════════════════════════════
-const MODEL_REGISTRY = {
-  'reasoning-deep':    { model: 'gpt-4o',         cost: 5,  speed: 3, quality: 10 },
-  'reasoning-fast':    { model: 'gpt-4o-mini',    cost: 1,  speed: 9, quality: 7 },
-  'coding-strong':     { model: 'gpt-4o',         cost: 5,  speed: 4, quality: 10 },
-  'coding-fast':       { model: 'gpt-4o-mini',    cost: 1,  speed: 9, quality: 7 },
-  'creative':          { model: 'gpt-4o',         cost: 5,  speed: 4, quality: 10 },
-  'extraction':        { model: 'gpt-4o-mini',    cost: 1,  speed: 9, quality: 8 },
-  'classification':    { model: 'gpt-4o-mini',    cost: 1,  speed: 9, quality: 9 },
-  'summarization':     { model: 'gpt-4o-mini',    cost: 1,  speed: 9, quality: 8 },
-  'embedding':         { model: 'text-embedding-3-small', cost: 0.1, speed: 10, quality: 9 },
-};
+// ─── Model registry endpoint ────────────────
+router.get('/models', wrap(async (req, res) => {
+  res.json({ registry: modelRouter.MODEL_REGISTRY, patterns: modelRouter.TASK_PATTERNS });
+}));
 
-const TASK_PATTERNS = [
-  { keywords: ['debug', 'fix bug', 'error', 'why does', 'troubleshoot'],          task: 'reasoning-deep' },
-  { keywords: ['code', 'function', 'class', 'implement', 'build', 'algorithm'],   task: 'coding-strong' },
-  { keywords: ['quick', 'short', 'brief', 'tldr', 'summary'],                     task: 'summarization' },
-  { keywords: ['extract', 'parse', 'find', 'list'],                               task: 'extraction' },
-  { keywords: ['classify', 'categorize', 'is this', 'detect'],                    task: 'classification' },
-  { keywords: ['write', 'story', 'creative', 'poem', 'imagine'],                  task: 'creative' },
-  { keywords: ['plan', 'analyze', 'compare', 'evaluate', 'decide'],               task: 'reasoning-deep' },
-];
-
-function detectTask(prompt, hint) {
-  if (hint && MODEL_REGISTRY[hint]) return hint;
-  const lower = String(prompt || '').toLowerCase();
-  for (const { keywords, task } of TASK_PATTERNS) {
-    if (keywords.some(k => lower.includes(k))) return task;
-  }
-  // Default by length
-  if (lower.length < 200) return 'reasoning-fast';
-  return 'reasoning-deep';
-}
-
-function selectModel(taskType, options = {}) {
-  const task = MODEL_REGISTRY[taskType] || MODEL_REGISTRY['reasoning-fast'];
-  return task.model;
-}
-
-async function smartCall({ prompt, system, task, max_tokens = 1500, temperature = 0.7, json = false, stream = false }) {
-  const taskType = detectTask(prompt, task);
-  const model = selectModel(taskType);
-
-  const config = {
-    model,
-    max_tokens,
-    temperature,
-    messages: [
-      ...(system ? [{ role: 'system', content: system }] : []),
-      { role: 'user', content: prompt }
-    ],
-  };
-  if (json) config.response_format = { type: 'json_object' };
-  if (stream) config.stream = true;
-
-  return { config, model, taskType };
-}
-
-// Public router endpoint
+// ─── Smart routed AI call ────────────────────
 router.post('/route', requireAuth, requireQuota, aiLimiter, wrap(async (req, res) => {
   const { prompt, system, task, max_tokens, json } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
 
-  const { config, model, taskType } = await smartCall({ prompt, system, task, max_tokens, json });
-  const startTime = Date.now();
-
-  const result = await openai.chat.completions.create(config);
-  const duration = Date.now() - startTime;
-  const output = result.choices[0]?.message?.content || '';
-
-  res.json({
-    output: json ? JSON.parse(output) : output,
-    routing: { task_type: taskType, model_used: model, duration_ms: duration },
-    usage: result.usage,
+  const result = await smartCall({
+    prompt: services.security.sanitizeInput(prompt, { stripHtml: false, maxLength: 20000 }),
+    system,
+    task,
+    max_tokens,
+    json,
   });
+  res.json(result);
 }));
 
-// Get model registry
-router.get('/models', wrap(async (req, res) => {
-  res.json({ registry: MODEL_REGISTRY, patterns: TASK_PATTERNS });
-}));
-
-// ═══════════════════════════════════════════════════════════
-// ⚡ SMART CACHE (response caching with semantic key)
-// ═══════════════════════════════════════════════════════════
-db.prepare(`CREATE TABLE IF NOT EXISTS smart_cache (
-  cache_key TEXT PRIMARY KEY,
-  prompt_hash TEXT NOT NULL,
-  response TEXT NOT NULL,
-  model TEXT,
-  task_type TEXT,
-  hits INTEGER DEFAULT 0,
-  expires_at INTEGER NOT NULL,
-  created_at TEXT DEFAULT (datetime('now'))
-)`).run();
-db.prepare(`CREATE INDEX IF NOT EXISTS idx_smart_cache_expires ON smart_cache(expires_at)`).run();
-
-const memCache = new Map();
-function hashPrompt(text) {
-  return crypto.createHash('sha256').update(String(text)).digest('hex').slice(0, 16);
-}
-
-function getCached(prompt, system) {
-  const key = hashPrompt((system || '') + '||' + prompt);
-  const mem = memCache.get(key);
-  if (mem && mem.expires > Date.now()) return mem.value;
-  if (mem) memCache.delete(key);
-  try {
-    const row = db.prepare(`SELECT response FROM smart_cache WHERE cache_key = ? AND expires_at > ?`).get(key, Date.now());
-    if (row) {
-      db.prepare(`UPDATE smart_cache SET hits = hits + 1 WHERE cache_key = ?`).run(key);
-      const value = JSON.parse(row.response);
-      memCache.set(key, { value, expires: Date.now() + 600000 });
-      return value;
-    }
-  } catch (_) {}
-  return null;
-}
-
-function setCached(prompt, system, response, model, taskType, ttlSec = 3600) {
-  const key = hashPrompt((system || '') + '||' + prompt);
-  const expires = Date.now() + ttlSec * 1000;
-  memCache.set(key, { value: response, expires });
-  if (memCache.size > 500) {
-    const firstKey = memCache.keys().next().value;
-    memCache.delete(firstKey);
-  }
-  try {
-    db.prepare(`INSERT OR REPLACE INTO smart_cache (cache_key, prompt_hash, response, model, task_type, expires_at) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(key, key, JSON.stringify(response), model, taskType, expires);
-  } catch (_) {}
-}
-
-setInterval(() => {
-  try { db.prepare(`DELETE FROM smart_cache WHERE expires_at < ?`).run(Date.now()); } catch (_) {}
-}, 5 * 60 * 1000);
-
+// ─── Cache stats / clear ─────────────────────
 router.get('/cache/stats', requireAuth, wrap(async (req, res) => {
-  const stats = db.prepare(`SELECT COUNT(*) as total, SUM(hits) as total_hits, AVG(hits) as avg_hits FROM smart_cache`).get();
-  const top = db.prepare(`SELECT task_type, model, hits FROM smart_cache ORDER BY hits DESC LIMIT 10`).all();
-  res.json({ memory_size: memCache.size, ...stats, top_cached: top });
+  res.json(cache.stats());
 }));
 
 router.delete('/cache/clear', requireAuth, wrap(async (req, res) => {
-  memCache.clear();
-  db.prepare(`DELETE FROM smart_cache`).run();
+  cache.clear();
   res.json({ ok: true });
 }));
 
-// ═══════════════════════════════════════════════════════════
-// 🎼 SMART ORCHESTRATOR (DAG execution with retries)
-// ═══════════════════════════════════════════════════════════
+// ─── DAG Orchestration ───────────────────────
 db.prepare(`CREATE TABLE IF NOT EXISTS orchestrations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
   name TEXT NOT NULL,
   graph TEXT NOT NULL,
-  results TEXT DEFAULT '{}',
+  results TEXT,
   status TEXT DEFAULT 'running',
   created_at TEXT DEFAULT (datetime('now')),
   completed_at TEXT
 )`).run();
 
-class Orchestrator {
-  constructor(graph, options = {}) {
-    this.graph = graph;
-    this.results = {};
-    this.errors = {};
-    this.maxRetries = options.maxRetries || 2;
-    this.onEvent = options.onEvent || (() => {});
-  }
-
-  // Topological sort with parallel layers
-  buildLayers() {
-    const layers = [];
-    const completed = new Set();
-    const remaining = new Set(Object.keys(this.graph));
-
-    while (remaining.size > 0) {
-      const layer = [];
-      for (const node of remaining) {
-        const deps = this.graph[node].depends_on || [];
-        if (deps.every(d => completed.has(d))) layer.push(node);
-      }
-      if (!layer.length) {
-        // Circular or missing deps — abort
-        throw new Error('Circular dependency or missing nodes: ' + Array.from(remaining).join(','));
-      }
-      layers.push(layer);
-      layer.forEach(n => { completed.add(n); remaining.delete(n); });
-    }
-    return layers;
-  }
-
-  async runNode(nodeName) {
-    const node = this.graph[nodeName];
-    let lastError;
-
-    for (let attempt = 1; attempt <= this.maxRetries + 1; attempt++) {
-      try {
-        this.onEvent({ type: 'node_start', node: nodeName, attempt });
-        const startTime = Date.now();
-
-        // Build context from dependencies
-        const context = {};
-        (node.depends_on || []).forEach(dep => { context[dep] = this.results[dep]; });
-
-        // Execute
-        const prompt = typeof node.prompt === 'function' ? node.prompt(context) : node.prompt;
-        const system = node.system || 'You are an expert AI agent. Respond clearly and accurately.';
-        const taskType = detectTask(prompt, node.task);
-        const model = selectModel(taskType);
-
-        // Check cache (if cacheable)
-        if (node.cacheable !== false) {
-          const cached = getCached(prompt, system);
-          if (cached) {
-            this.results[nodeName] = cached;
-            this.onEvent({ type: 'node_done', node: nodeName, cached: true, duration_ms: Date.now() - startTime, model, task_type: taskType });
-            return cached;
-          }
-        }
-
-        const result = await openai.chat.completions.create({
-          model,
-          max_tokens: node.max_tokens || 1500,
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: prompt }
-          ],
-          response_format: node.json ? { type: 'json_object' } : undefined,
-        });
-
-        let output = result.choices[0]?.message?.content || '';
-        if (node.json) {
-          try { output = JSON.parse(output); }
-          catch (_) { output = { raw: output, parse_error: true }; }
-        }
-
-        // Validate if validator provided
-        if (node.validator) {
-          const valid = await this.validate(nodeName, output, node.validator);
-          if (!valid.passes && attempt <= this.maxRetries) {
-            this.onEvent({ type: 'node_validation_failed', node: nodeName, attempt, reason: valid.reason });
-            continue;
-          }
-        }
-
-        this.results[nodeName] = output;
-        if (node.cacheable !== false) setCached(prompt, system, output, model, taskType, node.ttl || 3600);
-
-        this.onEvent({ type: 'node_done', node: nodeName, duration_ms: Date.now() - startTime, model, task_type: taskType, attempt });
-        return output;
-
-      } catch (err) {
-        lastError = err;
-        this.onEvent({ type: 'node_error', node: nodeName, attempt, error: err.message });
-        if (attempt > this.maxRetries) {
-          // Use fallback if defined
-          if (node.fallback) {
-            this.results[nodeName] = typeof node.fallback === 'function' ? node.fallback() : node.fallback;
-            return this.results[nodeName];
-          }
-          this.errors[nodeName] = err.message;
-          throw err;
-        }
-        // Wait before retry (exponential backoff)
-        await new Promise(r => setTimeout(r, Math.min(1000 * Math.pow(2, attempt - 1), 8000)));
-      }
-    }
-  }
-
-  async validate(nodeName, output, validator) {
-    try {
-      const result = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        max_tokens: 200,
-        response_format: { type: 'json_object' },
-        messages: [{
-          role: 'user',
-          content: `Validate this output: ${JSON.stringify(output).slice(0, 1500)}\n\nCriteria: ${validator}\n\nReturn JSON: {"passes":true/false,"reason":"..."}`
-        }],
-      });
-      return JSON.parse(result.choices[0]?.message?.content || '{"passes":true}');
-    } catch (_) { return { passes: true }; }
-  }
-
-  async run() {
-    const layers = this.buildLayers();
-    this.onEvent({ type: 'orchestration_start', total_nodes: Object.keys(this.graph).length, layers: layers.length });
-
-    for (let i = 0; i < layers.length; i++) {
-      this.onEvent({ type: 'layer_start', layer: i + 1, total_layers: layers.length, parallel_nodes: layers[i] });
-
-      // Run all nodes in this layer in parallel
-      await Promise.allSettled(layers[i].map(node => this.runNode(node)));
-
-      this.onEvent({ type: 'layer_done', layer: i + 1 });
-    }
-
-    this.onEvent({ type: 'orchestration_complete', results_keys: Object.keys(this.results), errors: this.errors });
-    return { results: this.results, errors: this.errors };
-  }
-}
-
-// Run custom DAG
 router.post('/orchestrate', requireAuth, requireQuota, aiLimiter, wrap(async (req, res) => {
   const { name, graph } = req.body;
   if (!graph || typeof graph !== 'object') return res.status(400).json({ error: 'Missing graph' });
@@ -324,36 +59,39 @@ router.post('/orchestrate', requireAuth, requireQuota, aiLimiter, wrap(async (re
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
+
   const send = (e) => res.write(`data: ${JSON.stringify(e)}\n\n`);
 
-  const orchestrationId = db.prepare(`INSERT INTO orchestrations (user_id, name, graph) VALUES (?, ?, ?)`)
+  const orchId = db.prepare(`INSERT INTO orchestrations (user_id, name, graph) VALUES (?, ?, ?)`)
     .run(req.user.id, name || 'orchestration', JSON.stringify(graph)).lastInsertRowid;
 
-  send({ type: 'orchestration_id', id: orchestrationId });
+  send({ type: 'orchestration_id', id: orchId });
 
   try {
-    const orch = new Orchestrator(graph, { onEvent: send });
-    const { results, errors } = await orch.run();
+    const orch = createOrchestrator(graph, { onEvent: send, userId: req.user.id });
+    const { results, errors, summary } = await orch.run();
 
     db.prepare(`UPDATE orchestrations SET results = ?, status = 'completed', completed_at = datetime('now') WHERE id = ?`)
-      .run(JSON.stringify(results), orchestrationId);
+      .run(JSON.stringify(results), orchId);
 
-    send({ type: 'final', results, errors });
+    send({ type: 'final', results, errors, summary });
     res.end();
   } catch (e) {
-    db.prepare(`UPDATE orchestrations SET status = 'failed' WHERE id = ?`).run(orchestrationId);
+    db.prepare(`UPDATE orchestrations SET status = 'failed' WHERE id = ?`).run(orchId);
+    logger.error('Orchestration failed', { user_id: req.user.id, error: e.message });
     send({ type: 'fatal', error: e.message });
     res.end();
   }
 }));
 
 // ═══════════════════════════════════════════════════════════
-// ⚡ ONE-PROMPT EXPERIENCE
-// "Build me a SaaS for restaurants" → end-to-end execution
+// ⚡ ONE-PROMPT EXPERIENCE — The Hero Feature
 // ═══════════════════════════════════════════════════════════
 router.post('/one-prompt', requireAuth, requireQuota, aiLimiter, wrap(async (req, res) => {
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  const { prompt: rawPrompt } = req.body;
+  if (!rawPrompt) return res.status(400).json({ error: 'Missing prompt' });
+
+  const prompt = services.security.sanitizeInput(rawPrompt, { maxLength: 5000 });
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -361,136 +99,95 @@ router.post('/one-prompt', requireAuth, requireQuota, aiLimiter, wrap(async (req
   res.flushHeaders();
   const send = (e) => res.write(`data: ${JSON.stringify(e)}\n\n`);
 
-  // STEP 1: Understand intent
+  // PHASE 1: Understand intent
   send({ type: 'phase', name: 'understanding', label: '🧠 Understanding your request...' });
-  const intentResult = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
-    max_tokens: 500,
-    response_format: { type: 'json_object' },
-    messages: [{
-      role: 'user',
-      content: `Classify this user request and extract details. Return JSON:
+
+  let intent;
+  try {
+    const intentResult = await smartCall({
+      prompt: `Classify this user request and extract details. Return JSON:
 {
-  "intent": "build_startup/build_app/research/analyze/write/code/design/other",
-  "domain": "what industry/area",
-  "scope": "minimal/standard/comprehensive",
+  "intent": "build_startup | build_app | research | analyze | write | code | design | other",
+  "domain": "industry/area",
+  "scope": "minimal | standard | comprehensive",
   "key_requirements": ["..."],
-  "implicit_needs": ["..."],
   "expected_deliverables": ["..."],
   "name_suggestion": "short product name",
   "confidence": 0-100
 }
 
-Request: ${prompt}`
-    }]
-  });
-  const intent = JSON.parse(intentResult.choices[0]?.message?.content || '{}');
+Request: ${prompt}`,
+      task: 'classification',
+      json: true,
+      cacheable: true,
+      cacheTTL: 7200,
+    });
+    intent = intentResult.output;
+  } catch (e) {
+    send({ type: 'error', error: 'Failed to understand: ' + e.message });
+    return res.end();
+  }
+
   send({ type: 'intent_detected', intent });
 
-  // STEP 2: Build execution graph dynamically based on intent
+  // PHASE 2: Inject user context for personalization
+  const userContext = memory.buildContext(req.user.id);
+
+  // PHASE 3: Build graph dynamically
   send({ type: 'phase', name: 'planning', label: '📋 Building execution plan...' });
 
   let graph;
   if (intent.intent === 'build_startup' || intent.intent === 'build_app') {
-    // Full multi-agent startup pipeline
-    graph = {
-      strategy: {
-        prompt: `Define startup strategy for: "${prompt}". Domain: ${intent.domain}. Return JSON: {"vision":"...","mission":"...","target_market":"...","value_prop":"...","differentiators":["..."],"revenue_model":"..."}`,
-        system: 'CEO Agent. Strategic thinker.',
-        task: 'reasoning-deep', json: true,
-      },
-      product_spec: {
-        prompt: (ctx) => `Design product spec based on strategy: ${JSON.stringify(ctx.strategy).slice(0, 1500)}\n\nFor: "${prompt}"\n\nReturn JSON: {"name":"...","tagline":"...","features":[{"name":"...","desc":"...","priority":"P0/P1"}],"user_personas":[{"name":"...","needs":["..."]}],"mvp_scope":["..."]}`,
-        system: 'Product Manager. Detail-oriented.',
-        task: 'reasoning-deep', json: true,
-        depends_on: ['strategy'],
-      },
-      design: {
-        prompt: (ctx) => `Generate complete dark-themed landing page HTML for "${ctx.product_spec?.name || 'startup'}".\nValue prop: ${ctx.strategy?.value_prop || prompt}\n\nReturn JSON: {"landing_html":"COMPLETE HTML with hero, 6 features, 3 pricing tiers, CTA","brand_colors":["#c6f135","#35f1c6"],"font":"Inter"}`,
-        system: 'Senior UI/UX designer. Premium dark theme expert.',
-        task: 'creative', json: true, max_tokens: 4000,
-        depends_on: ['product_spec'],
-      },
-      backend: {
-        prompt: (ctx) => `Generate complete Node.js + Express + SQLite backend for: "${prompt}"\n\nFeatures: ${JSON.stringify(ctx.product_spec?.features || []).slice(0, 1000)}\n\nReturn JSON: {"server_js":"complete server.js","schema":"CREATE TABLE...","package_json":"...","env_example":"..."}`,
-        system: 'Senior backend engineer.',
-        task: 'coding-strong', json: true, max_tokens: 4000,
-        depends_on: ['product_spec'],
-      },
-      frontend: {
-        prompt: (ctx) => `Generate React frontend for: "${prompt}"\n\nFeatures: ${JSON.stringify(ctx.product_spec?.features || []).slice(0, 1000)}\n\nReturn JSON: {"app_jsx":"complete React app","components":["..."],"package_json":"..."}`,
-        system: 'Senior React engineer.',
-        task: 'coding-strong', json: true, max_tokens: 4000,
-        depends_on: ['product_spec'],
-      },
-      marketing: {
-        prompt: (ctx) => `Generate viral launch package for "${ctx.product_spec?.name}".\n\nReturn JSON: {"twitter_thread":["tweet 1",...],"product_hunt":{"tagline":"...","description":"..."},"linkedin_post":"...","email_sequence":[{"day":0,"subject":"...","body":"..."}]}`,
-        system: 'Growth marketing expert.',
-        task: 'creative', json: true,
-        depends_on: ['strategy', 'product_spec'],
-      },
-      deploy_config: {
-        prompt: (ctx) => `Generate deployment configs.\n\nReturn JSON: {"dockerfile":"...","docker_compose":"...","github_actions":"...","vercel_json":"...","railway_json":"...","readme":"# ${ctx.product_spec?.name || 'Project'}\\n..."}`,
-        system: 'DevOps engineer.',
-        task: 'coding-fast', json: true,
-        depends_on: ['backend'],
-      },
-    };
+    graph = buildStartupGraph(prompt, intent, userContext);
   } else if (intent.intent === 'research' || intent.intent === 'analyze') {
-    graph = {
-      research: {
-        prompt: `Deep research: "${prompt}"\n\nReturn JSON: {"key_findings":["..."],"data_points":["..."],"sources_to_check":["..."],"insights":["..."]}`,
-        task: 'reasoning-deep', json: true,
-      },
-      analysis: {
-        prompt: (ctx) => `Analyze findings: ${JSON.stringify(ctx.research).slice(0, 2000)}\n\nReturn JSON: {"patterns":["..."],"implications":["..."],"recommendations":["..."]}`,
-        task: 'reasoning-deep', json: true,
-        depends_on: ['research'],
-      },
-      report: {
-        prompt: (ctx) => `Write comprehensive report based on:\n${JSON.stringify(ctx.analysis).slice(0, 2000)}`,
-        task: 'creative',
-        depends_on: ['analysis'],
-      },
-    };
+    graph = buildResearchGraph(prompt, intent, userContext);
+  } else if (intent.intent === 'code') {
+    graph = buildCodeGraph(prompt, intent, userContext);
   } else {
-    // Generic single-task flow
-    graph = {
-      task: { prompt, task: 'reasoning-deep' },
-    };
+    graph = buildGenericGraph(prompt, intent, userContext);
   }
 
-  send({ type: 'graph_ready', node_count: Object.keys(graph).length, intent: intent.intent });
+  send({ type: 'graph_ready', node_count: Object.keys(graph).length });
 
-  // STEP 3: Execute orchestration
-  const orch = new Orchestrator(graph, {
+  // PHASE 4: Execute orchestration
+  const orch = createOrchestrator(graph, {
     onEvent: (e) => send({ type: 'execution', event: e }),
+    userId: req.user.id,
     maxRetries: 2,
   });
 
   try {
-    const { results, errors } = await orch.run();
+    const { results, errors, summary } = await orch.run();
 
-    // STEP 4: Save as project if it's a build request
+    // PHASE 5: Save as project if buildable
     let projectId = null;
+    let shareId = null;
     if (intent.intent === 'build_startup' || intent.intent === 'build_app') {
-      const shareId = crypto.randomBytes(8).toString('hex');
       try {
+        shareId = crypto.randomBytes(8).toString('hex');
         projectId = db.prepare(`INSERT INTO agent_projects (user_id, share_id, name, idea, status) VALUES (?, ?, ?, ?, 'completed')`)
           .run(req.user.id, shareId, intent.name_suggestion || prompt.slice(0, 60), prompt).lastInsertRowid;
 
-        // Save each agent step
-        const agentMap = { strategy: 'CEO Agent', product_spec: 'Product Agent', design: 'Design Agent', backend: 'Dev Agent', frontend: 'Dev Agent', marketing: 'Marketing Agent', deploy_config: 'Deploy Agent' };
+        const agentMap = {
+          strategy: 'CEO Agent',
+          product_spec: 'Product Agent',
+          design: 'Design Agent',
+          backend: 'Dev Agent',
+          frontend: 'Dev Agent',
+          marketing: 'Marketing Agent',
+          deploy_config: 'Deploy Agent',
+        };
         for (const [key, value] of Object.entries(results)) {
           const agentName = agentMap[key] || key;
-          // Map design output for compatibility
           const output = key === 'design' && value?.landing_html
             ? { landing_page_html: value.landing_html, ...value }
             : value;
-          db.prepare(`INSERT INTO agent_steps (project_id, agent_name, step_name, status, output, duration_ms) VALUES (?, ?, ?, 'completed', ?, 0)`)
-            .run(projectId, agentName, key, JSON.stringify(output));
+          db.prepare(`INSERT INTO agent_steps (project_id, agent_name, step_name, status, output, duration_ms) VALUES (?, ?, ?, 'completed', ?, ?)`)
+            .run(projectId, agentName, key, JSON.stringify(output), 0);
         }
-      } catch (e) { /* table may not exist */ }
+      } catch (e) {
+        logger.warn('Could not save project', { error: e.message });
+      }
     }
 
     send({
@@ -499,43 +196,149 @@ Request: ${prompt}`
       results,
       errors,
       project_id: projectId,
-      summary: `✨ ${intent.name_suggestion || 'Project'} ready! Generated ${Object.keys(results).length} components.`,
+      share_id: shareId,
+      summary: `✨ ${intent.name_suggestion || 'Project'} ready! Generated ${Object.keys(results).length} components in ${(summary.duration_ms / 1000).toFixed(1)}s.`,
     });
     res.end();
   } catch (e) {
+    logger.error('One-Prompt failed', { user_id: req.user.id, error: e.message });
     send({ type: 'error', error: e.message });
     res.end();
   }
 }));
 
+// ─── Graph builders ─────────────────────────
+function buildStartupGraph(prompt, intent, userCtx) {
+  return {
+    strategy: {
+      task: 'reasoning-deep', json: true,
+      system: `${userCtx}You are the CEO Agent. Strategic thinker.`,
+      prompt: `Define startup strategy for: "${prompt}"\nDomain: ${intent.domain}\n\nReturn JSON: {"vision":"...","mission":"...","target_market":"...","value_prop":"...","differentiators":["..."],"revenue_model":"..."}`,
+      validator: 'Has vision, target_market, value_prop, differentiators',
+    },
+    product_spec: {
+      task: 'reasoning-deep', json: true,
+      depends_on: ['strategy'],
+      system: 'You are the Product Agent. Detail-oriented.',
+      prompt: (ctx) => `Design product spec for: "${prompt}"\n\nStrategy:\n${JSON.stringify(ctx.strategy).slice(0, 1500)}\n\nReturn JSON: {"name":"...","tagline":"...","features":[{"name":"...","desc":"...","priority":"P0/P1"}],"user_personas":[{"name":"...","needs":["..."]}],"mvp_scope":["..."]}`,
+    },
+    design: {
+      task: 'creative', json: true, max_tokens: 4000,
+      depends_on: ['product_spec'],
+      system: 'You are the Design Agent. Premium dark UI/UX expert.',
+      prompt: (ctx) => `Generate complete dark-themed landing page HTML for "${ctx.product_spec?.name || 'startup'}".\nValue prop: ${ctx.product_spec?.tagline || prompt}\n\nReturn JSON: {"landing_html":"COMPLETE HTML with hero, 6 features, 3 pricing tiers, testimonials, FAQ, CTA. Use lime/cyan gradient. Inline CSS.","brand_colors":["#c6f135","#35f1c6"]}`,
+    },
+    backend: {
+      task: 'coding-strong', json: true, max_tokens: 4000,
+      depends_on: ['product_spec'],
+      system: 'You are the Dev Agent. Senior backend engineer.',
+      prompt: (ctx) => `Generate Node.js + Express + SQLite backend for: "${prompt}"\n\nFeatures: ${JSON.stringify(ctx.product_spec?.features || []).slice(0, 1000)}\n\nReturn JSON: {"server_js":"complete server.js with auth, CRUD, error handling","schema":"CREATE TABLE...","package_json":"...","env_example":"..."}`,
+    },
+    frontend: {
+      task: 'coding-strong', json: true, max_tokens: 4000,
+      depends_on: ['product_spec'],
+      system: 'You are the Frontend Agent. Senior React engineer.',
+      prompt: (ctx) => `Generate React frontend for: "${prompt}"\n\nFeatures: ${JSON.stringify(ctx.product_spec?.features || []).slice(0, 1000)}\n\nReturn JSON: {"app_jsx":"complete React app","components":["..."],"package_json":"..."}`,
+    },
+    marketing: {
+      task: 'creative', json: true,
+      depends_on: ['strategy', 'product_spec'],
+      system: 'You are the Marketing Agent. Growth expert.',
+      prompt: (ctx) => `Generate viral launch package for "${ctx.product_spec?.name}".\n\nReturn JSON: {"twitter_thread":["tweet 1",...],"product_hunt":{"tagline":"...","description":"..."},"linkedin_post":"...","email_sequence":[{"day":0,"subject":"...","body":"..."}]}`,
+    },
+    deploy_config: {
+      task: 'coding-fast', json: true,
+      depends_on: ['backend'],
+      system: 'You are the Deploy Agent. DevOps expert.',
+      prompt: (ctx) => `Generate deployment configs.\n\nReturn JSON: {"dockerfile":"FROM node:20...","docker_compose":"version: '3.8'...","github_actions":"...","vercel_json":"...","railway_json":"...","readme":"# Project\\n..."}`,
+    },
+  };
+}
+
+function buildResearchGraph(prompt, intent, userCtx) {
+  return {
+    research: {
+      task: 'reasoning-deep', json: true,
+      system: `${userCtx}You are a Research Agent. Thorough and analytical.`,
+      prompt: `Deep research: "${prompt}"\n\nReturn JSON: {"key_findings":["..."],"data_points":["..."],"insights":["..."],"sources_to_verify":["..."]}`,
+    },
+    analysis: {
+      task: 'reasoning-deep', json: true,
+      depends_on: ['research'],
+      system: 'You are an Analyst Agent. Pattern recognition expert.',
+      prompt: (ctx) => `Analyze findings:\n${JSON.stringify(ctx.research).slice(0, 2000)}\n\nReturn JSON: {"patterns":["..."],"implications":["..."],"recommendations":["..."]}`,
+    },
+    report: {
+      task: 'creative',
+      depends_on: ['analysis'],
+      system: 'You are a Writer Agent. Clear and concise.',
+      prompt: (ctx) => `Write comprehensive report based on:\n\nResearch:\n${JSON.stringify(ctx.research).slice(0, 1500)}\n\nAnalysis:\n${JSON.stringify(ctx.analysis).slice(0, 1500)}`,
+    },
+  };
+}
+
+function buildCodeGraph(prompt, intent, userCtx) {
+  return {
+    plan: {
+      task: 'reasoning-deep', json: true,
+      system: `${userCtx}You are a Software Architect.`,
+      prompt: `Plan implementation for: "${prompt}"\n\nReturn JSON: {"language":"...","framework":"...","files_needed":["..."],"approach":"..."}`,
+    },
+    code: {
+      task: 'coding-strong', max_tokens: 4000,
+      depends_on: ['plan'],
+      system: 'You are a Senior Engineer. Write production-grade, well-commented code.',
+      prompt: (ctx) => `Implement: "${prompt}"\n\nPlan:\n${JSON.stringify(ctx.plan).slice(0, 1500)}\n\nWrite complete, working code with comments.`,
+    },
+    tests: {
+      task: 'coding-fast',
+      depends_on: ['code'],
+      system: 'You are a QA Engineer. Write thorough tests.',
+      prompt: (ctx) => `Write tests for this code:\n${String(ctx.code).slice(0, 3000)}`,
+      required: false,
+    },
+  };
+}
+
+function buildGenericGraph(prompt, intent, userCtx) {
+  return {
+    response: {
+      task: 'reasoning-deep',
+      system: `${userCtx}You are a helpful expert assistant.`,
+      prompt,
+    },
+  };
+}
+
 // ═══════════════════════════════════════════════════════════
-// 🛡️ SECURITY + VALIDATION HELPERS
+// 🛡️ Security helpers exposed
 // ═══════════════════════════════════════════════════════════
 router.post('/sanitize', requireAuth, wrap(async (req, res) => {
-  const { input, type = 'general' } = req.body;
+  const { input } = req.body;
   if (!input) return res.status(400).json({ error: 'Missing input' });
 
-  // Basic sanitization rules
-  const checks = {
-    has_script_tag: /<script[\s\S]*?>/i.test(input),
-    has_sql_injection: /('|"|;|--|\/\*|union\s+select|drop\s+table)/i.test(input),
-    has_path_traversal: /(\.\.\/|\.\.\\)/i.test(input),
-    too_long: input.length > 10000,
-    contains_pii: /(\b\d{3}-\d{2}-\d{4}\b|\b\d{16}\b|password\s*[:=])/i.test(input),
-  };
-
-  const safe = !Object.values(checks).some(v => v);
-  res.json({ safe, checks, sanitized: safe ? input : input.replace(/<script[\s\S]*?<\/script>/gi, '') });
+  const threats = services.security.detectThreats(input);
+  const sanitized = services.security.sanitizeInput(input);
+  res.json({
+    safe: services.security.isSafe(input),
+    threats,
+    sanitized,
+  });
 }));
 
 // ═══════════════════════════════════════════════════════════
-// 📊 SYSTEM HEALTH MONITORING
+// 📊 SYSTEM HEALTH
 // ═══════════════════════════════════════════════════════════
 router.get('/health', wrap(async (req, res) => {
   const memUsage = process.memoryUsage();
-  const cacheStats = db.prepare(`SELECT COUNT(*) as size, SUM(hits) as hits FROM smart_cache`).get();
-  const recentJobs = db.prepare(`SELECT status, COUNT(*) as c FROM background_jobs WHERE created_at > datetime('now','-1 hour') GROUP BY status`).all().reduce((acc, r) => { acc[r.status] = r.c; return acc; }, {});
-  const recentOrch = db.prepare(`SELECT status, COUNT(*) as c FROM orchestrations WHERE created_at > datetime('now','-24 hours') GROUP BY status`).all().reduce((acc, r) => { acc[r.status] = r.c; return acc; }, {});
+  const cacheStats = cache.stats();
+  const workerStats = services.workers.stats();
+
+  let recentOrch = {};
+  try {
+    recentOrch = db.prepare(`SELECT status, COUNT(*) as c FROM orchestrations WHERE created_at > datetime('now','-24 hours') GROUP BY status`)
+      .all().reduce((acc, r) => { acc[r.status] = r.c; return acc; }, {});
+  } catch (_) {}
 
   res.json({
     status: 'healthy',
@@ -544,12 +347,8 @@ router.get('/health', wrap(async (req, res) => {
       rss_mb: (memUsage.rss / 1024 / 1024).toFixed(1),
       heap_used_mb: (memUsage.heapUsed / 1024 / 1024).toFixed(1),
     },
-    cache: {
-      memory_size: memCache.size,
-      db_size: cacheStats.size,
-      total_hits: cacheStats.hits || 0,
-    },
-    jobs_last_hour: recentJobs,
+    cache: cacheStats,
+    workers: workerStats,
     orchestrations_24h: recentOrch,
     timestamp: new Date().toISOString(),
   });

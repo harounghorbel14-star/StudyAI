@@ -3083,12 +3083,33 @@ app.use((err,_req,res,_next) => {
 });
 
 // ─────────────────────────────────────────────
+// 🧠 INITIALIZE SERVICES (production architecture)
+// ─────────────────────────────────────────────
+let services = null;
+try {
+  const { initServices } = require('./services');
+  services = initServices(db, openai, { startWorkers: true });
+  services.logger.info('Services initialized', {
+    cache: 'ready',
+    workers: 'started',
+    memory: 'ready',
+    router: Object.keys(services.router.MODEL_REGISTRY).length + ' models',
+  });
+} catch (e) {
+  console.warn('⚠️ Services init:', e.message);
+}
+
+// ─────────────────────────────────────────────
 // 📦 ROUTE MODULES
 // ─────────────────────────────────────────────
 try{
   const coreRoute = require('./routes/core-system');
-  app.use('/api/core', coreRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete));
-  console.log('✅ CORE: Model Router + Smart Orchestrator + Cache + One-Prompt loaded');
+  if (services) {
+    app.use('/api/core', coreRoute(db, openai, services, requireAuth, requireQuota, aiLimiter, wrap));
+    console.log('✅ CORE: Model Router + Smart Orchestrator + Cache + One-Prompt loaded');
+  } else {
+    console.warn('⚠️ Skipping core routes — services not initialized');
+  }
 }catch(e){console.warn('⚠️ Core routes:', e.message);}
 
 try{
