@@ -2396,6 +2396,574 @@ async function runAnalyticsAgent(){
   }catch(e){hideTyping();toast(e.message,'error');}
 }
 
+// ── 🚀 DEPLOY CENTER (Real GitHub + Vercel + Railway) ──────
+async function navigate_deploy(){
+  S.page='deploy';closeSidebar();
+  document.getElementById('tool-label').textContent='🚀 Deploy Center';
+  document.getElementById('tool-sub').textContent='Real GitHub + Vercel + Railway deploy';
+
+  let connections=[];
+  try{const d=await api('/api/deploy/connections');connections=d.connections||[];}catch(_){}
+  const has = s => connections.find(c=>c.service===s);
+
+  let deployments=[];
+  try{const d=await api('/api/deploy/deployments');deployments=d.deployments||[];}catch(_){}
+
+  document.getElementById('messages').innerHTML=`<div class="page-wrap ai-os-bg">
+    <div class="page-title gradient-text">🚀 Deploy Center</div>
+    <p style="color:var(--t2);font-size:14px;margin-bottom:24px">Connect once, deploy any project to production with one click</p>
+
+    <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--t2)">🔗 CONNECTED SERVICES</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:32px">
+      ${[
+        {s:'github',e:'⚡',n:'GitHub',d:'Repo creation + push',url:'https://github.com/settings/tokens/new?scopes=repo,workflow&description=NexusAI'},
+        {s:'vercel',e:'▲',n:'Vercel',d:'Frontend deploy',url:'https://vercel.com/account/tokens'},
+        {s:'railway',e:'🚂',n:'Railway',d:'Backend deploy',url:'https://railway.app/account/tokens'},
+        {s:'cloudflare',e:'☁️',n:'Cloudflare',d:'DNS + Custom domains',url:'https://dash.cloudflare.com/profile/api-tokens'},
+      ].map(svc=>{
+        const conn=has(svc.s);
+        return `<div class="connect-card ${conn?'connected':''}" onclick="${conn?`disconnectService('${svc.s}')`:`connectService('${svc.s}','${svc.url}')`}">
+          <div class="connect-icon">${svc.e}</div>
+          <div class="connect-name">${svc.n}</div>
+          <div class="connect-status">${conn?`✓ ${conn.username||'Connected'}`:svc.d}</div>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--t2)">📦 DEPLOY A PROJECT</div>
+    <div id="deploy-projects" style="display:flex;flex-direction:column;gap:10px;margin-bottom:32px"></div>
+
+    ${deployments.length?`<div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--t2)">🌐 LIVE DEPLOYMENTS</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${deployments.map(d=>`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;display:flex;align-items:center;gap:12px">
+        <div style="font-size:20px">🌐</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600">${esc(d.repo_name)}</div>
+          <div style="font-size:11px;color:var(--t3)">${new Date(d.created_at).toLocaleString()}</div>
+        </div>
+        ${d.repo_url?`<a href="${d.repo_url}" target="_blank" class="sm-btn">GitHub</a>`:''}
+        ${d.vercel_url?`<a href="${d.vercel_url}" target="_blank" class="sm-btn" style="color:var(--a1);border-color:var(--a1)">Live →</a>`:''}
+      </div>`).join('')}
+    </div>`:''}
+
+    <div id="deploy-output"></div>
+  </div>`;
+
+  // Load user's projects
+  try{
+    const {projects=[]}=await api('/api/agents/projects');
+    const completed=projects.filter(p=>p.status==='completed');
+    document.getElementById('deploy-projects').innerHTML=
+      completed.length ? completed.slice(0,10).map(p=>`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;display:flex;align-items:center;gap:12px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600">${esc(p.name)}</div>
+          <div style="font-size:11px;color:var(--t3)">${new Date(p.created_at).toLocaleDateString()}</div>
+        </div>
+        <button onclick="deployProject(${p.id},'${esc(p.name).toLowerCase().replace(/[^a-z0-9]/g,'-').slice(0,30)}')" style="background:var(--grad);color:#000;border:none;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">🚀 Deploy</button>
+      </div>`).join('') : '<div style="color:var(--t3);text-align:center;padding:24px;font-size:13px">No projects yet. Build one with AI Team first.</div>';
+  }catch(_){}
+}
+
+async function connectService(service, helpUrl){
+  const token = prompt(`Get your ${service} token from:\n${helpUrl}\n\nPaste here:`);
+  if(!token) return;
+  toast('🔄 Verifying...', 'success');
+  try{
+    const d = await api('/api/deploy/connect',{method:'POST',body:{service,token}});
+    toast(`✅ ${service} connected as ${d.info?.login||d.info?.email||'user'}!`, 'success');
+    navigate_deploy();
+  }catch(e){toast('❌ '+e.message,'error');}
+}
+
+async function disconnectService(service){
+  if(!confirm(`Disconnect ${service}?`))return;
+  await api('/api/deploy/connect/'+service,{method:'DELETE'});
+  toast(`Disconnected from ${service}`,'success');
+  navigate_deploy();
+}
+
+async function deployProject(projectId, repoName){
+  const finalName = prompt('Repository name:', repoName);
+  if(!finalName)return;
+
+  const output = document.getElementById('deploy-output');
+  if(output){
+    output.innerHTML=`<div style="margin-top:24px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px">🚀 Deploying ${esc(finalName)}...</div>
+      <div class="live-progress" style="margin-bottom:14px"><div id="dep-bar" class="live-progress-fill" style="width:0%"></div></div>
+      <div class="deploy-console" id="dep-console"></div>
+    </div>`;
+  }
+
+  const log = (line, type='info')=>{
+    const c = document.getElementById('dep-console');
+    if(c){
+      const d = document.createElement('div');
+      d.className='log-line log-'+type;
+      d.textContent='> '+line;
+      c.appendChild(d);
+      c.scrollTop = c.scrollHeight;
+    }
+  };
+
+  log('Starting deployment pipeline...','info');
+
+  try{
+    const resp = await fetch(API+'/api/deploy/deploy/full',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.token},
+      body:JSON.stringify({project_id:projectId, repo_name:finalName})
+    });
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer='';
+
+    while(true){
+      const {done,value} = await reader.read();
+      if(done)break;
+      buffer += decoder.decode(value,{stream:true});
+      const lines = buffer.split('\n');
+      buffer = lines.pop()||'';
+
+      for(const line of lines){
+        if(!line.startsWith('data: '))continue;
+        try{
+          const d = JSON.parse(line.slice(6));
+          if(d.type==='step'){
+            log(d.message, d.status==='done'?'success':d.status==='error'?'error':'step');
+            const bar = document.getElementById('dep-bar');
+            if(bar && d.progress)bar.style.width=d.progress+'%';
+          }
+          if(d.type==='complete'){
+            log('🎉 Deployment complete!','success');
+            const bar = document.getElementById('dep-bar');
+            if(bar)bar.style.width='100%';
+            if(d.live_url){
+              log('Live URL: '+d.live_url,'success');
+              setTimeout(()=>{
+                if(confirm('🎉 Deployed!\n\nOpen live site?\n'+d.live_url)){
+                  window.open(d.live_url,'_blank');
+                }
+              },500);
+            }
+            notify('NexusAI','🚀 Project deployed!');
+          }
+          if(d.type==='error'){log('ERROR: '+d.message,'error');}
+        }catch(_){}
+      }
+    }
+  }catch(e){log('FATAL: '+e.message,'error');}
+}
+
+// ── 🌍 PUBLIC SHOWCASE ────────────────────────
+async function navigate_showcase(){
+  S.page='showcase';closeSidebar();
+  document.getElementById('tool-label').textContent='🌍 Showcase';
+  document.getElementById('tool-sub').textContent='Built with NexusAI';
+
+  let projects=[];
+  try{const d=await api('/api/agents/projects');projects=d.projects.filter(p=>p.status==='completed');}catch(_){}
+
+  document.getElementById('messages').innerHTML=`<div class="page-wrap ai-os-bg">
+    <div class="page-title gradient-text">🌍 Public Showcase</div>
+    <p style="color:var(--t2);font-size:14px;margin-bottom:24px">Share your AI-built startups with the world</p>
+
+    ${projects.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px">
+      ${projects.map(p=>`<div class="showcase-card" onclick="window.open('${window.location.origin}/share.html?id=${p.share_id}','_blank')">
+        <div class="showcase-thumb">🚀</div>
+        <div class="showcase-meta">
+          <div class="showcase-title">${esc(p.name)}</div>
+          <div class="showcase-desc">${esc(p.idea.slice(0,100))}${p.idea.length>100?'...':''}</div>
+          <div class="showcase-stats">
+            <span>📅 ${new Date(p.created_at).toLocaleDateString()}</span>
+            <span>✓ ${p.status}</span>
+          </div>
+        </div>
+      </div>`).join('')}
+    </div>`:'<div style="text-align:center;padding:40px;color:var(--t3)">No completed projects yet. Build one with AI Team!</div>'}
+  </div>`;
+}
+
+// ── 🎤 VOICE INTERACTION ──────────────────────
+let voiceRec = null;
+let voiceListening = false;
+
+async function navigate_voice(){
+  S.page='voice';closeSidebar();
+  document.getElementById('tool-label').textContent='🎤 Voice AI';
+  document.getElementById('tool-sub').textContent='Talk to NexusAI';
+
+  document.getElementById('messages').innerHTML=`<div class="page-wrap ai-os-bg" style="text-align:center;padding-top:80px">
+    <div style="margin-bottom:32px">
+      <button class="voice-orb" id="voice-orb-btn" onclick="toggleVoiceListening()">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+        </svg>
+      </button>
+    </div>
+    <div id="voice-status" style="font-size:14px;color:var(--t2);margin-bottom:24px">Tap to speak</div>
+    <div id="voice-transcript" style="max-width:600px;margin:0 auto;font-size:18px;font-weight:300;line-height:1.5;color:var(--text);min-height:60px"></div>
+    <div id="voice-response" style="max-width:600px;margin:24px auto;text-align:left"></div>
+  </div>`;
+}
+
+async function toggleVoiceListening(){
+  if(voiceListening){
+    voiceRec?.stop();
+    voiceListening=false;
+    document.getElementById('voice-status').textContent='Tap to speak';
+    return;
+  }
+
+  if(!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)){
+    toast('Voice not supported in this browser','error');return;
+  }
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  voiceRec = new SR();
+  voiceRec.continuous = false;
+  voiceRec.interimResults = true;
+  voiceRec.lang = 'en-US';
+
+  voiceRec.onstart = ()=>{
+    voiceListening = true;
+    document.getElementById('voice-status').textContent='🎙️ Listening...';
+  };
+
+  voiceRec.onresult = (e)=>{
+    let interim='', final='';
+    for(let i=e.resultIndex; i<e.results.length; i++){
+      const t = e.results[i][0].transcript;
+      if(e.results[i].isFinal) final += t;
+      else interim += t;
+    }
+    document.getElementById('voice-transcript').textContent = (final||interim);
+    if(final) processVoiceCommand(final);
+  };
+
+  voiceRec.onerror = (e)=>{
+    document.getElementById('voice-status').textContent='Error: '+e.error;
+    voiceListening=false;
+  };
+
+  voiceRec.onend = ()=>{
+    voiceListening=false;
+    if(document.getElementById('voice-status'))
+      document.getElementById('voice-status').textContent='Tap to speak';
+  };
+
+  voiceRec.start();
+}
+
+async function processVoiceCommand(text){
+  document.getElementById('voice-status').textContent='💭 Thinking...';
+  const responseEl = document.getElementById('voice-response');
+  if(responseEl) responseEl.innerHTML = '<div class="thinking-wave"><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div></div>';
+
+  try{
+    const r = await api('/api/chat',{method:'POST',body:{message:text}});
+    if(responseEl) responseEl.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;font-size:14px;line-height:1.5">${esc(r.reply||'')}</div>`;
+
+    // Speak the response
+    if('speechSynthesis' in window && r.reply){
+      const utt = new SpeechSynthesisUtterance(r.reply.slice(0,500));
+      utt.rate = 1.05;
+      window.speechSynthesis.speak(utt);
+    }
+  }catch(e){
+    if(responseEl) responseEl.innerHTML = `<div style="color:#f44">Error: ${esc(e.message)}</div>`;
+  }
+  document.getElementById('voice-status').textContent='Tap to speak again';
+}
+
+// ── 🤖 AUTONOMOUS MODE FULL ───────────────────
+async function navigate_autonomous(){
+  S.page='autonomous';closeSidebar();
+  document.getElementById('tool-label').textContent='🤖 Autonomous AI';
+  document.getElementById('tool-sub').textContent='AI works on its own';
+
+  document.getElementById('messages').innerHTML=`<div class="page-wrap ai-os-bg">
+    <div class="page-title gradient-text">🤖 Autonomous Mode</div>
+    <p style="color:var(--t2);font-size:14px;margin-bottom:20px">Set a goal — AI plans, executes, validates, and iterates by itself</p>
+
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:24px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px">🎯 Your goal</div>
+      <textarea id="auto-full-goal" placeholder="e.g. Research the top 5 AI productivity tools, compare them, and write a launch strategy for a competitor"
+        rows="3" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;color:var(--text);outline:none;resize:vertical;box-sizing:border-box;font-family:inherit"></textarea>
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
+        <select id="auto-iter" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:8px;font-size:12px">
+          <option value="5">5 iterations</option>
+          <option value="10" selected>10 iterations</option>
+          <option value="15">15 iterations</option>
+          <option value="20">20 iterations</option>
+        </select>
+        <select id="auto-time" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:8px;font-size:12px">
+          <option value="180">3 min</option>
+          <option value="300" selected>5 min</option>
+          <option value="600">10 min</option>
+        </select>
+        <button onclick="startAutonomousFull()" style="flex:1;background:linear-gradient(135deg,#7c3aed,#06b6d4);color:#fff;border:none;padding:12px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">🚀 Start Autonomous AI</button>
+      </div>
+    </div>
+
+    <div id="auto-progress"></div>
+  </div>`;
+}
+
+async function startAutonomousFull(){
+  const goal = document.getElementById('auto-full-goal')?.value?.trim();
+  if(!goal){toast('Set a goal first!','error');return;}
+  const max_iterations = +document.getElementById('auto-iter').value;
+  const time_limit_seconds = +document.getElementById('auto-time').value;
+
+  const container = document.getElementById('auto-progress');
+  container.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--a1);border-radius:14px;padding:20px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <div class="thinking-wave"><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div></div>
+      <div style="font-size:14px;font-weight:600">AI is working...</div>
+      <div id="auto-iter-num" style="margin-left:auto;font-size:12px;color:var(--a1)">Iteration 0</div>
+    </div>
+    <div style="font-size:12px;color:var(--t2)">${esc(goal)}</div>
+  </div>
+  <div id="auto-iterations" style="display:flex;flex-direction:column;gap:10px"></div>`;
+
+  try{
+    const resp = await fetch(API+'/api/os/autonomous/full',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.token},
+      body:JSON.stringify({goal,max_iterations,time_limit_seconds})
+    });
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer='';
+
+    while(true){
+      const {done,value} = await reader.read();
+      if(done)break;
+      buffer += decoder.decode(value,{stream:true});
+      const lines = buffer.split('\n');
+      buffer = lines.pop()||'';
+
+      for(const line of lines){
+        if(!line.startsWith('data: '))continue;
+        try{
+          const d = JSON.parse(line.slice(6));
+          const iters = document.getElementById('auto-iterations');
+          if(!iters)continue;
+
+          if(d.type==='iteration_start'){
+            const num=document.getElementById('auto-iter-num');
+            if(num)num.textContent=`Iteration ${d.iteration}`;
+            const card = document.createElement('div');
+            card.id='iter-card-'+d.iteration;
+            card.style.cssText='background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px';
+            card.innerHTML=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+              <div style="width:28px;height:28px;border-radius:50%;background:var(--grad);color:#000;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px">${d.iteration}</div>
+              <div style="font-size:13px;font-weight:600">Iteration ${d.iteration}</div>
+              <div id="iter-phase-${d.iteration}" style="margin-left:auto;font-size:11px;color:var(--a2)">starting...</div>
+            </div>
+            <div id="iter-content-${d.iteration}"></div>`;
+            iters.appendChild(card);
+            card.scrollIntoView({behavior:'smooth',block:'end'});
+          }
+
+          if(d.type==='phase'){
+            const p = document.getElementById('iter-phase-'+d.iteration);
+            if(p)p.textContent=d.phase;
+          }
+
+          if(d.type==='plan'){
+            const c = document.getElementById('iter-content-'+d.iteration);
+            if(c)c.innerHTML += `<div style="background:var(--bg3);border-radius:8px;padding:10px;margin-bottom:6px">
+              <div style="font-size:11px;color:var(--t3);text-transform:uppercase;margin-bottom:4px">💭 Thought</div>
+              <div style="font-size:12px;color:var(--t2);margin-bottom:8px">${esc(d.plan.thought||'')}</div>
+              <div style="font-size:11px;color:var(--a1);text-transform:uppercase;margin-bottom:4px">⚡ Action</div>
+              <div style="font-size:12px;font-weight:500">${esc(d.plan.next_action||'')}</div>
+            </div>`;
+          }
+
+          if(d.type==='execution'){
+            const c = document.getElementById('iter-content-'+d.iteration);
+            if(c)c.innerHTML += `<div style="background:var(--bg3);border-radius:8px;padding:10px;margin-bottom:6px">
+              <div style="font-size:11px;color:var(--t3);text-transform:uppercase;margin-bottom:4px">✅ Result</div>
+              <div style="font-size:12px;color:var(--t2);max-height:200px;overflow:auto;white-space:pre-wrap">${esc(d.output||'')}</div>
+            </div>`;
+          }
+
+          if(d.type==='validation'){
+            const c = document.getElementById('iter-content-'+d.iteration);
+            if(c)c.innerHTML += `<div style="background:var(--bg3);border-radius:8px;padding:10px">
+              <div style="display:flex;gap:12px;font-size:11px;color:var(--t3)">
+                <span>Quality: <strong style="color:var(--a1)">${d.validation.quality}/100</strong></span>
+                <span>Progress: <strong style="color:var(--a2)">${d.validation.goal_progress_pct}%</strong></span>
+              </div>
+              <div style="font-size:11px;color:var(--t3);margin-top:4px">📚 ${esc(d.validation.learned||'')}</div>
+            </div>`;
+            const p = document.getElementById('iter-phase-'+d.iteration);
+            if(p)p.textContent='✓ done';
+          }
+
+          if(d.type==='complete'){
+            const final = document.createElement('div');
+            final.style.cssText='background:linear-gradient(135deg,#c6f13520,#35f1c620);border:1px solid var(--a1);border-radius:14px;padding:20px;text-align:center;margin-top:14px';
+            final.innerHTML=`<div style="font-size:32px;margin-bottom:8px">${d.achieved?'🎯':'⏱️'}</div>
+              <div style="font-size:16px;font-weight:700">${esc(d.summary||'')}</div>
+              <div style="font-size:12px;color:var(--t2);margin-top:6px">Time: ${d.total_time_seconds}s · Iterations: ${d.iteration}</div>`;
+            iters.appendChild(final);
+            toast(d.achieved?'🎯 Goal achieved!':'⏱️ Stopped','success');
+            notify('NexusAI', d.summary);
+          }
+
+          if(d.type==='error'){toast('❌ '+d.error,'error');}
+        }catch(_){}
+      }
+    }
+  }catch(e){toast('❌ '+e.message,'error');}
+}
+
+// ── 🎭 DEBATE SYSTEM UI ───────────────────────
+async function navigate_debate(){
+  S.page='debate';closeSidebar();
+  document.getElementById('tool-label').textContent='🎭 AI Debate';
+  document.getElementById('tool-sub').textContent='Multiple agents debate, then converge';
+
+  document.getElementById('messages').innerHTML=`<div class="page-wrap ai-os-bg">
+    <div class="page-title gradient-text">🎭 AI Debate System</div>
+    <p style="color:var(--t2);font-size:14px;margin-bottom:20px">Multiple AI perspectives debate your topic, then synthesize a consensus</p>
+
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:24px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px">🎯 Topic to debate</div>
+      <textarea id="debate-topic" placeholder="e.g. Should we build a B2B or B2C product first?" rows="2"
+        style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;color:var(--text);outline:none;resize:vertical;box-sizing:border-box;font-family:inherit"></textarea>
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <input id="debate-perspectives" placeholder="optimist,skeptic,realist" value="optimist,skeptic,realist" style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:8px;font-size:12px;outline:none"/>
+        <button onclick="startDebateAI()" style="background:var(--grad);color:#000;border:none;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">🥊 Debate</button>
+      </div>
+    </div>
+
+    <div id="debate-output"></div>
+  </div>`;
+}
+
+async function startDebateAI(){
+  const topic = document.getElementById('debate-topic')?.value?.trim();
+  if(!topic){toast('Enter topic','error');return;}
+  const perspectives = document.getElementById('debate-perspectives').value.split(',').map(p=>p.trim()).filter(Boolean);
+
+  const out = document.getElementById('debate-output');
+  out.innerHTML = `<div id="debate-rounds" style="display:flex;flex-direction:column;gap:10px"></div>`;
+
+  try{
+    const resp = await fetch(API+'/api/os/debate',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.token},
+      body:JSON.stringify({topic,perspectives,rounds:2})
+    });
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer='';
+
+    while(true){
+      const {done,value} = await reader.read();
+      if(done)break;
+      buffer += decoder.decode(value,{stream:true});
+      const lines = buffer.split('\n');
+      buffer = lines.pop()||'';
+
+      for(const line of lines){
+        if(!line.startsWith('data: '))continue;
+        try{
+          const d = JSON.parse(line.slice(6));
+          const rounds = document.getElementById('debate-rounds');
+
+          if(d.type==='argument'){
+            const colors = {optimist:'#c6f135',skeptic:'#f44',realist:'#35f1c6'};
+            const c = colors[d.perspective] || 'var(--a1)';
+            rounds.innerHTML += `<div style="background:var(--bg2);border-left:3px solid ${c};border-radius:8px;padding:12px">
+              <div style="font-size:11px;color:${c};text-transform:uppercase;font-weight:700;margin-bottom:6px">Round ${d.round} · ${d.perspective}</div>
+              <div style="font-size:13px;line-height:1.5">${esc(d.argument)}</div>
+            </div>`;
+            rounds.scrollIntoView({behavior:'smooth',block:'end'});
+          }
+
+          if(d.type==='complete'){
+            const cons = d.consensus || {};
+            rounds.innerHTML += `<div style="background:linear-gradient(135deg,#c6f13520,#35f1c620);border:1px solid var(--a1);border-radius:14px;padding:18px;margin-top:14px">
+              <div style="font-size:14px;font-weight:700;margin-bottom:10px">🎯 Consensus (${cons.confidence||0}% confidence)</div>
+              <div style="font-size:13px;line-height:1.5;margin-bottom:12px">${esc(cons.consensus||'')}</div>
+              ${cons.recommended_action?`<div style="background:var(--bg2);border-radius:8px;padding:12px;margin-top:10px">
+                <div style="font-size:11px;color:var(--a1);font-weight:700;margin-bottom:4px">⚡ RECOMMENDED ACTION</div>
+                <div style="font-size:13px">${esc(cons.recommended_action)}</div>
+              </div>`:''}
+              ${cons.key_insights?.length?`<div style="margin-top:10px"><div style="font-size:11px;color:var(--t3);margin-bottom:6px">KEY INSIGHTS</div>${cons.key_insights.map(i=>`<div style="font-size:12px;padding:3px 0">• ${esc(i)}</div>`).join('')}</div>`:''}
+            </div>`;
+            toast('🎯 Consensus reached!','success');
+          }
+        }catch(_){}
+      }
+    }
+  }catch(e){toast('❌ '+e.message,'error');}
+}
+
+// ── 📋 PLANNER UI ─────────────────────────────
+async function navigate_planner(){
+  S.page='planner';closeSidebar();
+  document.getElementById('tool-label').textContent='📋 AI Planner';
+  document.getElementById('tool-sub').textContent='Break any goal into executable plan';
+
+  document.getElementById('messages').innerHTML=`<div class="page-wrap ai-os-bg">
+    <div class="page-title gradient-text">📋 AI Planner</div>
+    <p style="color:var(--t2);font-size:14px;margin-bottom:20px">Turn any goal into a phase-by-phase executable plan</p>
+
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:24px">
+      <textarea id="plan-goal" placeholder="e.g. Launch my SaaS to first 100 paying users in 60 days" rows="2"
+        style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;color:var(--text);outline:none;resize:vertical;box-sizing:border-box;font-family:inherit"></textarea>
+      <input id="plan-constraints" placeholder="Constraints (e.g. budget $500, solo founder)" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:8px;font-size:12px;margin-top:10px;outline:none;box-sizing:border-box"/>
+      <button onclick="generatePlan()" style="margin-top:12px;width:100%;background:var(--grad);color:#000;border:none;padding:12px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">📋 Generate Plan</button>
+    </div>
+
+    <div id="plan-output"></div>
+  </div>`;
+}
+
+async function generatePlan(){
+  const goal = document.getElementById('plan-goal')?.value?.trim();
+  if(!goal){toast('Set goal','error');return;}
+  const constraints = document.getElementById('plan-constraints')?.value?.trim();
+
+  const out = document.getElementById('plan-output');
+  out.innerHTML = '<div style="text-align:center;padding:24px"><div class="thinking-wave" style="display:inline-flex"><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div></div></div>';
+
+  try{
+    const d = await api('/api/os/plan',{method:'POST',body:{goal,constraints}});
+    out.innerHTML = `
+      <div style="background:linear-gradient(135deg,var(--bg2),var(--bg3));border:1px solid var(--a1);border-radius:14px;padding:20px;margin-bottom:14px">
+        <div style="font-size:11px;color:var(--a1);text-transform:uppercase;margin-bottom:6px">⚡ DO THIS NOW</div>
+        <div style="font-size:14px;font-weight:600">${esc(d.first_action||'')}</div>
+        <div style="font-size:11px;color:var(--t3);margin-top:8px">Total estimated: ${d.estimated_total_hours||'?'}h</div>
+      </div>
+      ${(d.phases||[]).map(p=>`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <div style="width:28px;height:28px;border-radius:50%;background:var(--grad);color:#000;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px">${p.phase}</div>
+          <div style="font-size:14px;font-weight:600;flex:1">${esc(p.name)}</div>
+          <div style="font-size:11px;color:var(--t3)">${esc(p.duration||'')}</div>
+        </div>
+        ${(p.tasks||[]).map(t=>`<div style="background:var(--bg3);border-radius:8px;padding:10px;margin-bottom:6px;display:flex;gap:10px;align-items:start">
+          <div style="font-size:10px;background:${t.priority==='P0'?'#f44':t.priority==='P1'?'#fbbf24':'var(--bg)'};color:#fff;padding:2px 6px;border-radius:4px;font-weight:700">${t.priority||''}</div>
+          <div style="flex:1">
+            <div style="font-size:13px">${esc(t.task)}</div>
+            <div style="font-size:10px;color:var(--t3);margin-top:2px">${t.owner||'?'} · ${t.estimated_hours||'?'}h</div>
+          </div>
+        </div>`).join('')}
+      </div>`).join('')}
+      ${d.milestones?.length?`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px"><div style="font-size:13px;font-weight:600;margin-bottom:8px">🏁 Milestones</div>${d.milestones.map(m=>`<div style="font-size:12px;padding:4px 0">• <strong>${esc(m.date)}:</strong> ${esc(m.milestone)}</div>`).join('')}</div>`:''}
+    `;
+  }catch(e){out.innerHTML='<div style="color:#f44">'+esc(e.message)+'</div>';}
+}
+
 // ── 🤖 AI TEAM (Multi-Agent System) ───────────
 async function navigate_team(){
   S.page='team';closeSidebar();
@@ -4258,6 +4826,14 @@ document.addEventListener('DOMContentLoaded',()=>{
       emailInput.value=savedEmail;
       setTimeout(()=>document.getElementById('auth-password')?.focus(),100);
     }
+  }
+  // 🎬 Cinematic intro on first visit
+  if(!localStorage.getItem('nx_intro_seen')){
+    const intro=document.createElement('div');
+    intro.className='cinematic-onboarding';
+    intro.innerHTML=`<div class="cinematic-text">NexusAI<br/><span style="font-size:.4em;opacity:.6">The AI that builds startups</span></div>`;
+    document.body.appendChild(intro);
+    setTimeout(()=>{intro.remove();localStorage.setItem('nx_intro_seen','1');},4000);
   }
   initTheme();
   if(S.token)init();

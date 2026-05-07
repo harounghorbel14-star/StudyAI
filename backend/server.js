@@ -3086,6 +3086,18 @@ app.use((err,_req,res,_next) => {
 // 📦 ROUTE MODULES
 // ─────────────────────────────────────────────
 try{
+  const deployRoute = require('./routes/deploy-engine');
+  app.use('/api/deploy', deployRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap));
+  console.log('✅ Real Deploy Engine loaded (GitHub + Vercel + Railway + DNS)');
+}catch(e){console.warn('⚠️ Deploy routes:', e.message);}
+
+try{
+  const aiOsRoute = require('./routes/ai-os-core');
+  app.use('/api/os', aiOsRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete));
+  console.log('✅ AI OS Core loaded (Debate + Planner + Memory + Cache + Workers + Autonomous)');
+}catch(e){console.warn('⚠️ AI OS routes:', e.message);}
+
+try{
   const agentsRoute = require('./routes/agents-system');
   app.use('/api/agents', agentsRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete));
   console.log('✅ Multi-Agent System loaded');
