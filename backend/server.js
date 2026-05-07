@@ -3086,6 +3086,12 @@ app.use((err,_req,res,_next) => {
 // 📦 ROUTE MODULES
 // ─────────────────────────────────────────────
 try{
+  const coreRoute = require('./routes/core-system');
+  app.use('/api/core', coreRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete));
+  console.log('✅ CORE: Model Router + Smart Orchestrator + Cache + One-Prompt loaded');
+}catch(e){console.warn('⚠️ Core routes:', e.message);}
+
+try{
   const deployRoute = require('./routes/deploy-engine');
   app.use('/api/deploy', deployRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap));
   console.log('✅ Real Deploy Engine loaded (GitHub + Vercel + Railway + DNS)');

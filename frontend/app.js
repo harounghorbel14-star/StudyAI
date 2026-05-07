@@ -2396,6 +2396,172 @@ async function runAnalyticsAgent(){
   }catch(e){hideTyping();toast(e.message,'error');}
 }
 
+// ── ⚡ ONE-PROMPT KILLER EXPERIENCE ──────────
+async function navigate_oneprompt(){
+  S.page='oneprompt';closeSidebar();
+  document.getElementById('tool-label').textContent='⚡ One-Prompt';
+  document.getElementById('tool-sub').textContent='Just describe — AI executes everything';
+
+  document.getElementById('messages').innerHTML=`<div class="page-wrap ai-os-bg">
+    <div style="text-align:center;padding:32px 0 24px">
+      <div class="gradient-text" style="font-size:48px;font-weight:300;letter-spacing:-1px;margin-bottom:8px">One Prompt.</div>
+      <div class="gradient-text" style="font-size:48px;font-weight:700;letter-spacing:-1px;margin-bottom:14px">Real Outcome.</div>
+      <div style="color:var(--t2);font-size:14px;max-width:520px;margin:0 auto">Describe what you want. AI plans, designs, codes, deploys, and launches it for you.</div>
+    </div>
+
+    <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:18px;padding:24px;margin-bottom:24px;box-shadow:0 12px 60px var(--a1)10">
+      <textarea id="op-prompt" placeholder="e.g. Build me a SaaS for restaurants to manage reservations and orders" rows="3"
+        style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:14px;font-size:15px;color:var(--text);outline:none;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5"></textarea>
+      <button onclick="runOnePrompt()" style="margin-top:14px;width:100%;background:var(--grad);color:#000;border:none;padding:16px;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;letter-spacing:.3px">⚡ Execute</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-bottom:24px">
+      ${[
+        'Build a SaaS for gym owners',
+        'Build a fitness tracking app',
+        'Build a freelancer invoicing tool',
+        'Build an AI writing assistant',
+        'Research the AI productivity market',
+      ].map(s=>`<button onclick="document.getElementById('op-prompt').value='${esc(s)}';document.getElementById('op-prompt').focus()"
+        style="background:var(--bg2);border:1px solid var(--border);color:var(--t2);padding:10px 12px;border-radius:8px;font-size:11px;cursor:pointer;text-align:left">💡 ${esc(s)}</button>`).join('')}
+    </div>
+
+    <div id="op-output"></div>
+  </div>`;
+}
+
+async function runOnePrompt(){
+  const prompt=document.getElementById('op-prompt')?.value?.trim();
+  if(!prompt){toast('Describe what you want!','error');return;}
+
+  const out=document.getElementById('op-output');
+  out.innerHTML=`
+    <div style="background:linear-gradient(135deg,var(--bg2),var(--bg3));border:1px solid var(--a1);border-radius:14px;padding:20px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+        <div class="thinking-wave"><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div></div>
+        <div style="font-size:14px;font-weight:600">AI is thinking...</div>
+      </div>
+      <div id="op-phase" style="font-size:12px;color:var(--t2)">Initializing</div>
+    </div>
+    <div id="op-nodes" style="display:flex;flex-direction:column;gap:8px"></div>
+    <div id="op-final"></div>
+  `;
+
+  const nodeStates={};
+  let projectId=null;
+
+  try{
+    const resp=await fetch(API+'/api/core/one-prompt',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.token},
+      body:JSON.stringify({prompt})
+    });
+    const reader=resp.body.getReader();
+    const decoder=new TextDecoder();
+    let buffer='';
+
+    while(true){
+      const {done,value}=await reader.read();if(done)break;
+      buffer+=decoder.decode(value,{stream:true});
+      const lines=buffer.split('\n');
+      buffer=lines.pop()||'';
+
+      for(const line of lines){
+        if(!line.startsWith('data: '))continue;
+        try{
+          const d=JSON.parse(line.slice(6));
+
+          if(d.type==='phase'){
+            const ph=document.getElementById('op-phase');
+            if(ph)ph.textContent=d.label||d.name;
+          }
+
+          if(d.type==='intent_detected'){
+            const ph=document.getElementById('op-phase');
+            if(ph)ph.innerHTML=`Intent: <strong>${esc(d.intent.intent)}</strong> · ${esc(d.intent.domain||'')} · Confidence: ${d.intent.confidence}%`;
+          }
+
+          if(d.type==='graph_ready'){
+            const ph=document.getElementById('op-phase');
+            if(ph)ph.textContent=`📋 Plan ready: ${d.node_count} agents will execute`;
+          }
+
+          if(d.type==='execution'){
+            const e=d.event;
+            const nodes=document.getElementById('op-nodes');
+
+            if(e.type==='node_start'){
+              if(!nodeStates[e.node]){
+                nodeStates[e.node]=true;
+                const card=document.createElement('div');
+                card.id='op-node-'+e.node;
+                card.style.cssText='background:var(--bg2);border:1px solid var(--a2);border-radius:10px;padding:12px;display:flex;align-items:center;gap:12px;animation:msgIn .3s ease';
+                card.innerHTML=`<div id="op-icon-${e.node}" style="font-size:18px">⚡</div>
+                  <div style="flex:1"><div style="font-size:13px;font-weight:600">${esc(e.node.replace(/_/g,' '))}</div>
+                  <div id="op-meta-${e.node}" style="font-size:11px;color:var(--t3)">running...</div></div>`;
+                nodes.appendChild(card);
+                nodes.scrollIntoView({behavior:'smooth',block:'end'});
+              }
+            }
+
+            if(e.type==='node_done'){
+              const icon=document.getElementById('op-icon-'+e.node);
+              const meta=document.getElementById('op-meta-'+e.node);
+              const card=document.getElementById('op-node-'+e.node);
+              if(icon)icon.textContent='✅';
+              if(meta)meta.innerHTML=`<span style="color:var(--a1)">${e.cached?'cached':'completed'}</span> · ${e.model} · ${e.duration_ms}ms`;
+              if(card)card.style.borderColor='var(--a1)';
+            }
+
+            if(e.type==='node_error'){
+              const meta=document.getElementById('op-meta-'+e.node);
+              if(meta)meta.innerHTML=`<span style="color:#fbbf24">retry ${e.attempt}: ${esc(e.error)}</span>`;
+            }
+          }
+
+          if(d.type==='complete'){
+            projectId=d.project_id;
+            const final=document.getElementById('op-final');
+            const designHtml=d.results?.design?.landing_html;
+            window._opResults=d.results;
+
+            if(final){
+              final.innerHTML=`
+                <div style="background:linear-gradient(135deg,#c6f13520,#35f1c620);border:1px solid var(--a1);border-radius:16px;padding:20px;margin-top:14px">
+                  <div style="font-size:18px;font-weight:700;margin-bottom:6px">🎉 ${esc(d.summary)}</div>
+                  <div style="font-size:13px;color:var(--t2);margin-bottom:14px">All ${Object.keys(d.results||{}).length} agents completed</div>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    ${designHtml?`<button onclick="opPreview()" style="background:var(--grad);color:#000;border:none;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">🎨 Preview Landing</button>`:''}
+                    ${projectId?`<button onclick="navigate_team();setTimeout(()=>viewProject(${projectId}),300)" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:8px;font-size:13px;cursor:pointer">📁 Open Project</button>`:''}
+                    ${projectId?`<button onclick="navigate_deploy()" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:8px;font-size:13px;cursor:pointer">🚀 Deploy</button>`:''}
+                    <button onclick="opShowResults()" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:8px;font-size:13px;cursor:pointer">📋 View All</button>
+                  </div>
+                </div>
+              `;
+            }
+            toast('🎉 Done!','success');
+            notify('NexusAI', d.summary);
+          }
+
+          if(d.type==='error'){toast('❌ '+d.error,'error');}
+        }catch(_){}
+      }
+    }
+  }catch(e){toast('❌ '+e.message,'error');}
+}
+
+function opPreview(){
+  const html=window._opResults?.design?.landing_html;
+  if(!html){toast('No landing page','error');return;}
+  openCanvas(html,'Landing Page');
+}
+
+function opShowResults(){
+  const r=window._opResults||{};
+  const text=Object.entries(r).map(([k,v])=>`## ${k}\n\n\`\`\`json\n${JSON.stringify(v,null,2).slice(0,1500)}\n\`\`\``).join('\n\n');
+  addMsg({role:'assistant',text});
+}
+
 // ── 🚀 DEPLOY CENTER (Real GitHub + Vercel + Railway) ──────
 async function navigate_deploy(){
   S.page='deploy';closeSidebar();
