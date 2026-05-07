@@ -2210,6 +2210,446 @@ async function navigate_insights(){
   }catch(e){toast(e.message,'error');}
 }
 
+// ── 🤖 AI TEAM (Multi-Agent System) ───────────
+async function navigate_team(){
+  S.page='team';closeSidebar();
+  document.getElementById('tool-label').textContent='🤖 AI Team';
+  document.getElementById('tool-sub').textContent='6 agents working together';
+
+  let projects=[];
+  try{const d=await api('/api/agents/projects');projects=d.projects||[];}catch(_){}
+
+  document.getElementById('messages').innerHTML=`<div class="page-wrap">
+    <div class="page-title">🤖 AI Team — Multi-Agent System</div>
+    <p style="color:var(--t2);font-size:14px;margin-bottom:20px">6 specialized agents collaborate: <strong>CEO → Product → Design → Dev → Marketing → Deploy</strong></p>
+
+    <div style="background:linear-gradient(135deg,var(--bg2),var(--bg3));border:1px solid var(--a1)40;border-radius:16px;padding:20px;margin-bottom:20px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:10px">💡 What do you want to build?</div>
+      <textarea id="team-idea" placeholder="e.g. An AI tool that helps doctors write patient reports 5x faster..." rows="3"
+        style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;color:var(--text);outline:none;resize:vertical;box-sizing:border-box;font-family:inherit"></textarea>
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <button onclick="runTeam()" style="flex:1;min-width:160px;background:var(--grad);color:#000;border:none;padding:14px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">🚀 Launch AI Team</button>
+        <button onclick="validateIdea()" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:14px 16px;border-radius:10px;font-size:13px;cursor:pointer">💡 Validate</button>
+        <button onclick="competitorAnalysis()" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:14px 16px;border-radius:10px;font-size:13px;cursor:pointer">🔍 Competitors</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button onclick="predictRevenue()" style="flex:1;min-width:140px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:10px;font-size:12px;cursor:pointer">💰 Revenue Forecast</button>
+        <button onclick="detectTrends()" style="flex:1;min-width:140px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:10px;font-size:12px;cursor:pointer">📈 Detect Trends</button>
+        <button onclick="autonomousMode()" style="flex:1;min-width:140px;background:linear-gradient(135deg,#7c3aed,#06b6d4);color:#fff;border:none;padding:10px 16px;border-radius:10px;font-size:12px;cursor:pointer;font-weight:600">🤖 Autonomous</button>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:20px">
+      ${[{e:'👔',n:'CEO',d:'Strategy'},{e:'📦',n:'Product',d:'Specs'},{e:'🎨',n:'Design',d:'UI/UX'},{e:'💻',n:'Dev',d:'Code'},{e:'📢',n:'Marketing',d:'Growth'},{e:'🚀',n:'Deploy',d:'Launch'}].map(a=>`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center"><div style="font-size:24px;margin-bottom:4px">${a.e}</div><div style="font-size:12px;font-weight:600">${a.n}</div><div style="font-size:10px;color:var(--t3)">${a.d}</div></div>`).join('')}
+    </div>
+
+    ${projects.length?`<div style="font-size:13px;font-weight:600;margin-bottom:10px">📁 Your Projects</div><div style="display:flex;flex-direction:column;gap:8px">
+      ${projects.slice(0,10).map(p=>`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="viewProject(${p.id})">
+        <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">${esc(p.name)}</div><div style="font-size:11px;color:var(--t3)">${p.status} · ${new Date(p.created_at).toLocaleDateString()}</div></div>
+        <span style="font-size:11px;padding:3px 8px;border-radius:99px;background:${p.status==='completed'?'var(--a1)20':'var(--bg3)'};color:${p.status==='completed'?'var(--a1)':'var(--t2)'}">${p.status}</span>
+        <button onclick="event.stopPropagation();shareProject('${p.share_id}')" style="background:none;border:1px solid var(--border);color:var(--t2);padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer">Share</button>
+      </div>`).join('')}
+    </div>`:''}
+  </div>`;
+}
+
+async function runTeam(){
+  const idea=document.getElementById('team-idea')?.value?.trim();
+  if(!idea){toast('Enter your startup idea first!','error');return;}
+
+  const agents=[
+    {key:'CEO_AGENT',e:'👔',n:'CEO Agent'},{key:'PRODUCT_AGENT',e:'📦',n:'Product Agent'},
+    {key:'DESIGN_AGENT',e:'🎨',n:'Design Agent'},{key:'DEV_AGENT',e:'💻',n:'Dev Agent'},
+    {key:'MARKETING_AGENT',e:'📢',n:'Marketing Agent'},{key:'DEPLOY_AGENT',e:'🚀',n:'Deploy Agent'},
+  ];
+
+  document.getElementById('messages').innerHTML=`<div class="page-wrap">
+    <div class="page-title">🤖 Building: "${esc(idea)}"</div>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        <div style="font-size:14px;font-weight:600;flex:1">Pipeline Progress</div>
+        <div id="team-pct" style="font-size:13px;color:var(--a1);font-weight:700">0%</div>
+      </div>
+      <div style="background:var(--bg3);border-radius:99px;height:6px;overflow:hidden"><div id="team-bar" style="height:100%;background:var(--grad);width:0%;transition:width .3s"></div></div>
+    </div>
+    <div id="team-agents" style="display:grid;gap:10px">
+      ${agents.map(a=>`<div id="agent-${a.key}" style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px;display:flex;align-items:center;gap:12px;transition:.3s">
+        <div id="icon-${a.key}" style="font-size:24px">⚪</div>
+        <div style="flex:1"><div style="font-size:13px;font-weight:600">${a.e} ${a.n}</div><div id="status-${a.key}" style="font-size:11px;color:var(--t3)">waiting...</div></div>
+        <div id="time-${a.key}" style="font-size:11px;color:var(--t3)"></div>
+      </div>`).join('')}
+    </div>
+    <div id="team-results" style="margin-top:20px"></div>
+  </div>`;
+
+  const results={};
+  let projectId, shareId;
+
+  try{
+    const resp=await fetch(API+'/api/agents/orchestrate',{
+      method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.token},
+      body:JSON.stringify({idea}),
+    });
+
+    const reader=resp.body.getReader();
+    const decoder=new TextDecoder();
+    let buffer='';
+
+    while(true){
+      const {done,value}=await reader.read();if(done)break;
+      buffer+=decoder.decode(value,{stream:true});
+      const lines=buffer.split('\n');
+      buffer=lines.pop()||'';
+
+      for(const line of lines){
+        if(!line.startsWith('data: '))continue;
+        try{
+          const d=JSON.parse(line.slice(6));
+          if(d.type==='project_created'){projectId=d.project_id;shareId=d.share_id;}
+          if(d.type==='agent_started'){
+            const icon=document.getElementById('icon-'+d.agent);
+            const status=document.getElementById('status-'+d.agent);
+            const card=document.getElementById('agent-'+d.agent);
+            if(icon)icon.textContent='⚡';
+            if(status){status.textContent='working...';status.style.color='var(--a2)';}
+            if(card)card.style.borderColor='var(--a2)';
+          }
+          if(d.type==='agent_completed'){
+            const icon=document.getElementById('icon-'+d.agent);
+            const status=document.getElementById('status-'+d.agent);
+            const card=document.getElementById('agent-'+d.agent);
+            const time=document.getElementById('time-'+d.agent);
+            if(icon)icon.textContent=d.success?'✅':'❌';
+            if(status){status.textContent=d.success?'completed':'failed';status.style.color=d.success?'var(--a1)':'#f44';}
+            if(card)card.style.borderColor=d.success?'var(--a1)':'#f44';
+            if(time)time.textContent=Math.round(d.duration_ms/1000)+'s';
+            results[d.agent]=d.output;
+            const pct=document.getElementById('team-pct');
+            const bar=document.getElementById('team-bar');
+            if(pct)pct.textContent=d.progress+'%';
+            if(bar)bar.style.width=d.progress+'%';
+          }
+          if(d.type==='complete'){
+            renderTeamResults(results, d.share_id, d.project_id);
+            toast('🎉 Your AI team finished!','success');
+            notify('NexusAI','Your startup is ready! 🚀');
+          }
+          if(d.type==='error'){toast('❌ '+d.error,'error');}
+        }catch(_){}
+      }
+    }
+  }catch(e){toast('❌ '+e.message,'error');}
+}
+
+function renderTeamResults(results, shareId, projectId){
+  const container=document.getElementById('team-results');
+  if(!container)return;
+  const designHtml=results.DESIGN_AGENT?.landing_page_html;
+  window._teamResults=results;
+  window._teamProjectId=projectId;
+  window._teamShareId=shareId;
+
+  container.innerHTML=`
+    <div style="background:linear-gradient(135deg,#c6f13520,#35f1c620);border:1px solid var(--a1);border-radius:16px;padding:20px;margin-bottom:16px">
+      <div style="font-size:18px;font-weight:700;margin-bottom:8px">🎉 Your Startup is Ready!</div>
+      <div style="font-size:13px;color:var(--t2);margin-bottom:14px">All 6 agents completed</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${designHtml?`<button onclick="previewLanding()" style="background:var(--grad);color:#000;border:none;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">🎨 Preview Landing</button>`:''}
+        <button onclick="shareProject('${shareId}')" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:8px;font-size:13px;cursor:pointer">🔗 Share</button>
+        <button onclick="exportProject(${projectId})" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:8px;font-size:13px;cursor:pointer">📤 Export</button>
+        <button onclick="improveProject(${projectId})" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:8px;font-size:13px;cursor:pointer">🔄 Improve</button>
+        <button onclick="generateSocialContent(${projectId})" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:8px;font-size:13px;cursor:pointer">📢 Viral Content</button>
+      </div>
+    </div>
+    ${Object.entries(results).map(([key,data])=>{
+      const a={CEO_AGENT:{e:'👔',n:'CEO'},PRODUCT_AGENT:{e:'📦',n:'Product'},DESIGN_AGENT:{e:'🎨',n:'Design'},DEV_AGENT:{e:'💻',n:'Dev'},MARKETING_AGENT:{e:'📢',n:'Marketing'},DEPLOY_AGENT:{e:'🚀',n:'Deploy'}}[key];
+      if(!data||!a)return '';
+      return `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <div style="font-size:24px">${a.e}</div>
+          <div style="flex:1"><div style="font-size:13px;font-weight:600">${a.n} Agent</div></div>
+          <button onclick="copyAgentOutput('${key}')" class="sm-btn">Copy</button>
+        </div>
+        <pre style="background:var(--bg3);padding:12px;border-radius:8px;font-size:11px;color:var(--t2);overflow:auto;max-height:200px;white-space:pre-wrap;word-break:break-word">${esc(JSON.stringify(data,null,2).slice(0,1500))}${JSON.stringify(data).length>1500?'...':''}</pre>
+      </div>`;
+    }).join('')}
+  `;
+}
+
+function previewLanding(){
+  const html=window._teamResults?.DESIGN_AGENT?.landing_page_html;
+  if(!html){toast('No landing page','error');return;}
+  openCanvas(html,'Landing Page Preview');
+}
+
+function copyAgentOutput(key){
+  const data=window._teamResults?.[key];
+  if(!data)return;
+  navigator.clipboard.writeText(JSON.stringify(data,null,2));
+  toast('Copied!','success');
+}
+
+async function shareProject(shareId){
+  const url=`${window.location.origin}/share/${shareId}`;
+  await navigator.clipboard.writeText(url).catch(()=>{});
+  toast('🔗 Share link copied!','success');
+  if(window._teamProjectId){
+    api('/api/agents/projects/'+window._teamProjectId+'/analytics',{method:'POST',body:{event:'share'}}).catch(()=>{});
+  }
+}
+
+async function exportProject(projectId){
+  try{
+    const d=await api('/api/agents/projects/'+projectId+'/export');
+    const blob=new Blob([d.markdown],{type:'text/markdown'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;a.download=`${d.project.name.replace(/[^a-z0-9]/gi,'_')}.md`;
+    a.click();URL.revokeObjectURL(url);
+    toast(`✅ Exported ${d.files.length} files!`,'success');
+    api('/api/agents/projects/'+projectId+'/analytics',{method:'POST',body:{event:'export'}}).catch(()=>{});
+  }catch(e){toast(e.message,'error');}
+}
+
+async function improveProject(projectId){
+  const focus=prompt('What to improve? (or leave blank for full analysis)','');
+  toast('🔄 Analyzing...','success');
+  try{
+    const d=await api('/api/agents/improve',{method:'POST',body:{project_id:projectId,focus_area:focus||null}});
+    addMsg({role:'user',text:`🔄 Improve ${focus||'all'}`});
+    let text=`**🔄 Improvement Analysis**\n\n📊 **Scores:**\n• Viral: ${d.viral_score}/100\n• Monetization: ${d.monetization_score}/100\n• Tech: ${d.tech_quality_score}/100\n\n`;
+    if(d.analysis){
+      text+=`**✅ Strengths:**\n${(d.analysis.strengths||[]).map(s=>'• '+s).join('\n')}\n\n`;
+      text+=`**⚠️ Weaknesses:**\n${(d.analysis.weaknesses||[]).map(w=>'• '+w).join('\n')}\n\n`;
+    }
+    if(d.improvements?.length){
+      text+=`**🔥 Top Improvements:**\n${d.improvements.slice(0,5).map(i=>`\n**${i.priority?.toUpperCase()} - ${i.agent}:**\n${i.area}: ${i.improved_state}`).join('\n')}`;
+    }
+    addMsg({role:'assistant',text});
+  }catch(e){toast(e.message,'error');}
+}
+
+async function generateSocialContent(projectId){
+  toast('📢 Generating viral content...','success');
+  try{
+    const d=await api('/api/agents/social-content',{method:'POST',body:{project_id:projectId}});
+    addMsg({role:'user',text:'📢 Generate viral content'});
+    let text=`**📢 Viral Content for ${d.project}**\n\n`;
+    if(d.content.twitter){text+=`**🐦 Twitter:**\n*Hook:* ${d.content.twitter.hook}\n${(d.content.twitter.thread||[]).join('\n')}\n${(d.content.twitter.hashtags||[]).map(h=>'#'+h).join(' ')}\n\n`;}
+    if(d.content.tiktok){text+=`**🎵 TikTok:**\n*Hook:* ${d.content.tiktok.hook}\n${d.content.tiktok.script}\n\n`;}
+    if(d.content.linkedin){text+=`**💼 LinkedIn:**\n${d.content.linkedin.post}\n\n`;}
+    if(d.content.producthunt){text+=`**🚀 Product Hunt:**\n*Tagline:* ${d.content.producthunt.tagline}\n*Description:* ${d.content.producthunt.description}\n*Comment:*\n${d.content.producthunt.first_comment}\n\n`;}
+    if(d.content.reddit){text+=`**👽 Reddit:**\nSubreddits: ${(d.content.reddit.subreddit_suggestions||[]).join(', ')}\n*Title:* ${d.content.reddit.title}\n${d.content.reddit.post}\n`;}
+    addMsg({role:'assistant',text});
+  }catch(e){toast(e.message,'error');}
+}
+
+async function validateIdea(){
+  const idea=document.getElementById('team-idea')?.value?.trim();
+  if(!idea){toast('Enter idea first!','error');return;}
+  addMsg({role:'user',text:`💡 Validate: ${idea}`});showTyping();
+  try{
+    const d=await api('/api/agents/validate',{method:'POST',body:{idea}});
+    hideTyping();
+    let text=`**💡 Validation — Score: ${d.overall_score}/100**\n\n**Verdict:** ${d.verdict}\n\n**📊 Scores:**\n${Object.entries(d.scores||{}).map(([k,v])=>`• ${k.replace(/_/g,' ')}: ${v}/10`).join('\n')}\n\n**⚠️ Risks:**\n${(d.biggest_risks||[]).map(r=>'• '+r).join('\n')}\n\n**🎯 Opportunities:**\n${(d.biggest_opportunities||[]).map(o=>'• '+o).join('\n')}\n\n`;
+    if(d.similar_failed_startups?.length)text+=`**❌ Failures:**\n${d.similar_failed_startups.map(s=>`• ${s.name}: ${s.why_failed}`).join('\n')}\n\n`;
+    if(d.similar_successful_startups?.length)text+=`**✅ Wins:**\n${d.similar_successful_startups.map(s=>`• ${s.name}: ${s.why_won}`).join('\n')}\n\n`;
+    text+=`**🚀 First 100 users:**\n${d.first_100_users_strategy||''}`;
+    addMsg({role:'assistant',text});
+  }catch(e){hideTyping();toast(e.message,'error');}
+}
+
+async function competitorAnalysis(){
+  const idea=document.getElementById('team-idea')?.value?.trim();
+  if(!idea){toast('Enter idea first!','error');return;}
+  addMsg({role:'user',text:`🔍 Competitors: ${idea}`});showTyping();
+  try{
+    const d=await api('/api/agents/competitor-analysis',{method:'POST',body:{idea}});
+    hideTyping();
+    let text=`**🔍 Competitive Analysis**\n\n**📊 Market:** ${d.market_size}\n\n**🏆 Advantage Score:** ${d.competitive_advantage_score}/100\n\n`;
+    if(d.direct_competitors?.length)text+=`**🎯 Competitors:**\n${d.direct_competitors.map(c=>`\n**${c.name}** (${c.pricing||'?'})\n*+:* ${(c.strengths||[]).join(', ')}\n*-:* ${(c.weaknesses||[]).join(', ')}`).join('\n')}\n\n`;
+    text+=`**🎁 Gaps:**\n${(d.market_gaps||[]).map(g=>'• '+g).join('\n')}\n\n**🏆 Strategy:**\n${d.winning_strategy||''}`;
+    addMsg({role:'assistant',text});
+  }catch(e){hideTyping();toast(e.message,'error');}
+}
+
+async function viewProject(projectId){
+  try{
+    const {project,steps}=await api('/api/agents/projects/'+projectId);
+    document.getElementById('messages').innerHTML=`<div class="page-wrap">
+      <div class="page-title">${esc(project.name)}</div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:16px">
+        <div style="font-size:12px;color:var(--t3);margin-bottom:6px">Idea</div>
+        <div style="font-size:13px">${esc(project.idea)}</div>
+      </div>
+      <button onclick="navigate_team()" style="background:none;border:1px solid var(--border);color:var(--t2);padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;margin-bottom:16px">← Back</button>
+      ${steps.map(s=>{
+        const out=JSON.parse(s.output||'{}');
+        return `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:8px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:8px">${esc(s.agent_name)}</div>
+          <pre style="background:var(--bg3);padding:10px;border-radius:6px;font-size:11px;color:var(--t2);overflow:auto;max-height:200px;white-space:pre-wrap">${esc(JSON.stringify(out,null,2).slice(0,2000))}</pre>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }catch(e){toast(e.message,'error');}
+}
+
+async function predictRevenue(){
+  const idea=document.getElementById('team-idea')?.value?.trim();
+  if(!idea){toast('Enter idea first!','error');return;}
+  addMsg({role:'user',text:`💰 Revenue forecast: ${idea}`});showTyping();
+  try{
+    const d=await api('/api/agents/revenue-prediction',{method:'POST',body:{idea}});
+    hideTyping();
+    let text=`**💰 Revenue Forecast**\n\n`;
+    if(d.pricing_recommendation){
+      text+=`**💵 Recommended Pricing:**\n`;
+      Object.entries(d.pricing_recommendation).forEach(([tier,price])=>{
+        text+=`• ${tier}: ${price}\n`;
+      });
+      text+='\n';
+    }
+    if(d.year_1){
+      text+=`**📊 Year 1:** ${d.year_1.users} users · ${d.year_1.paying_users} paying · ${d.year_1.mrr} MRR · ${d.year_1.arr} ARR\n`;
+    }
+    if(d.year_2){text+=`**📊 Year 2:** ${d.year_2.users} users · ${d.year_2.mrr} MRR · ${d.year_2.arr} ARR\n`;}
+    if(d.year_3){text+=`**📊 Year 3:** ${d.year_3.users} users · ${d.year_3.mrr} MRR · ${d.year_3.arr} ARR\n\n`;}
+    text+=`**📈 Unit Economics:**\n• LTV: ${d.ltv_estimate}\n• CAC: ${d.cac_estimate}\n• LTV/CAC: ${d.ltv_cac_ratio}\n• Burn: ${d.burn_rate}\n• Runway needed: ${d.runway_required}\n\n`;
+    if(d.realistic_scenario){
+      text+=`**🎯 Scenarios:**\n• Pessimistic: ${d.pessimistic_scenario?.y1_arr} → ${d.pessimistic_scenario?.y3_arr}\n• Realistic: ${d.realistic_scenario.y1_arr} → ${d.realistic_scenario.y3_arr}\n• Optimistic: ${d.optimistic_scenario?.y1_arr} → ${d.optimistic_scenario?.y3_arr}\n\n`;
+    }
+    if(d.comparable_companies?.length){
+      text+=`**📚 Comparable Companies:**\n${d.comparable_companies.map(c=>`• ${c.name}: ${c.their_arr} (${c.trajectory})`).join('\n')}\n\n`;
+    }
+    if(d.growth_levers?.length){
+      text+=`**🚀 Growth Levers:**\n${d.growth_levers.map(g=>'• '+g).join('\n')}`;
+    }
+    addMsg({role:'assistant',text});
+  }catch(e){hideTyping();toast(e.message,'error');}
+}
+
+async function detectTrends(){
+  const industry=prompt('What industry/niche?','AI tools');
+  if(!industry)return;
+  addMsg({role:'user',text:`📈 Trends: ${industry}`});showTyping();
+  try{
+    const d=await api('/api/agents/trends',{method:'POST',body:{industry}});
+    hideTyping();
+    let text=`**📈 Trend Analysis: ${d.industry}**\n\n`;
+    text+=`**🎯 Key Thesis:**\n${d.key_thesis}\n\n`;
+    if(d.rising_trends?.length){
+      text+=`**📈 Rising Trends:**\n${d.rising_trends.map(t=>`\n• **${t.trend}** (${t.growth_rate})\n  Score: ${t.opportunity_score}/10\n  Evidence: ${t.evidence}`).join('\n')}\n\n`;
+    }
+    if(d.startup_opportunities?.length){
+      text+=`**💡 Startup Opportunities:**\n${d.startup_opportunities.map(o=>`\n• **${o.idea}**\n  Market: ${o.market_size} · Difficulty: ${o.difficulty} · Timing: ${o.timing}`).join('\n')}\n\n`;
+    }
+    if(d.tech_to_watch?.length){
+      text+=`**🔬 Tech to Watch:**\n${d.tech_to_watch.map(t=>'• '+t).join('\n')}\n\n`;
+    }
+    if(d.action_items?.length){
+      text+=`**✅ Action Items:**\n${d.action_items.map(a=>'• '+a).join('\n')}`;
+    }
+    addMsg({role:'assistant',text});
+  }catch(e){hideTyping();toast(e.message,'error');}
+}
+
+async function autonomousMode(){
+  const goal=document.getElementById('team-idea')?.value?.trim()||prompt('What goal should AI pursue?');
+  if(!goal)return;
+
+  document.getElementById('messages').innerHTML=`<div class="page-wrap">
+    <div class="page-title">🤖 Autonomous Mode</div>
+    <p style="color:var(--t2);font-size:14px;margin-bottom:16px">AI is working towards: <strong>${esc(goal)}</strong></p>
+    <div id="auto-iterations" style="display:flex;flex-direction:column;gap:10px"></div>
+  </div>`;
+
+  try{
+    const resp=await fetch(API+'/api/agents/autonomous',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.token},
+      body:JSON.stringify({goal,max_iterations:5}),
+    });
+
+    const reader=resp.body.getReader();
+    const decoder=new TextDecoder();
+    let buffer='';
+
+    while(true){
+      const {done,value}=await reader.read();if(done)break;
+      buffer+=decoder.decode(value,{stream:true});
+      const lines=buffer.split('\n');
+      buffer=lines.pop()||'';
+
+      for(const line of lines){
+        if(!line.startsWith('data: '))continue;
+        try{
+          const d=JSON.parse(line.slice(6));
+          const container=document.getElementById('auto-iterations');
+          if(!container)continue;
+
+          if(d.type==='iteration'){
+            const div=document.createElement('div');
+            div.id='iter-'+d.iteration;
+            div.style.cssText='background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px';
+            div.innerHTML=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+              <div style="background:var(--grad);color:#000;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px">${d.iteration}</div>
+              <div style="font-size:13px;font-weight:600">Iteration ${d.iteration}/${d.max_iterations}</div>
+              <div id="iter-status-${d.iteration}" style="margin-left:auto;font-size:11px;color:var(--a2)">thinking...</div>
+            </div>
+            <div id="iter-body-${d.iteration}"></div>`;
+            container.appendChild(div);
+            container.scrollIntoView({behavior:'smooth',block:'end'});
+          }
+
+          if(d.type==='thinking'){
+            const body=document.getElementById('iter-body-'+d.iteration);
+            if(body){
+              body.innerHTML=`
+                <div style="background:var(--bg3);border-radius:8px;padding:12px;margin-bottom:8px">
+                  <div style="font-size:11px;color:var(--t3);text-transform:uppercase;margin-bottom:4px">💭 Thought</div>
+                  <div style="font-size:12px;color:var(--t2)">${esc(d.thought)}</div>
+                </div>
+                <div style="background:var(--bg3);border-radius:8px;padding:12px;margin-bottom:8px">
+                  <div style="font-size:11px;color:var(--a1);text-transform:uppercase;margin-bottom:4px">⚡ Action</div>
+                  <div style="font-size:12px;color:var(--text);font-weight:500">${esc(d.action)}</div>
+                </div>
+              `;
+            }
+          }
+
+          if(d.type==='executed'){
+            const body=document.getElementById('iter-body-'+d.iteration);
+            const status=document.getElementById('iter-status-'+d.iteration);
+            if(status){status.textContent='completed';status.style.color='var(--a1)';}
+            if(body){
+              body.insertAdjacentHTML('beforeend',`
+                <div style="background:var(--bg3);border-radius:8px;padding:12px">
+                  <div style="font-size:11px;color:var(--t3);text-transform:uppercase;margin-bottom:4px">✅ Result</div>
+                  <div style="font-size:12px;color:var(--t2);white-space:pre-wrap;max-height:200px;overflow:auto">${esc(d.result)}</div>
+                </div>
+              `);
+            }
+          }
+
+          if(d.type==='goal_achieved'){
+            const div=document.createElement('div');
+            div.style.cssText='background:linear-gradient(135deg,#c6f13520,#35f1c620);border:1px solid var(--a1);border-radius:12px;padding:20px;text-align:center;margin-top:10px';
+            div.innerHTML=`<div style="font-size:24px;margin-bottom:8px">🎉</div><div style="font-size:16px;font-weight:700">Goal Achieved!</div><div style="font-size:12px;color:var(--t2);margin-top:4px">${esc(d.summary)}</div>`;
+            container.appendChild(div);
+            toast('🎉 Goal achieved!','success');
+          }
+
+          if(d.type==='complete'){
+            notify('NexusAI','Autonomous mode complete!');
+          }
+
+          if(d.type==='error'){toast('❌ '+d.error,'error');}
+        }catch(_){}
+      }
+    }
+  }catch(e){toast('❌ '+e.message,'error');}
+}
+
 // ── 🚀 MEGA AGENT UI ─────────────────────────
 async function navigate_mega(){
   S.page='mega';closeSidebar();

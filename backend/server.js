@@ -3086,10 +3086,16 @@ app.use((err,_req,res,_next) => {
 // 📦 ROUTE MODULES
 // ─────────────────────────────────────────────
 try{
-  const megaRoute = require('./routes/mega-agent');
-  app.use('/api/mega', megaRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete));
-  console.log('✅ Mega Agent routes loaded');
-}catch(e){console.warn('⚠️ Mega routes:', e.message);}
+  const agentsRoute = require('./routes/agents-system');
+  app.use('/api/agents', agentsRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete));
+  console.log('✅ Multi-Agent System loaded (CEO+Product+Dev+Design+Marketing+Deploy)');
+}catch(e){console.warn('⚠️ Agents-system routes:', e.message);}
+
+try{
+  const agentsRoute = require('./routes/agents-system');
+  app.use('/api/agents', agentsRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete));
+  console.log('✅ Multi-Agent System loaded');
+}catch(e){console.warn('⚠️ Agents routes:', e.message);}
 
 try{
   const megaRoute = require('./routes/mega-agent');
