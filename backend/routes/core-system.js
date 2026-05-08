@@ -1,26 +1,35 @@
 // ============================================================
-// 🧠 routes/core-system.js — Production routes using services
-// Model Router · Orchestrator · Cache · One-Prompt
+// 🧠 routes/core-system.js — Production Core Routes
+// Uses: services (router, cache, orchestrator, sse, security)
 // ============================================================
 const express = require('express');
 const crypto = require('crypto');
 
 module.exports = (db, openai, services, requireAuth, requireQuota, aiLimiter, wrap) => {
 const router = express.Router();
-const { router: modelRouter, cache, memory, logger, createOrchestrator, smartCall } = services;
+const { router: modelRouter, cache, memory, logger, sse, security, smartCall, createOrchestrator, queues } = services;
 
-// ─── Model registry endpoint ────────────────
+// ─── Models registry ────────────────────────
 router.get('/models', wrap(async (req, res) => {
-  res.json({ registry: modelRouter.MODEL_REGISTRY, patterns: modelRouter.TASK_PATTERNS });
+  res.json({
+    providers: modelRouter.PROVIDERS,
+    registry: modelRouter.MODEL_REGISTRY,
+    patterns: modelRouter.TASK_PATTERNS,
+  });
 }));
 
-// ─── Smart routed AI call ────────────────────
+// ─── Smart routed AI call ───────────────────
 router.post('/route', requireAuth, requireQuota, aiLimiter, wrap(async (req, res) => {
   const { prompt, system, task, max_tokens, json } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
 
+  const sanitized = security.sanitizeInput(prompt, { maxLength: 20000 });
+  if (!security.isSafe(sanitized)) {
+    return res.status(400).json({ error: 'Input contains unsafe content', threats: security.detectThreats(sanitized) });
+  }
+
   const result = await smartCall({
-    prompt: services.security.sanitizeInput(prompt, { stripHtml: false, maxLength: 20000 }),
+    prompt: sanitized,
     system,
     task,
     max_tokens,
@@ -29,17 +38,18 @@ router.post('/route', requireAuth, requireQuota, aiLimiter, wrap(async (req, res
   res.json(result);
 }));
 
-// ─── Cache stats / clear ─────────────────────
+// ─── Cache stats / clear ────────────────────
 router.get('/cache/stats', requireAuth, wrap(async (req, res) => {
-  res.json(cache.stats());
+  res.json(await cache.stats());
 }));
 
 router.delete('/cache/clear', requireAuth, wrap(async (req, res) => {
-  cache.clear();
+  await cache.clear();
+  logger.warn('Cache manually cleared', { user_id: req.user.id });
   res.json({ ok: true });
 }));
 
-// ─── DAG Orchestration ───────────────────────
+// ─── DAG Orchestration ──────────────────────
 db.prepare(`CREATE TABLE IF NOT EXISTS orchestrations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
@@ -55,52 +65,48 @@ router.post('/orchestrate', requireAuth, requireQuota, aiLimiter, wrap(async (re
   const { name, graph } = req.body;
   if (!graph || typeof graph !== 'object') return res.status(400).json({ error: 'Missing graph' });
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-
-  const send = (e) => res.write(`data: ${JSON.stringify(e)}\n\n`);
+  const stream = sse.createStream(res);
 
   const orchId = db.prepare(`INSERT INTO orchestrations (user_id, name, graph) VALUES (?, ?, ?)`)
     .run(req.user.id, name || 'orchestration', JSON.stringify(graph)).lastInsertRowid;
 
-  send({ type: 'orchestration_id', id: orchId });
+  stream.send('orchestration_id', { id: orchId });
 
   try {
-    const orch = createOrchestrator(graph, { onEvent: send, userId: req.user.id });
+    const orch = createOrchestrator(graph, {
+      onEvent: (e) => stream.send(e.type, e),
+      userId: req.user.id,
+    });
     const { results, errors, summary } = await orch.run();
 
     db.prepare(`UPDATE orchestrations SET results = ?, status = 'completed', completed_at = datetime('now') WHERE id = ?`)
       .run(JSON.stringify(results), orchId);
 
-    send({ type: 'final', results, errors, summary });
-    res.end();
+    stream.done({ results, errors, summary });
   } catch (e) {
     db.prepare(`UPDATE orchestrations SET status = 'failed' WHERE id = ?`).run(orchId);
     logger.error('Orchestration failed', { user_id: req.user.id, error: e.message });
-    send({ type: 'fatal', error: e.message });
-    res.end();
+    stream.error(e.message);
+    stream.close();
   }
 }));
 
 // ═══════════════════════════════════════════════════════════
-// ⚡ ONE-PROMPT EXPERIENCE — The Hero Feature
+// ⚡ ONE-PROMPT EXPERIENCE — Hero Feature
 // ═══════════════════════════════════════════════════════════
 router.post('/one-prompt', requireAuth, requireQuota, aiLimiter, wrap(async (req, res) => {
   const { prompt: rawPrompt } = req.body;
   if (!rawPrompt) return res.status(400).json({ error: 'Missing prompt' });
 
-  const prompt = services.security.sanitizeInput(rawPrompt, { maxLength: 5000 });
+  const prompt = security.sanitizeInput(rawPrompt, { maxLength: 5000 });
+  if (!security.isSafe(prompt)) {
+    return res.status(400).json({ error: 'Input contains unsafe content' });
+  }
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-  const send = (e) => res.write(`data: ${JSON.stringify(e)}\n\n`);
+  const stream = sse.createStream(res);
 
-  // PHASE 1: Understand intent
-  send({ type: 'phase', name: 'understanding', label: '🧠 Understanding your request...' });
+  // PHASE 1: Detect intent (cached)
+  stream.send('phase', { name: 'understanding', label: '🧠 Understanding your request...' });
 
   let intent;
   try {
@@ -119,22 +125,22 @@ router.post('/one-prompt', requireAuth, requireQuota, aiLimiter, wrap(async (req
 Request: ${prompt}`,
       task: 'classification',
       json: true,
-      cacheable: true,
       cacheTTL: 7200,
     });
     intent = intentResult.output;
   } catch (e) {
-    send({ type: 'error', error: 'Failed to understand: ' + e.message });
-    return res.end();
+    stream.error('Failed to understand: ' + e.message);
+    stream.close();
+    return;
   }
 
-  send({ type: 'intent_detected', intent });
+  stream.send('intent_detected', { intent });
 
-  // PHASE 2: Inject user context for personalization
+  // PHASE 2: Build user context
   const userContext = memory.buildContext(req.user.id);
 
   // PHASE 3: Build graph dynamically
-  send({ type: 'phase', name: 'planning', label: '📋 Building execution plan...' });
+  stream.send('phase', { name: 'planning', label: '📋 Building execution plan...' });
 
   let graph;
   if (intent.intent === 'build_startup' || intent.intent === 'build_app') {
@@ -147,11 +153,11 @@ Request: ${prompt}`,
     graph = buildGenericGraph(prompt, intent, userContext);
   }
 
-  send({ type: 'graph_ready', node_count: Object.keys(graph).length });
+  stream.send('graph_ready', { node_count: Object.keys(graph).length });
 
   // PHASE 4: Execute orchestration
   const orch = createOrchestrator(graph, {
-    onEvent: (e) => send({ type: 'execution', event: e }),
+    onEvent: (e) => stream.send('execution', { event: e }),
     userId: req.user.id,
     maxRetries: 2,
   });
@@ -169,13 +175,9 @@ Request: ${prompt}`,
           .run(req.user.id, shareId, intent.name_suggestion || prompt.slice(0, 60), prompt).lastInsertRowid;
 
         const agentMap = {
-          strategy: 'CEO Agent',
-          product_spec: 'Product Agent',
-          design: 'Design Agent',
-          backend: 'Dev Agent',
-          frontend: 'Dev Agent',
-          marketing: 'Marketing Agent',
-          deploy_config: 'Deploy Agent',
+          strategy: 'CEO Agent', product_spec: 'Product Agent', design: 'Design Agent',
+          backend: 'Dev Agent', frontend: 'Dev Agent',
+          marketing: 'Marketing Agent', deploy_config: 'Deploy Agent',
         };
         for (const [key, value] of Object.entries(results)) {
           const agentName = agentMap[key] || key;
@@ -190,20 +192,18 @@ Request: ${prompt}`,
       }
     }
 
-    send({
-      type: 'complete',
+    stream.done({
       intent,
       results,
       errors,
       project_id: projectId,
       share_id: shareId,
-      summary: `✨ ${intent.name_suggestion || 'Project'} ready! Generated ${Object.keys(results).length} components in ${(summary.duration_ms / 1000).toFixed(1)}s.`,
+      summary: `✨ ${intent.name_suggestion || 'Project'} ready! ${Object.keys(results).length} components in ${(summary.duration_ms / 1000).toFixed(1)}s.`,
     });
-    res.end();
   } catch (e) {
     logger.error('One-Prompt failed', { user_id: req.user.id, error: e.message });
-    send({ type: 'error', error: e.message });
-    res.end();
+    stream.error(e.message);
+    stream.close();
   }
 }));
 
@@ -214,25 +214,24 @@ function buildStartupGraph(prompt, intent, userCtx) {
       task: 'reasoning-deep', json: true,
       system: `${userCtx}You are the CEO Agent. Strategic thinker.`,
       prompt: `Define startup strategy for: "${prompt}"\nDomain: ${intent.domain}\n\nReturn JSON: {"vision":"...","mission":"...","target_market":"...","value_prop":"...","differentiators":["..."],"revenue_model":"..."}`,
-      validator: 'Has vision, target_market, value_prop, differentiators',
     },
     product_spec: {
       task: 'reasoning-deep', json: true,
       depends_on: ['strategy'],
-      system: 'You are the Product Agent. Detail-oriented.',
+      system: 'You are the Product Agent.',
       prompt: (ctx) => `Design product spec for: "${prompt}"\n\nStrategy:\n${JSON.stringify(ctx.strategy).slice(0, 1500)}\n\nReturn JSON: {"name":"...","tagline":"...","features":[{"name":"...","desc":"...","priority":"P0/P1"}],"user_personas":[{"name":"...","needs":["..."]}],"mvp_scope":["..."]}`,
     },
     design: {
       task: 'creative', json: true, max_tokens: 4000,
       depends_on: ['product_spec'],
       system: 'You are the Design Agent. Premium dark UI/UX expert.',
-      prompt: (ctx) => `Generate complete dark-themed landing page HTML for "${ctx.product_spec?.name || 'startup'}".\nValue prop: ${ctx.product_spec?.tagline || prompt}\n\nReturn JSON: {"landing_html":"COMPLETE HTML with hero, 6 features, 3 pricing tiers, testimonials, FAQ, CTA. Use lime/cyan gradient. Inline CSS.","brand_colors":["#c6f135","#35f1c6"]}`,
+      prompt: (ctx) => `Generate complete dark-themed landing page HTML for "${ctx.product_spec?.name || 'startup'}".\nValue: ${ctx.product_spec?.tagline || prompt}\n\nReturn JSON: {"landing_html":"COMPLETE HTML with hero, 6 features, 3 pricing tiers, CTA. Use lime/cyan gradient.","brand_colors":["#c6f135","#35f1c6"]}`,
     },
     backend: {
       task: 'coding-strong', json: true, max_tokens: 4000,
       depends_on: ['product_spec'],
       system: 'You are the Dev Agent. Senior backend engineer.',
-      prompt: (ctx) => `Generate Node.js + Express + SQLite backend for: "${prompt}"\n\nFeatures: ${JSON.stringify(ctx.product_spec?.features || []).slice(0, 1000)}\n\nReturn JSON: {"server_js":"complete server.js with auth, CRUD, error handling","schema":"CREATE TABLE...","package_json":"...","env_example":"..."}`,
+      prompt: (ctx) => `Generate Node.js + Express + SQLite backend for: "${prompt}"\n\nFeatures: ${JSON.stringify(ctx.product_spec?.features || []).slice(0, 1000)}\n\nReturn JSON: {"server_js":"complete server.js with auth, CRUD","schema":"CREATE TABLE...","package_json":"...","env_example":"..."}`,
     },
     frontend: {
       task: 'coding-strong', json: true, max_tokens: 4000,
@@ -243,14 +242,14 @@ function buildStartupGraph(prompt, intent, userCtx) {
     marketing: {
       task: 'creative', json: true,
       depends_on: ['strategy', 'product_spec'],
-      system: 'You are the Marketing Agent. Growth expert.',
-      prompt: (ctx) => `Generate viral launch package for "${ctx.product_spec?.name}".\n\nReturn JSON: {"twitter_thread":["tweet 1",...],"product_hunt":{"tagline":"...","description":"..."},"linkedin_post":"...","email_sequence":[{"day":0,"subject":"...","body":"..."}]}`,
+      system: 'You are the Marketing Agent.',
+      prompt: (ctx) => `Generate viral launch package for "${ctx.product_spec?.name}".\n\nReturn JSON: {"twitter_thread":["tweet 1"],"product_hunt":{"tagline":"...","description":"..."},"linkedin_post":"...","email_sequence":[{"day":0,"subject":"...","body":"..."}]}`,
     },
     deploy_config: {
       task: 'coding-fast', json: true,
       depends_on: ['backend'],
       system: 'You are the Deploy Agent. DevOps expert.',
-      prompt: (ctx) => `Generate deployment configs.\n\nReturn JSON: {"dockerfile":"FROM node:20...","docker_compose":"version: '3.8'...","github_actions":"...","vercel_json":"...","railway_json":"...","readme":"# Project\\n..."}`,
+      prompt: (ctx) => `Generate deployment configs.\n\nReturn JSON: {"dockerfile":"FROM node:20...","docker_compose":"...","github_actions":"...","vercel_json":"...","railway_json":"...","readme":"..."}`,
     },
   };
 }
@@ -259,20 +258,20 @@ function buildResearchGraph(prompt, intent, userCtx) {
   return {
     research: {
       task: 'reasoning-deep', json: true,
-      system: `${userCtx}You are a Research Agent. Thorough and analytical.`,
+      system: `${userCtx}You are a Research Agent.`,
       prompt: `Deep research: "${prompt}"\n\nReturn JSON: {"key_findings":["..."],"data_points":["..."],"insights":["..."],"sources_to_verify":["..."]}`,
     },
     analysis: {
       task: 'reasoning-deep', json: true,
       depends_on: ['research'],
-      system: 'You are an Analyst Agent. Pattern recognition expert.',
+      system: 'You are an Analyst Agent.',
       prompt: (ctx) => `Analyze findings:\n${JSON.stringify(ctx.research).slice(0, 2000)}\n\nReturn JSON: {"patterns":["..."],"implications":["..."],"recommendations":["..."]}`,
     },
     report: {
       task: 'creative',
       depends_on: ['analysis'],
-      system: 'You are a Writer Agent. Clear and concise.',
-      prompt: (ctx) => `Write comprehensive report based on:\n\nResearch:\n${JSON.stringify(ctx.research).slice(0, 1500)}\n\nAnalysis:\n${JSON.stringify(ctx.analysis).slice(0, 1500)}`,
+      system: 'You are a Writer Agent.',
+      prompt: (ctx) => `Write comprehensive report:\n\nResearch:\n${JSON.stringify(ctx.research).slice(0, 1500)}\n\nAnalysis:\n${JSON.stringify(ctx.analysis).slice(0, 1500)}`,
     },
   };
 }
@@ -287,13 +286,13 @@ function buildCodeGraph(prompt, intent, userCtx) {
     code: {
       task: 'coding-strong', max_tokens: 4000,
       depends_on: ['plan'],
-      system: 'You are a Senior Engineer. Write production-grade, well-commented code.',
-      prompt: (ctx) => `Implement: "${prompt}"\n\nPlan:\n${JSON.stringify(ctx.plan).slice(0, 1500)}\n\nWrite complete, working code with comments.`,
+      system: 'Senior Engineer. Write production-grade code.',
+      prompt: (ctx) => `Implement: "${prompt}"\n\nPlan:\n${JSON.stringify(ctx.plan).slice(0, 1500)}\n\nWrite complete, working code.`,
     },
     tests: {
       task: 'coding-fast',
       depends_on: ['code'],
-      system: 'You are a QA Engineer. Write thorough tests.',
+      system: 'You are a QA Engineer.',
       prompt: (ctx) => `Write tests for this code:\n${String(ctx.code).slice(0, 3000)}`,
       required: false,
     },
@@ -310,29 +309,21 @@ function buildGenericGraph(prompt, intent, userCtx) {
   };
 }
 
-// ═══════════════════════════════════════════════════════════
-// 🛡️ Security helpers exposed
-// ═══════════════════════════════════════════════════════════
+// ─── Security/Sanitization helper ─────────────
 router.post('/sanitize', requireAuth, wrap(async (req, res) => {
   const { input } = req.body;
   if (!input) return res.status(400).json({ error: 'Missing input' });
-
-  const threats = services.security.detectThreats(input);
-  const sanitized = services.security.sanitizeInput(input);
   res.json({
-    safe: services.security.isSafe(input),
-    threats,
-    sanitized,
+    safe: security.isSafe(input),
+    threats: security.detectThreats(input),
+    sanitized: security.sanitizeInput(input),
   });
 }));
 
-// ═══════════════════════════════════════════════════════════
-// 📊 SYSTEM HEALTH
-// ═══════════════════════════════════════════════════════════
+// ─── System Health ────────────────────────────
 router.get('/health', wrap(async (req, res) => {
   const memUsage = process.memoryUsage();
-  const cacheStats = cache.stats();
-  const workerStats = services.workers.stats();
+  const cacheStats = await cache.stats();
 
   let recentOrch = {};
   try {
@@ -348,10 +339,25 @@ router.get('/health', wrap(async (req, res) => {
       heap_used_mb: (memUsage.heapUsed / 1024 / 1024).toFixed(1),
     },
     cache: cacheStats,
-    workers: workerStats,
+    providers: modelRouter.PROVIDERS,
+    queues_type: queues.useBullMQ ? 'BullMQ+Redis' : 'in-process',
     orchestrations_24h: recentOrch,
     timestamp: new Date().toISOString(),
   });
+}));
+
+// ─── Job queue endpoints ──────────────────────
+router.post('/jobs/enqueue', requireAuth, wrap(async (req, res) => {
+  const { queue: queueName, name, data, delay = 0 } = req.body;
+  if (!queueName || !name) return res.status(400).json({ error: 'Missing queue/name' });
+
+  const job = await queues.enqueue(queueName, name, { ...data, _user_id: req.user.id }, { delay });
+  res.json({ ok: true, job_id: job.id });
+}));
+
+router.get('/jobs/stats/:queue', requireAuth, wrap(async (req, res) => {
+  const stats = await queues.stats(req.params.queue);
+  res.json(stats || { error: 'Queue not found' });
 }));
 
 return router;

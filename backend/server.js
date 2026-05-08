@@ -3089,11 +3089,16 @@ let services = null;
 try {
   const { initServices } = require('./services');
   services = initServices(db, openai, { startWorkers: true });
-  services.logger.info('Services initialized', {
-    cache: 'ready',
-    workers: 'started',
-    memory: 'ready',
-    router: Object.keys(services.router.MODEL_REGISTRY).length + ' models',
+
+  // Apply request logging middleware
+  if (services.logger?.middleware) {
+    app.use(services.logger.middleware());
+  }
+
+  services.logger.info('Services ready', {
+    providers: services.router?.PROVIDERS,
+    cache_redis: !!services.cache.redis,
+    queue_type: services.queues.useBullMQ ? 'BullMQ' : 'in-process',
   });
 } catch (e) {
   console.warn('⚠️ Services init:', e.message);
@@ -3111,6 +3116,14 @@ try{
     console.warn('⚠️ Skipping core routes — services not initialized');
   }
 }catch(e){console.warn('⚠️ Core routes:', e.message);}
+
+try{
+  const intelligenceRoute = require('./routes/intelligence');
+  if (services) {
+    app.use('/api/intelligence', intelligenceRoute(db, services, requireAuth, requireQuota, aiLimiter, wrap));
+    console.log('✅ Compound Intelligence loaded (multi-model + validation + refinement + reasoning chains)');
+  }
+}catch(e){console.warn('⚠️ Intelligence routes:', e.message);}
 
 try{
   const deployRoute = require('./routes/deploy-engine');

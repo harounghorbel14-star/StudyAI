@@ -1,114 +1,174 @@
 // ============================================================
-// ⚡ services/cache.js — Smart Cache (Memory + DB, Redis-style)
-// Semantic keys, TTL, hit tracking, auto-cleanup
+// ⚡ services/cache.js — Production Cache Layer
+// Upstash Redis (primary) → Memory LRU (fallback)
+// Semantic keys, TTL, hit tracking, invalidation
 // ============================================================
 const crypto = require('crypto');
 
+let UpstashRedis = null;
+try {
+  UpstashRedis = require('@upstash/redis').Redis;
+} catch (_) { /* upstash optional */ }
+
 class SmartCache {
-  constructor(db, options = {}) {
-    this.db = db;
+  constructor(options = {}) {
     this.maxMemorySize = options.maxMemorySize || 500;
-    this.defaultTTL = options.defaultTTL || 3600; // seconds
+    this.defaultTTL = options.defaultTTL || 3600;
+    this.namespace = options.namespace || 'nx';
     this.memCache = new Map();
+    this.stats_ = { hits: 0, misses: 0, sets: 0, redis_errors: 0 };
 
-    this.initSchema();
-    this.startCleanupInterval();
+    // Init Redis
+    this.redis = null;
+    if (UpstashRedis && process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+      try {
+        this.redis = new UpstashRedis({
+          url: process.env.UPSTASH_REDIS_REST_URL,
+          token: process.env.UPSTASH_REDIS_REST_TOKEN,
+        });
+        this.redisAvailable = true;
+      } catch (e) {
+        console.warn('[cache] Upstash init failed:', e.message);
+      }
+    }
+
+    // Memory cleanup
+    setInterval(() => this.cleanupMemory(), 60 * 1000);
   }
 
-  initSchema() {
-    this.db.prepare(`CREATE TABLE IF NOT EXISTS smart_cache (
-      cache_key TEXT PRIMARY KEY,
-      response TEXT NOT NULL,
-      model TEXT,
-      task_type TEXT,
-      hits INTEGER DEFAULT 0,
-      expires_at INTEGER NOT NULL,
-      created_at TEXT DEFAULT (datetime('now'))
-    )`).run();
-    this.db.prepare(`CREATE INDEX IF NOT EXISTS idx_smart_cache_expires ON smart_cache(expires_at)`).run();
-  }
-
+  // ─── Semantic key generation ─────────────
   hashKey(parts) {
     const data = Array.isArray(parts) ? parts.join('||') : String(parts);
-    return crypto.createHash('sha256').update(data).digest('hex').slice(0, 24);
+    const hash = crypto.createHash('sha256').update(data).digest('hex').slice(0, 24);
+    return `${this.namespace}:${hash}`;
   }
 
-  get(keyParts) {
+  // ─── GET ─────────────────────────────────
+  async get(keyParts) {
     const key = this.hashKey(keyParts);
 
-    // Memory layer
+    // L1: Memory
     const mem = this.memCache.get(key);
-    if (mem && mem.expires > Date.now()) return mem.value;
+    if (mem && mem.expires > Date.now()) {
+      this.stats_.hits++;
+      return mem.value;
+    }
     if (mem) this.memCache.delete(key);
 
-    // DB layer
-    try {
-      const row = this.db.prepare(`SELECT response FROM smart_cache WHERE cache_key = ? AND expires_at > ?`).get(key, Date.now());
-      if (row) {
-        this.db.prepare(`UPDATE smart_cache SET hits = hits + 1 WHERE cache_key = ?`).run(key);
-        const value = JSON.parse(row.response);
-        // Promote to memory
-        this.memCache.set(key, { value, expires: Date.now() + 600000 });
-        return value;
+    // L2: Redis
+    if (this.redis) {
+      try {
+        const raw = await this.redis.get(key);
+        if (raw) {
+          const value = typeof raw === 'string' ? this._safeParse(raw) : raw;
+          // Promote to memory
+          this.memCache.set(key, { value, expires: Date.now() + 600000 });
+          this._enforceMemorySize();
+          this.stats_.hits++;
+          return value;
+        }
+      } catch (e) {
+        this.stats_.redis_errors++;
       }
-    } catch (_) {}
+    }
+
+    this.stats_.misses++;
     return null;
   }
 
-  set(keyParts, value, options = {}) {
+  // ─── SET ─────────────────────────────────
+  async set(keyParts, value, options = {}) {
     const key = this.hashKey(keyParts);
     const ttl = options.ttl || this.defaultTTL;
     const expires = Date.now() + ttl * 1000;
 
-    // Memory
+    this.stats_.sets++;
+
+    // L1: Memory
     this.memCache.set(key, { value, expires });
-    if (this.memCache.size > this.maxMemorySize) {
+    this._enforceMemorySize();
+
+    // L2: Redis
+    if (this.redis) {
+      try {
+        await this.redis.set(key, JSON.stringify(value), { ex: ttl });
+      } catch (e) {
+        this.stats_.redis_errors++;
+      }
+    }
+    return true;
+  }
+
+  // ─── DELETE ──────────────────────────────
+  async delete(keyParts) {
+    const key = this.hashKey(keyParts);
+    this.memCache.delete(key);
+    if (this.redis) {
+      try { await this.redis.del(key); }
+      catch (_) { this.stats_.redis_errors++; }
+    }
+  }
+
+  // ─── INVALIDATE BY PREFIX ────────────────
+  async invalidatePrefix(prefix) {
+    // Clear from memory
+    for (const k of this.memCache.keys()) {
+      if (k.includes(prefix)) this.memCache.delete(k);
+    }
+    // Note: Upstash REST doesn't support SCAN, so only memory is cleared by prefix.
+    // For full Redis SCAN, ioredis would be needed.
+  }
+
+  // ─── CLEAR ALL ───────────────────────────
+  async clear() {
+    this.memCache.clear();
+    if (this.redis) {
+      try { await this.redis.flushdb(); }
+      catch (_) { this.stats_.redis_errors++; }
+    }
+  }
+
+  // ─── STATS ───────────────────────────────
+  async stats() {
+    const total = this.stats_.hits + this.stats_.misses;
+    return {
+      memory_size: this.memCache.size,
+      max_memory: this.maxMemorySize,
+      hits: this.stats_.hits,
+      misses: this.stats_.misses,
+      sets: this.stats_.sets,
+      hit_rate: total ? ((this.stats_.hits / total) * 100).toFixed(1) + '%' : '0%',
+      redis_available: !!this.redis,
+      redis_errors: this.stats_.redis_errors,
+    };
+  }
+
+  // ─── HELPERS ─────────────────────────────
+  _safeParse(raw) {
+    try { return JSON.parse(raw); } catch (_) { return raw; }
+  }
+
+  _enforceMemorySize() {
+    while (this.memCache.size > this.maxMemorySize) {
       const firstKey = this.memCache.keys().next().value;
       this.memCache.delete(firstKey);
     }
-
-    // DB
-    try {
-      this.db.prepare(`INSERT OR REPLACE INTO smart_cache (cache_key, response, model, task_type, expires_at) VALUES (?, ?, ?, ?, ?)`)
-        .run(key, JSON.stringify(value), options.model || null, options.task_type || null, expires);
-    } catch (_) {}
   }
 
-  delete(keyParts) {
-    const key = this.hashKey(keyParts);
-    this.memCache.delete(key);
-    try { this.db.prepare(`DELETE FROM smart_cache WHERE cache_key = ?`).run(key); } catch (_) {}
-  }
-
-  clear() {
-    this.memCache.clear();
-    try { this.db.prepare(`DELETE FROM smart_cache`).run(); } catch (_) {}
-  }
-
-  stats() {
-    try {
-      const total = this.db.prepare(`SELECT COUNT(*) as c, SUM(hits) as h FROM smart_cache`).get();
-      return {
-        memory_size: this.memCache.size,
-        db_size: total.c || 0,
-        total_hits: total.h || 0,
-        max_memory: this.maxMemorySize,
-      };
-    } catch (_) {
-      return { memory_size: this.memCache.size };
+  cleanupMemory() {
+    const now = Date.now();
+    for (const [k, v] of this.memCache.entries()) {
+      if (v.expires < now) this.memCache.delete(k);
     }
   }
 
-  startCleanupInterval() {
-    setInterval(() => {
-      try { this.db.prepare(`DELETE FROM smart_cache WHERE expires_at < ?`).run(Date.now()); }
-      catch (_) {}
-      // Also cleanup memory
-      const now = Date.now();
-      for (const [k, v] of this.memCache.entries()) {
-        if (v.expires < now) this.memCache.delete(k);
-      }
-    }, 5 * 60 * 1000);
+  // ─── WRAP — cache an async function ──────
+  async wrap(keyParts, fn, options = {}) {
+    const cached = await this.get(keyParts);
+    if (cached !== null) return cached;
+    const result = await fn();
+    await this.set(keyParts, result, options);
+    return result;
   }
 }
 

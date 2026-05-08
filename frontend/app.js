@@ -2396,6 +2396,64 @@ async function runAnalyticsAgent(){
   }catch(e){hideTyping();toast(e.message,'error');}
 }
 
+// ── 📊 SYSTEM HEALTH (Production monitoring) ──
+async function navigate_health(){
+  S.page='health';closeSidebar();
+  document.getElementById('tool-label').textContent='📊 System Health';
+  document.getElementById('tool-sub').textContent='Production monitoring';
+
+  document.getElementById('messages').innerHTML=`<div class="page-wrap ai-os-bg">
+    <div class="page-title">📊 System Health</div>
+    <div id="health-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px"></div>
+    <div id="health-detail"></div>
+  </div>`;
+
+  refreshHealth();
+}
+
+async function refreshHealth(){
+  try{
+    const h=await api('/api/core/health');
+    const stats=document.getElementById('health-stats');
+    if(stats){
+      stats.innerHTML=`
+        <div class="dash-card"><div class="dash-num" style="color:var(--a1)">✓</div><div class="dash-lbl">${esc(h.status)}</div></div>
+        <div class="dash-card"><div class="dash-num">${Math.floor(h.uptime_seconds/60)}m</div><div class="dash-lbl">Uptime</div></div>
+        <div class="dash-card"><div class="dash-num">${h.memory.rss_mb}</div><div class="dash-lbl">RAM (MB)</div></div>
+        <div class="dash-card"><div class="dash-num">${h.cache.memory_size||0}</div><div class="dash-lbl">Cache (mem)</div></div>
+        <div class="dash-card"><div class="dash-num">${h.cache.db_size||0}</div><div class="dash-lbl">Cache (DB)</div></div>
+        <div class="dash-card"><div class="dash-num">${h.cache.total_hits||0}</div><div class="dash-lbl">Cache hits</div></div>
+        <div class="dash-card"><div class="dash-num">${h.workers?.queued||0}</div><div class="dash-lbl">Jobs queued</div></div>
+        <div class="dash-card"><div class="dash-num">${h.workers?.running||0}</div><div class="dash-lbl">Jobs running</div></div>
+      `;
+    }
+    const detail=document.getElementById('health-detail');
+    if(detail){
+      detail.innerHTML=`
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:10px">⚙️ Workers (last hour)</div>
+          ${Object.entries(h.workers||{}).map(([k,v])=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)"><span>${esc(k)}</span><span style="color:var(--a1)">${v}</span></div>`).join('')||'<div style="color:var(--t3);font-size:12px">No worker activity</div>'}
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:10px">🎼 Orchestrations (24h)</div>
+          ${Object.entries(h.orchestrations_24h||{}).map(([k,v])=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)"><span>${esc(k)}</span><span style="color:var(--a1)">${v}</span></div>`).join('')||'<div style="color:var(--t3);font-size:12px">No orchestrations yet</div>'}
+        </div>
+        <button onclick="clearAppCache()" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:8px;font-size:13px;cursor:pointer">🗑️ Clear Cache</button>
+        <button onclick="refreshHealth()" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:8px;font-size:13px;cursor:pointer;margin-left:8px">🔄 Refresh</button>
+      `;
+    }
+  }catch(e){toast(e.message,'error');}
+}
+
+async function clearAppCache(){
+  if(!confirm('Clear all cache? Subsequent requests will be slower until cache rebuilds.'))return;
+  try{
+    await api('/api/core/cache/clear',{method:'DELETE'});
+    toast('Cache cleared','success');
+    refreshHealth();
+  }catch(e){toast(e.message,'error');}
+}
+
 // ── ⚡ ONE-PROMPT KILLER EXPERIENCE ──────────
 async function navigate_oneprompt(){
   S.page='oneprompt';closeSidebar();

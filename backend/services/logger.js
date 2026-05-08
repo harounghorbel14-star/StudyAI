@@ -1,63 +1,96 @@
 // ============================================================
-// 📋 services/logger.js — Production logging with levels
+// 📋 services/logger.js — Production Logger (pino-based)
+// Structured logs, levels, child loggers, fallback to console
 // ============================================================
-const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
-const COLORS = { debug: '\x1b[90m', info: '\x1b[36m', warn: '\x1b[33m', error: '\x1b[31m' };
-const RESET = '\x1b[0m';
+
+let pino;
+try { pino = require('pino'); } catch (_) { pino = null; }
+
+const LEVELS = ['debug', 'info', 'warn', 'error', 'fatal'];
 
 class Logger {
   constructor(options = {}) {
-    this.level = LEVELS[options.level || process.env.LOG_LEVEL || 'info'] ?? 1;
+    this.level = options.level || process.env.LOG_LEVEL || 'info';
     this.context = options.context || 'NexusAI';
-    this.db = options.db;
 
-    if (this.db) {
+    if (pino) {
+      const config = {
+        name: this.context,
+        level: this.level,
+      };
+      // Pretty in dev, JSON in prod
+      if (process.env.NODE_ENV !== 'production') {
+        try {
+          config.transport = {
+            target: 'pino-pretty',
+            options: { colorize: true, translateTime: 'HH:MM:ss', ignore: 'pid,hostname' },
+          };
+        } catch (_) {}
+      }
       try {
-        this.db.prepare(`CREATE TABLE IF NOT EXISTS app_logs (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          level TEXT NOT NULL,
-          context TEXT,
-          message TEXT NOT NULL,
-          metadata TEXT,
-          created_at TEXT DEFAULT (datetime('now'))
-        )`).run();
-        this.db.prepare(`CREATE INDEX IF NOT EXISTS idx_app_logs_level ON app_logs(level, created_at)`).run();
-      } catch (_) {}
+        this.pino = pino(config);
+      } catch (_) {
+        this.pino = null;
+      }
     }
   }
 
-  log(level, message, metadata) {
-    if (LEVELS[level] < this.level) return;
-
+  _log(level, msg, meta) {
+    if (this.pino) {
+      const args = meta ? [meta, msg] : [msg];
+      this.pino[level]?.(...args);
+      return;
+    }
+    // Fallback console
     const ts = new Date().toISOString();
-    const meta = metadata ? ' ' + JSON.stringify(metadata).slice(0, 500) : '';
-    console.log(`${COLORS[level]}[${ts}] [${level.toUpperCase()}] [${this.context}]${RESET} ${message}${meta}`);
-
-    if (this.db && (level === 'error' || level === 'warn')) {
-      try {
-        this.db.prepare(`INSERT INTO app_logs (level, context, message, metadata) VALUES (?, ?, ?, ?)`)
-          .run(level, this.context, message, metadata ? JSON.stringify(metadata) : null);
-      } catch (_) {}
-    }
+    const metaStr = meta ? ' ' + JSON.stringify(meta).slice(0, 500) : '';
+    const colors = { debug: '\x1b[90m', info: '\x1b[36m', warn: '\x1b[33m', error: '\x1b[31m', fatal: '\x1b[35m' };
+    const reset = '\x1b[0m';
+    console.log(`${colors[level] || ''}[${ts}] [${level.toUpperCase()}] [${this.context}]${reset} ${msg}${metaStr}`);
   }
 
-  debug(msg, meta) { this.log('debug', msg, meta); }
-  info(msg, meta) { this.log('info', msg, meta); }
-  warn(msg, meta) { this.log('warn', msg, meta); }
-  error(msg, meta) { this.log('error', msg, meta); }
+  debug(msg, meta) { this._log('debug', msg, meta); }
+  info(msg, meta) { this._log('info', msg, meta); }
+  warn(msg, meta) { this._log('warn', msg, meta); }
+  error(msg, meta) { this._log('error', msg, meta); }
+  fatal(msg, meta) { this._log('fatal', msg, meta); }
 
   child(context) {
-    return new Logger({ level: Object.keys(LEVELS).find(k => LEVELS[k] === this.level), context, db: this.db });
+    const childCtx = `${this.context}:${context}`;
+    if (this.pino) {
+      const child = this.pino.child({ context: childCtx });
+      const wrapper = new Logger({ level: this.level, context: childCtx });
+      wrapper.pino = child;
+      return wrapper;
+    }
+    return new Logger({ level: this.level, context: childCtx });
   }
 
-  async getRecent(level = null, limit = 100) {
-    if (!this.db) return [];
-    try {
-      const sql = level
-        ? `SELECT * FROM app_logs WHERE level = ? ORDER BY id DESC LIMIT ?`
-        : `SELECT * FROM app_logs ORDER BY id DESC LIMIT ?`;
-      return level ? this.db.prepare(sql).all(level, limit) : this.db.prepare(sql).all(limit);
-    } catch (_) { return []; }
+  // Express middleware
+  middleware() {
+    return (req, res, next) => {
+      const start = Date.now();
+      const reqId = Math.random().toString(36).slice(2, 10);
+      req.reqId = reqId;
+      req.log = this.child(`req:${reqId}`);
+
+      res.on('finish', () => {
+        const duration = Date.now() - start;
+        const meta = {
+          method: req.method,
+          path: req.path,
+          status: res.statusCode,
+          duration_ms: duration,
+          ip: req.ip,
+          user_id: req.user?.id,
+        };
+        if (res.statusCode >= 500) this.error('Request failed', meta);
+        else if (res.statusCode >= 400) this.warn('Request error', meta);
+        else if (duration > 5000) this.warn('Slow request', meta);
+        else this.debug('Request', meta);
+      });
+      next();
+    };
   }
 }
 
