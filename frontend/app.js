@@ -2396,6 +2396,471 @@ async function runAnalyticsAgent(){
   }catch(e){hideTyping();toast(e.message,'error');}
 }
 
+// ════════════════════════════════════════════
+// 🧠 INTELLIGENCE HUB — Compound AI Features
+// ════════════════════════════════════════════
+async function navigate_intelligence(){
+  S.page='intelligence';closeSidebar();
+  document.getElementById('tool-label').textContent='🧠 Intelligence Hub';
+  document.getElementById('tool-sub').textContent='Compound AI · Multi-model · Validation · Refinement';
+
+  document.getElementById('messages').innerHTML=`<div class="page-wrap ai-os-bg">
+    <div class="page-title gradient-text">🧠 Intelligence Hub</div>
+    <p style="color:var(--t2);font-size:14px;margin-bottom:24px">Compound intelligence — multiple models reasoning together with auto-validation</p>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:24px">
+      <button onclick="intelMode('multi')" class="intel-mode-card" data-mode="multi">
+        <div style="font-size:28px;margin-bottom:8px">🎭</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Multi-Model</div>
+        <div style="font-size:11px;color:var(--t3)">Multiple perspectives → synthesis</div>
+      </button>
+      <button onclick="intelMode('chain')" class="intel-mode-card" data-mode="chain">
+        <div style="font-size:28px;margin-bottom:8px">🌳</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Reasoning Chain</div>
+        <div style="font-size:11px;color:var(--t3)">Decompose → solve → synthesize</div>
+      </button>
+      <button onclick="intelMode('execute')" class="intel-mode-card" data-mode="execute">
+        <div style="font-size:28px;margin-bottom:8px">🎯</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Execute w/ Confidence</div>
+        <div style="font-size:11px;color:var(--t3)">Auto validate + refine</div>
+      </button>
+      <button onclick="intelMode('contradictions')" class="intel-mode-card" data-mode="contradictions">
+        <div style="font-size:28px;margin-bottom:8px">🔍</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Contradiction Check</div>
+        <div style="font-size:11px;color:var(--t3)">Detect inconsistencies</div>
+      </button>
+    </div>
+
+    <div id="intel-form"></div>
+    <div id="intel-output"></div>
+  </div>
+  <style>
+    .intel-mode-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:18px;text-align:left;cursor:pointer;color:var(--text);transition:.2s}
+    .intel-mode-card:hover{border-color:var(--a1);transform:translateY(-2px)}
+    .intel-mode-card.active{border-color:var(--a1);background:linear-gradient(135deg,var(--bg2),#c6f13510);box-shadow:0 0 0 1px var(--a1)40}
+  </style>`;
+
+  intelMode('multi');
+}
+
+function intelMode(mode){
+  document.querySelectorAll('.intel-mode-card').forEach(c=>{
+    c.classList.toggle('active',c.dataset.mode===mode);
+  });
+
+  const form=document.getElementById('intel-form');
+  document.getElementById('intel-output').innerHTML='';
+
+  const forms={
+    multi:`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:20px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">🎭 Multi-Model Reasoning</div>
+      <div style="font-size:12px;color:var(--t3);margin-bottom:14px">3 different perspectives reason on the same question, then a synthesizer combines them</div>
+      <textarea id="intel-prompt" placeholder="e.g. Should we build B2B or B2C first?" rows="3"
+        style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;color:var(--text);outline:none;resize:vertical;box-sizing:border-box;font-family:inherit"></textarea>
+      <input id="intel-perspectives" placeholder="analytical,pragmatic,creative" value="analytical,pragmatic,creative"
+        style="margin-top:10px;width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:8px;font-size:12px;outline:none;box-sizing:border-box"/>
+      <button onclick="runMultiModel()" style="margin-top:12px;width:100%;background:var(--grad);color:#000;border:none;padding:12px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">🎭 Run Multi-Model</button>
+    </div>`,
+    chain:`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:20px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">🌳 Reasoning Chain</div>
+      <div style="font-size:12px;color:var(--t3);margin-bottom:14px">AI decomposes the goal into steps, solves each, then synthesizes the final answer</div>
+      <textarea id="intel-prompt" placeholder="e.g. Design a complete go-to-market strategy for an AI productivity tool" rows="3"
+        style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;color:var(--text);outline:none;resize:vertical;box-sizing:border-box;font-family:inherit"></textarea>
+      <select id="intel-steps" style="margin-top:10px;width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:8px;font-size:12px;outline:none;box-sizing:border-box">
+        <option value="4">4 steps</option>
+        <option value="6" selected>6 steps</option>
+        <option value="8">8 steps</option>
+      </select>
+      <button onclick="runReasoningChain()" style="margin-top:12px;width:100%;background:var(--grad);color:#000;border:none;padding:12px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">🌳 Run Reasoning Chain</button>
+    </div>`,
+    execute:`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:20px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">🎯 Execute with Confidence</div>
+      <div style="font-size:12px;color:var(--t3);margin-bottom:14px">AI generates → auto-validates → auto-refines if score is low</div>
+      <textarea id="intel-prompt" placeholder="e.g. Write a compelling pitch for our seed round" rows="3"
+        style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;color:var(--text);outline:none;resize:vertical;box-sizing:border-box;font-family:inherit"></textarea>
+      <input id="intel-criteria" placeholder="Criteria (comma-separated)" value="specific, evidence-based, compelling"
+        style="margin-top:10px;width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:8px;font-size:12px;outline:none;box-sizing:border-box"/>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <input id="intel-min-score" type="number" value="80" min="50" max="100" placeholder="Min score"
+          style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:8px;font-size:12px;outline:none"/>
+        <input id="intel-max-refine" type="number" value="2" min="1" max="5" placeholder="Max refinements"
+          style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:8px;font-size:12px;outline:none"/>
+      </div>
+      <button onclick="runExecute()" style="margin-top:12px;width:100%;background:var(--grad);color:#000;border:none;padding:12px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">🎯 Execute</button>
+    </div>`,
+    contradictions:`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:20px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">🔍 Contradiction Check</div>
+      <div style="font-size:12px;color:var(--t3);margin-bottom:14px">Paste 2+ claims (one per line) — AI detects contradictions</div>
+      <textarea id="intel-claims" placeholder="The market is too crowded&#10;The market is wide open for newcomers&#10;Existing tools fail at user retention" rows="6"
+        style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;color:var(--text);outline:none;resize:vertical;box-sizing:border-box;font-family:inherit"></textarea>
+      <button onclick="runContradictions()" style="margin-top:12px;width:100%;background:var(--grad);color:#000;border:none;padding:12px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">🔍 Check Contradictions</button>
+    </div>`,
+  };
+  form.innerHTML=forms[mode]||'';
+}
+
+async function runMultiModel(){
+  const prompt=document.getElementById('intel-prompt')?.value?.trim();
+  if(!prompt){toast('Enter a question','error');return;}
+  const perspectives=document.getElementById('intel-perspectives').value.split(',').map(s=>s.trim()).filter(Boolean);
+
+  const out=document.getElementById('intel-output');
+  out.innerHTML='<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px;text-align:center"><div class="thinking-wave" style="display:inline-flex;margin-bottom:8px"><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div></div><div style="font-size:12px;color:var(--t2)">'+perspectives.length+' perspectives reasoning in parallel...</div></div>';
+
+  try{
+    const d=await api('/api/intelligence/multi-model',{method:'POST',body:{prompt,perspectives,synthesize:true}});
+    let html='<div style="background:linear-gradient(135deg,#c6f13520,#35f1c620);border:1px solid var(--a1);border-radius:14px;padding:20px;margin-bottom:14px">';
+    html+='<div style="font-size:11px;color:var(--a1);text-transform:uppercase;font-weight:700;margin-bottom:8px">🎯 Synthesized Answer</div>';
+    html+='<div style="font-size:14px;line-height:1.6;white-space:pre-wrap">'+esc(String(d.synthesis||''))+'</div>';
+    html+='<div style="font-size:11px;color:var(--t3);margin-top:10px">Models: '+(d.models_used||[]).join(', ')+' · '+d.duration_ms+'ms</div>';
+    html+='</div>';
+    html+='<div style="font-size:13px;font-weight:600;margin-bottom:10px">🎭 Individual Perspectives</div>';
+    (d.perspectives||[]).forEach(p=>{
+      html+='<div style="background:var(--bg2);border-left:3px solid var(--a2);border-radius:8px;padding:12px;margin-bottom:8px">';
+      html+='<div style="font-size:11px;color:var(--a2);text-transform:uppercase;font-weight:700;margin-bottom:6px">'+esc(p.perspective)+' · '+esc(p.model)+'</div>';
+      html+='<div style="font-size:13px;line-height:1.5;white-space:pre-wrap">'+esc(String(p.output).slice(0,800))+(String(p.output).length>800?'...':'')+'</div>';
+      html+='</div>';
+    });
+    out.innerHTML=html;
+  }catch(e){out.innerHTML='<div style="color:#f44;padding:20px">'+esc(e.message)+'</div>';}
+}
+
+async function runReasoningChain(){
+  const goal=document.getElementById('intel-prompt')?.value?.trim();
+  if(!goal){toast('Enter a goal','error');return;}
+  const max_steps=+document.getElementById('intel-steps').value;
+
+  const out=document.getElementById('intel-output');
+  out.innerHTML='<div id="chain-progress" style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:14px"><div class="thinking-wave"><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div></div><div id="chain-status" style="font-size:12px;color:var(--t2);margin-top:8px">Starting...</div></div><div id="chain-final"></div>';
+
+  try{
+    const resp=await fetch(API+'/api/intelligence/reasoning-chain',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.token},
+      body:JSON.stringify({goal,max_steps})
+    });
+    const reader=resp.body.getReader();
+    const decoder=new TextDecoder();
+    let buffer='';
+
+    while(true){
+      const {done,value}=await reader.read();if(done)break;
+      buffer+=decoder.decode(value,{stream:true});
+      const lines=buffer.split('\n');buffer=lines.pop()||'';
+      for(const line of lines){
+        if(!line.startsWith('data: '))continue;
+        try{
+          const d=JSON.parse(line.slice(6));
+          const status=document.getElementById('chain-status');
+          if(d.type==='start'&&status)status.textContent='🧠 Decomposing goal into steps...';
+          if(d.type==='plan'&&status){
+            status.textContent='📋 Plan ready: '+(d.plan.steps||[]).length+' steps. Executing...';
+          }
+          if(d.type==='steps_executed'&&status){
+            status.textContent='✓ Executed '+d.count+' steps. Synthesizing...';
+          }
+          if(d.type==='done'){
+            const final=document.getElementById('chain-final');
+            const cp=document.getElementById('chain-progress');
+            if(cp)cp.style.display='none';
+            let html='<div style="background:linear-gradient(135deg,#c6f13520,#35f1c620);border:1px solid var(--a1);border-radius:14px;padding:20px;margin-bottom:14px">';
+            html+='<div style="font-size:11px;color:var(--a1);text-transform:uppercase;font-weight:700;margin-bottom:8px">🎯 Final Answer</div>';
+            html+='<div style="font-size:14px;line-height:1.6;white-space:pre-wrap">'+esc(String(d.final_answer||''))+'</div>';
+            html+='</div>';
+            html+='<div style="font-size:13px;font-weight:600;margin:14px 0 10px">🌳 Reasoning Steps</div>';
+            (d.plan?.steps||[]).forEach((s,i)=>{
+              const result=d.step_results?.[s.id]||'';
+              html+='<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:8px">';
+              html+='<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><div style="width:24px;height:24px;border-radius:50%;background:var(--grad);color:#000;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px">'+s.id+'</div><div style="font-size:13px;font-weight:600">'+esc(s.task)+'</div></div>';
+              html+='<div style="background:var(--bg3);border-radius:6px;padding:10px;font-size:12px;color:var(--t2);max-height:200px;overflow:auto;white-space:pre-wrap">'+esc(String(result).slice(0,1500))+(String(result).length>1500?'...':'')+'</div>';
+              html+='</div>';
+            });
+            if(final)final.innerHTML=html;
+          }
+          if(d.type==='error'){toast('❌ '+d.message,'error');}
+        }catch(_){}
+      }
+    }
+  }catch(e){toast('❌ '+e.message,'error');}
+}
+
+async function runExecute(){
+  const prompt=document.getElementById('intel-prompt')?.value?.trim();
+  if(!prompt){toast('Enter prompt','error');return;}
+  const criteria=document.getElementById('intel-criteria').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const min_score=+document.getElementById('intel-min-score').value;
+  const max_refinements=+document.getElementById('intel-max-refine').value;
+
+  const out=document.getElementById('intel-output');
+  out.innerHTML='<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px;text-align:center"><div class="thinking-wave" style="display:inline-flex"><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div></div><div style="font-size:12px;color:var(--t2);margin-top:8px">Generating → validating → refining if needed...</div></div>';
+
+  try{
+    const d=await api('/api/intelligence/execute',{method:'POST',body:{prompt,criteria,min_score,max_refinements}});
+    let html='<div style="background:linear-gradient(135deg,#c6f13520,#35f1c620);border:1px solid var(--a1);border-radius:14px;padding:20px;margin-bottom:14px">';
+    html+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">';
+    html+='<div style="font-size:11px;color:var(--a1);text-transform:uppercase;font-weight:700">🎯 Final Output</div>';
+    html+='<div style="margin-left:auto;display:flex;gap:8px"><span style="font-size:11px;background:var(--bg2);padding:3px 8px;border-radius:99px">Confidence: <strong style="color:var(--a1)">'+d.confidence+'/100</strong></span>';
+    if(d.refined)html+='<span style="font-size:11px;background:var(--bg2);padding:3px 8px;border-radius:99px">🔁 Refined '+d.refinement_iterations+'x</span>';
+    html+='<span style="font-size:11px;background:var(--bg2);padding:3px 8px;border-radius:99px">'+d.model+'</span></div></div>';
+    html+='<div style="font-size:14px;line-height:1.6;white-space:pre-wrap">'+esc(typeof d.output==='string'?d.output:JSON.stringify(d.output,null,2))+'</div>';
+    html+='</div>';
+    if(d.validation){
+      html+='<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px">';
+      html+='<div style="font-size:13px;font-weight:600;margin-bottom:8px">📊 Validation Report</div>';
+      if(d.validation.strengths?.length)html+='<div style="margin-bottom:8px"><div style="font-size:11px;color:var(--a1);font-weight:700;margin-bottom:4px">✅ STRENGTHS</div>'+d.validation.strengths.map(s=>'<div style="font-size:12px;padding:2px 0">• '+esc(s)+'</div>').join('')+'</div>';
+      if(d.validation.weaknesses?.length)html+='<div style="margin-bottom:8px"><div style="font-size:11px;color:#fbbf24;font-weight:700;margin-bottom:4px">⚠️ WEAKNESSES</div>'+d.validation.weaknesses.map(s=>'<div style="font-size:12px;padding:2px 0">• '+esc(s)+'</div>').join('')+'</div>';
+      html+='</div>';
+    }
+    out.innerHTML=html;
+  }catch(e){out.innerHTML='<div style="color:#f44;padding:20px">'+esc(e.message)+'</div>';}
+}
+
+async function runContradictions(){
+  const text=document.getElementById('intel-claims')?.value?.trim();
+  if(!text){toast('Enter claims','error');return;}
+  const claims=text.split('\n').map(s=>s.trim()).filter(Boolean);
+  if(claims.length<2){toast('Need at least 2 claims','error');return;}
+
+  const out=document.getElementById('intel-output');
+  out.innerHTML='<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px;text-align:center"><div class="thinking-wave" style="display:inline-flex"><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div></div></div>';
+
+  try{
+    const d=await api('/api/intelligence/contradictions',{method:'POST',body:{claims}});
+    let html='<div style="background:'+(d.has_contradictions?'#f4444420':'#c6f13520')+';border:1px solid '+(d.has_contradictions?'#f44':'var(--a1)')+';border-radius:14px;padding:20px;margin-bottom:14px">';
+    html+='<div style="font-size:16px;font-weight:700;margin-bottom:8px">'+(d.has_contradictions?'⚠️ Contradictions Found':'✅ No Contradictions')+'</div>';
+    if(d.resolution)html+='<div style="font-size:13px;color:var(--t2);line-height:1.5">'+esc(d.resolution)+'</div>';
+    html+='</div>';
+    if(d.contradictions?.length){
+      html+='<div style="font-size:13px;font-weight:600;margin-bottom:10px">🔍 Conflicts</div>';
+      d.contradictions.forEach(c=>{
+        html+='<div style="background:var(--bg2);border-left:3px solid #f44;border-radius:8px;padding:12px;margin-bottom:8px">';
+        html+='<div style="font-size:12px;font-weight:600;margin-bottom:6px">Claim '+c.claim_a+' ↔ Claim '+c.claim_b+'</div>';
+        html+='<div style="font-size:12px;color:var(--t2);line-height:1.4">'+esc(c.explanation)+'</div>';
+        html+='</div>';
+      });
+    }
+    if(d.consistent_claims?.length){
+      html+='<div style="font-size:13px;font-weight:600;margin:14px 0 10px">✅ Consistent</div>';
+      html+='<div style="background:var(--bg2);border-radius:8px;padding:12px"><div style="font-size:12px;color:var(--t2)">Claims: '+d.consistent_claims.join(', ')+'</div></div>';
+    }
+    out.innerHTML=html;
+  }catch(e){out.innerHTML='<div style="color:#f44;padding:20px">'+esc(e.message)+'</div>';}
+}
+
+// ════════════════════════════════════════════
+// 🤖 AI WORKFORCE — 16 specialized agents
+// ════════════════════════════════════════════
+async function navigate_workforce(){
+  S.page='workforce';closeSidebar();
+  document.getElementById('tool-label').textContent='🤖 AI Workforce';
+  document.getElementById('tool-sub').textContent='16 specialized AI employees';
+
+  let agents=[];
+  try{const d=await api('/api/intelligence/agents');agents=d.agents||[];}catch(_){}
+
+  document.getElementById('messages').innerHTML=`<div class="page-wrap ai-os-bg">
+    <div class="page-title gradient-text">🤖 AI Workforce</div>
+    <p style="color:var(--t2);font-size:14px;margin-bottom:24px">Your team of ${agents.length} specialized AI employees — pick one or let the system decide</p>
+
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:20px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px">🎯 Auto-Pick Mode</div>
+      <div style="font-size:12px;color:var(--t3);margin-bottom:12px">Describe the task — system picks the best agent</div>
+      <input id="wf-task" placeholder="e.g. Write a React login component"
+        style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:12px;border-radius:10px;font-size:13px;outline:none;box-sizing:border-box;margin-bottom:10px"/>
+      <button onclick="autoPickAgent()" style="width:100%;background:linear-gradient(135deg,#7c3aed,#06b6d4);color:#fff;border:none;padding:12px;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">🎯 Auto-Pick & Run</button>
+    </div>
+
+    <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--t2)">👥 ALL AGENTS</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:24px">
+      ${agents.map(a=>`<button class="wf-agent-card" onclick="openAgent('${a.key}','${esc(a.name).replace(/'/g,'')}')">
+        <div style="font-size:28px;margin-bottom:6px">${a.emoji||'🤖'}</div>
+        <div style="font-size:12px;font-weight:600;margin-bottom:2px">${esc(a.name)}</div>
+        <div style="font-size:10px;color:var(--t3);line-height:1.3">${esc(a.role)}</div>
+      </button>`).join('')}
+    </div>
+
+    <div id="wf-output"></div>
+  </div>
+  <style>
+    .wf-agent-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center;cursor:pointer;color:var(--text);transition:.2s}
+    .wf-agent-card:hover{border-color:var(--a1);transform:translateY(-2px);box-shadow:0 6px 20px var(--a1)20}
+  </style>`;
+}
+
+function openAgent(agentKey, agentName){
+  const out=document.getElementById('wf-output');
+  out.innerHTML=`<div style="background:var(--bg2);border:1px solid var(--a1);border-radius:14px;padding:20px;margin-bottom:14px">
+    <div style="font-size:14px;font-weight:600;margin-bottom:12px">💼 Working with: ${esc(agentName)}</div>
+    <textarea id="wf-prompt" rows="4" placeholder="What do you want this agent to do?"
+      style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;color:var(--text);outline:none;resize:vertical;box-sizing:border-box;font-family:inherit"></textarea>
+    <button onclick="runWorkforceAgent('${agentKey}','${esc(agentName).replace(/'/g,'')}')" style="margin-top:12px;width:100%;background:var(--grad);color:#000;border:none;padding:12px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">⚡ Run Agent</button>
+  </div>
+  <div id="wf-result"></div>`;
+  document.getElementById('wf-prompt')?.focus();
+}
+
+async function runWorkforceAgent(agentKey, agentName){
+  const prompt=document.getElementById('wf-prompt')?.value?.trim();
+  if(!prompt){toast('Enter a task','error');return;}
+
+  const result=document.getElementById('wf-result');
+  result.innerHTML='<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px;text-align:center"><div class="thinking-wave" style="display:inline-flex"><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div><div class="thinking-bar"></div></div><div style="font-size:12px;color:var(--t2);margin-top:8px">'+esc(agentName)+' is working...</div></div>';
+
+  try{
+    const d=await api('/api/intelligence/agent/'+agentKey,{method:'POST',body:{prompt}});
+    let html='<div style="background:linear-gradient(135deg,var(--bg2),var(--bg3));border:1px solid var(--a1);border-radius:14px;padding:20px;margin-bottom:14px">';
+    html+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">';
+    html+='<div style="font-size:32px">'+esc(d.emoji||'🤖')+'</div>';
+    html+='<div style="flex:1"><div style="font-size:14px;font-weight:600">'+esc(d.name)+'</div><div style="font-size:11px;color:var(--t3)">'+esc(d.role)+'</div></div>';
+    html+='<div style="font-size:11px;color:var(--t3)">'+(d.duration_ms||0)+'ms · '+esc(d.provider||'')+'/'+esc(d.model||'')+'</div></div>';
+    html+='<div style="background:var(--bg);border-radius:10px;padding:14px;font-size:13px;line-height:1.6;white-space:pre-wrap;max-height:600px;overflow:auto">';
+    html+=esc(typeof d.output==='string'?d.output:JSON.stringify(d.output,null,2));
+    html+='</div></div>';
+    result.innerHTML=html;
+  }catch(e){result.innerHTML='<div style="color:#f44;padding:20px">'+esc(e.message)+'</div>';}
+}
+
+async function autoPickAgent(){
+  const task=document.getElementById('wf-task')?.value?.trim();
+  if(!task){toast('Describe the task','error');return;}
+
+  try{
+    const d=await api('/api/intelligence/agent-pick',{method:'POST',body:{task_description:task}});
+    toast('🎯 Picked: '+(d.details?.name||d.agent),'success');
+    openAgent(d.agent, d.details?.name || d.agent);
+    document.getElementById('wf-prompt').value=task;
+    setTimeout(()=>runWorkforceAgent(d.agent, d.details?.name || d.agent),200);
+  }catch(e){toast(e.message,'error');}
+}
+
+// ════════════════════════════════════════════
+// 📊 OBSERVATORY — Live system monitoring
+// ════════════════════════════════════════════
+let _observatoryInterval=null;
+
+async function navigate_observatory(){
+  S.page='observatory';closeSidebar();
+  document.getElementById('tool-label').textContent='📊 Observatory';
+  document.getElementById('tool-sub').textContent='Live system observability';
+
+  document.getElementById('messages').innerHTML=`<div class="page-wrap ai-os-bg">
+    <div class="page-title gradient-text">📊 Observatory</div>
+    <p style="color:var(--t2);font-size:14px;margin-bottom:24px">Live metrics · Circuit breakers · Memory · Cache</p>
+
+    <div id="obs-overview" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:24px"></div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;grid-template-areas:'a b' 'c d'" id="obs-grid"></div>
+
+    <div style="text-align:center;margin-top:10px">
+      <button onclick="refreshObservatory()" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:8px 16px;border-radius:8px;font-size:12px;cursor:pointer">🔄 Refresh</button>
+      <button onclick="toggleObsAuto()" id="obs-auto-btn" style="margin-left:8px;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:8px 16px;border-radius:8px;font-size:12px;cursor:pointer">▶️ Auto-refresh</button>
+    </div>
+  </div>
+  <style>
+    .obs-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px}
+    .obs-card-title{font-size:13px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+    .obs-stat{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)}
+    .obs-stat:last-child{border-bottom:none}
+    .obs-stat-name{font-size:12px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%}
+    .obs-stat-value{font-size:12px;color:var(--text);font-weight:600}
+    .obs-mini{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center}
+    .obs-mini-num{font-size:22px;font-weight:700;color:var(--a1);margin-bottom:4px}
+    .obs-mini-lbl{font-size:11px;color:var(--t3)}
+    .breaker-state{display:inline-block;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700;text-transform:uppercase}
+    .breaker-state.CLOSED{background:#c6f13520;color:#c6f135}
+    .breaker-state.OPEN{background:#f4444420;color:#f44}
+    .breaker-state.HALF_OPEN{background:#fbbf2420;color:#fbbf24}
+  </style>`;
+
+  refreshObservatory();
+}
+
+async function refreshObservatory(){
+  try{
+    const [health,metrics,breakers,memStats,cacheStats] = await Promise.all([
+      api('/api/core/health').catch(()=>({})),
+      api('/api/intelligence/metrics').catch(()=>({counters:{},histograms:{},gauges:{}})),
+      api('/api/intelligence/breakers').catch(()=>({breakers:[]})),
+      api('/api/intelligence/memory/stats').catch(()=>({})),
+      api('/api/core/cache/stats').catch(()=>({})),
+    ]);
+
+    // Overview
+    const ov=document.getElementById('obs-overview');
+    if(ov){
+      const aiCalls=(metrics.counters||{})['ai_calls_total{task=auto}']||0;
+      const aiSuccess=Object.entries(metrics.counters||{}).filter(([k])=>k.startsWith('ai_calls_success')).reduce((s,[,v])=>s+v,0);
+      const aiCached=metrics.counters?.ai_calls_cached||0;
+      const errors=metrics.counters?.errors_total||0;
+      ov.innerHTML=`
+        <div class="obs-mini"><div class="obs-mini-num">${health.uptime_seconds?Math.floor(health.uptime_seconds/60)+'m':'?'}</div><div class="obs-mini-lbl">Uptime</div></div>
+        <div class="obs-mini"><div class="obs-mini-num">${health.memory?.heap_used_mb||'?'}</div><div class="obs-mini-lbl">Heap MB</div></div>
+        <div class="obs-mini"><div class="obs-mini-num">${aiCalls+aiSuccess}</div><div class="obs-mini-lbl">AI calls</div></div>
+        <div class="obs-mini"><div class="obs-mini-num">${aiCached}</div><div class="obs-mini-lbl">Cache hits</div></div>
+        <div class="obs-mini"><div class="obs-mini-num" style="color:${errors>0?'#f44':'var(--a1)'}">${errors}</div><div class="obs-mini-lbl">Errors</div></div>
+        <div class="obs-mini"><div class="obs-mini-num">${cacheStats.hit_rate||'0%'}</div><div class="obs-mini-lbl">Hit rate</div></div>
+      `;
+    }
+
+    // Grid: 4 cards
+    const grid=document.getElementById('obs-grid');
+    if(grid){
+      // Cache stats card
+      const cacheCard=`<div class="obs-card">
+        <div class="obs-card-title">⚡ Cache</div>
+        <div class="obs-stat"><span class="obs-stat-name">Memory size</span><span class="obs-stat-value">${cacheStats.memory_size||0}/${cacheStats.max_memory||500}</span></div>
+        <div class="obs-stat"><span class="obs-stat-name">Total hits</span><span class="obs-stat-value">${cacheStats.hits||0}</span></div>
+        <div class="obs-stat"><span class="obs-stat-name">Total misses</span><span class="obs-stat-value">${cacheStats.misses||0}</span></div>
+        <div class="obs-stat"><span class="obs-stat-name">Hit rate</span><span class="obs-stat-value" style="color:var(--a1)">${cacheStats.hit_rate||'0%'}</span></div>
+        <div class="obs-stat"><span class="obs-stat-name">Redis</span><span class="obs-stat-value">${cacheStats.redis_available?'✅ connected':'⚠️ memory only'}</span></div>
+      </div>`;
+
+      // Memory stats
+      const memCard=`<div class="obs-card">
+        <div class="obs-card-title">🧠 Memory</div>
+        <div class="obs-stat"><span class="obs-stat-name">Long-term memories</span><span class="obs-stat-value">${memStats.memories||0}</span></div>
+        <div class="obs-stat"><span class="obs-stat-name">Graph nodes</span><span class="obs-stat-value">${memStats.graph_nodes||0}</span></div>
+        <div class="obs-stat"><span class="obs-stat-name">Graph edges</span><span class="obs-stat-value">${memStats.graph_edges||0}</span></div>
+        <div class="obs-stat"><span class="obs-stat-name">Workflows</span><span class="obs-stat-value">${memStats.workflows||0}</span></div>
+      </div>`;
+
+      // Circuit breakers
+      const breakersList=(breakers.breakers||[]).map(b=>`<div class="obs-stat">
+        <span class="obs-stat-name">${esc(b.name)}</span>
+        <span><span class="breaker-state ${b.state}">${b.state}</span> <span class="obs-stat-value">${b.success_rate||'N/A'}</span></span>
+      </div>`).join('');
+      const brCard=`<div class="obs-card">
+        <div class="obs-card-title">🛡️ Circuit Breakers</div>
+        ${breakersList||'<div class="obs-stat-name">No breakers</div>'}
+      </div>`;
+
+      // AI metrics histogram
+      const histRows=Object.entries(metrics.histograms||{}).slice(0,5).map(([k,v])=>`<div class="obs-stat">
+        <span class="obs-stat-name">${esc(k.split('{')[0])}</span>
+        <span class="obs-stat-value">p95: ${Math.round(v.p95)}ms · avg: ${Math.round(v.avg)}ms</span>
+      </div>`).join('');
+      const metCard=`<div class="obs-card">
+        <div class="obs-card-title">📊 Latency (p95)</div>
+        ${histRows||'<div class="obs-stat-name">No data yet — make some calls</div>'}
+      </div>`;
+
+      grid.innerHTML=cacheCard+memCard+brCard+metCard;
+    }
+  }catch(e){toast(e.message,'error');}
+}
+
+function toggleObsAuto(){
+  const btn=document.getElementById('obs-auto-btn');
+  if(_observatoryInterval){
+    clearInterval(_observatoryInterval);
+    _observatoryInterval=null;
+    if(btn)btn.textContent='▶️ Auto-refresh';
+  }else{
+    _observatoryInterval=setInterval(refreshObservatory,5000);
+    if(btn)btn.textContent='⏸️ Stop';
+  }
+}
+
 // ── 📊 SYSTEM HEALTH (Production monitoring) ──
 async function navigate_health(){
   S.page='health';closeSidebar();
