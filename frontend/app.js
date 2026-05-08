@@ -2751,7 +2751,17 @@ async function navigate_observatory(){
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;grid-template-areas:'a b' 'c d'" id="obs-grid"></div>
 
-    <div style="text-align:center;margin-top:10px">
+    <div style="margin-top:24px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--t2)">🔌 PROVIDER ANALYTICS</div>
+      <div id="obs-providers"></div>
+    </div>
+
+    <div style="margin-top:24px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--t2)">🔬 RECENT TRACES</div>
+      <div id="obs-traces"></div>
+    </div>
+
+    <div style="text-align:center;margin-top:18px">
       <button onclick="refreshObservatory()" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:8px 16px;border-radius:8px;font-size:12px;cursor:pointer">🔄 Refresh</button>
       <button onclick="toggleObsAuto()" id="obs-auto-btn" style="margin-left:8px;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:8px 16px;border-radius:8px;font-size:12px;cursor:pointer">▶️ Auto-refresh</button>
     </div>
@@ -2775,37 +2785,83 @@ async function navigate_observatory(){
   refreshObservatory();
 }
 
+async function viewTrace(traceId){
+  try{
+    const d=await api('/api/system/traces/'+encodeURIComponent(traceId));
+    const spans=d.spans||[];
+    if(!spans.length){toast('No spans in trace','error');return;}
+
+    const rootStart=Math.min(...spans.map(s=>s.start));
+    const totalDuration=Math.max(...spans.map(s=>(s.end||Date.now()))) - rootStart;
+
+    let html=`<div style="position:fixed;inset:0;background:#000c;backdrop-filter:blur(8px);z-index:9999;padding:24px;overflow:auto" onclick="if(event.target===this)this.remove()">
+      <div style="max-width:900px;margin:0 auto;background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <div>
+            <div style="font-size:16px;font-weight:700">🔬 Trace Details</div>
+            <div style="font-size:11px;color:var(--t3);font-family:monospace">${esc(traceId)}</div>
+          </div>
+          <button onclick="this.closest('[style*=fixed]').remove()" style="background:var(--bg3);border:none;color:var(--text);width:32px;height:32px;border-radius:50%;cursor:pointer">✕</button>
+        </div>
+        <div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:14px;font-size:11px;color:var(--t3)">
+          ${spans.length} spans · ${totalDuration}ms total
+        </div>
+        <div class="trace-timeline" style="cursor:default">`;
+
+    spans.forEach(s=>{
+      const startPct=((s.start-rootStart)/(totalDuration||1))*100;
+      const widthPct=Math.max(((s.duration_ms||10)/(totalDuration||1))*100, 2);
+      const cached=s.attrs?.cache_hit;
+      const status=s.status==='error'?'error':(cached?'cached':'ok');
+      html+=`<div class="trace-span">
+        <div class="trace-span-label">${esc(s.operation)}${s.attrs?.provider?` · ${esc(s.attrs.provider)}`:''}</div>
+        <div class="trace-span-bar">
+          <div class="trace-span-fill" data-status="${status}" style="left:${startPct}%;width:${widthPct}%"></div>
+        </div>
+        <div class="trace-span-duration">${s.duration_ms||0}ms</div>
+      </div>`;
+      if(s.attrs?.model){
+        html+=`<div style="font-size:10px;color:var(--t3);padding-left:120px;margin-bottom:4px">model: ${esc(s.attrs.model)}${s.attrs.input_tokens?` · ${s.attrs.input_tokens}→${s.attrs.output_tokens||'?'} tokens`:''}${cached?' · cached':''}</div>`;
+      }
+    });
+
+    html+='</div></div></div>';
+    document.body.insertAdjacentHTML('beforeend',html);
+  }catch(e){toast(e.message,'error');}
+}
+
 async function refreshObservatory(){
   try{
-    const [health,metrics,breakers,memStats,cacheStats] = await Promise.all([
+    const [health,metrics,breakers,memStats,cacheStats,traces,providers,events] = await Promise.all([
       api('/api/core/health').catch(()=>({})),
       api('/api/intelligence/metrics').catch(()=>({counters:{},histograms:{},gauges:{}})),
       api('/api/intelligence/breakers').catch(()=>({breakers:[]})),
       api('/api/intelligence/memory/stats').catch(()=>({})),
       api('/api/core/cache/stats').catch(()=>({})),
+      api('/api/system/traces?limit=20').catch(()=>({traces:[]})),
+      api('/api/system/adaptive/provider-stats').catch(()=>({providers:[]})),
+      api('/api/system/events/stats').catch(()=>({})),
     ]);
 
     // Overview
     const ov=document.getElementById('obs-overview');
     if(ov){
-      const aiCalls=(metrics.counters||{})['ai_calls_total{task=auto}']||0;
-      const aiSuccess=Object.entries(metrics.counters||{}).filter(([k])=>k.startsWith('ai_calls_success')).reduce((s,[,v])=>s+v,0);
+      const aiCalls=Object.entries(metrics.counters||{}).filter(([k])=>k.startsWith('ai_calls_total')).reduce((s,[,v])=>s+v,0);
       const aiCached=metrics.counters?.ai_calls_cached||0;
       const errors=metrics.counters?.errors_total||0;
       ov.innerHTML=`
         <div class="obs-mini"><div class="obs-mini-num">${health.uptime_seconds?Math.floor(health.uptime_seconds/60)+'m':'?'}</div><div class="obs-mini-lbl">Uptime</div></div>
         <div class="obs-mini"><div class="obs-mini-num">${health.memory?.heap_used_mb||'?'}</div><div class="obs-mini-lbl">Heap MB</div></div>
-        <div class="obs-mini"><div class="obs-mini-num">${aiCalls+aiSuccess}</div><div class="obs-mini-lbl">AI calls</div></div>
+        <div class="obs-mini"><div class="obs-mini-num">${aiCalls}</div><div class="obs-mini-lbl">AI calls</div></div>
         <div class="obs-mini"><div class="obs-mini-num">${aiCached}</div><div class="obs-mini-lbl">Cache hits</div></div>
         <div class="obs-mini"><div class="obs-mini-num" style="color:${errors>0?'#f44':'var(--a1)'}">${errors}</div><div class="obs-mini-lbl">Errors</div></div>
         <div class="obs-mini"><div class="obs-mini-num">${cacheStats.hit_rate||'0%'}</div><div class="obs-mini-lbl">Hit rate</div></div>
       `;
     }
 
-    // Grid: 4 cards
+    // Grid: 4 cards + tracing + provider stats
     const grid=document.getElementById('obs-grid');
     if(grid){
-      // Cache stats card
       const cacheCard=`<div class="obs-card">
         <div class="obs-card-title">⚡ Cache</div>
         <div class="obs-stat"><span class="obs-stat-name">Memory size</span><span class="obs-stat-value">${cacheStats.memory_size||0}/${cacheStats.max_memory||500}</span></div>
@@ -2815,7 +2871,6 @@ async function refreshObservatory(){
         <div class="obs-stat"><span class="obs-stat-name">Redis</span><span class="obs-stat-value">${cacheStats.redis_available?'✅ connected':'⚠️ memory only'}</span></div>
       </div>`;
 
-      // Memory stats
       const memCard=`<div class="obs-card">
         <div class="obs-card-title">🧠 Memory</div>
         <div class="obs-stat"><span class="obs-stat-name">Long-term memories</span><span class="obs-stat-value">${memStats.memories||0}</span></div>
@@ -2824,7 +2879,6 @@ async function refreshObservatory(){
         <div class="obs-stat"><span class="obs-stat-name">Workflows</span><span class="obs-stat-value">${memStats.workflows||0}</span></div>
       </div>`;
 
-      // Circuit breakers
       const breakersList=(breakers.breakers||[]).map(b=>`<div class="obs-stat">
         <span class="obs-stat-name">${esc(b.name)}</span>
         <span><span class="breaker-state ${b.state}">${b.state}</span> <span class="obs-stat-value">${b.success_rate||'N/A'}</span></span>
@@ -2834,7 +2888,6 @@ async function refreshObservatory(){
         ${breakersList||'<div class="obs-stat-name">No breakers</div>'}
       </div>`;
 
-      // AI metrics histogram
       const histRows=Object.entries(metrics.histograms||{}).slice(0,5).map(([k,v])=>`<div class="obs-stat">
         <span class="obs-stat-name">${esc(k.split('{')[0])}</span>
         <span class="obs-stat-value">p95: ${Math.round(v.p95)}ms · avg: ${Math.round(v.avg)}ms</span>
@@ -2845,6 +2898,41 @@ async function refreshObservatory(){
       </div>`;
 
       grid.innerHTML=cacheCard+memCard+brCard+metCard;
+    }
+
+    // Provider analytics
+    const provDiv=document.getElementById('obs-providers');
+    if(provDiv){
+      const provs=providers.providers||{};
+      const provHtml=Object.entries(provs).map(([name,p])=>`
+        <div class="provider-card">
+          <div class="provider-header">
+            <div style="font-size:18px">${name==='openai'?'🤖':name==='anthropic'?'🧠':name==='deepseek'?'⚡':'🔌'}</div>
+            <div class="provider-name">${esc(name)}</div>
+            <div class="provider-stat">${p.calls} calls · ${p.avg_ms}ms avg · <span style="color:${p.errors>0?'#f44':'var(--a1)'}">${p.error_rate}</span></div>
+          </div>
+          <div class="provider-models">
+            ${Object.entries(p.models||{}).map(([m,mStats])=>`<div class="provider-model">
+              <span style="color:var(--t3)">${esc(m)}</span>
+              <span>${mStats.calls} · ${mStats.avg_ms}ms · ${mStats.error_rate}</span>
+            </div>`).join('')}
+          </div>
+        </div>`).join('');
+      provDiv.innerHTML=provHtml||'<div style="color:var(--t3);text-align:center;padding:14px;font-size:12px">No provider data yet</div>';
+    }
+
+    // Recent traces
+    const tracesDiv=document.getElementById('obs-traces');
+    if(tracesDiv){
+      const tracesList=(traces.traces||[]).slice(0,10).map(t=>`
+        <div class="trace-timeline" onclick="viewTrace('${esc(t.trace_id)}')" style="cursor:pointer;transition:.2s" onmouseover="this.style.borderColor='var(--a1)'" onmouseout="this.style.borderColor='var(--border)'">
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+            <span style="font-size:12px;color:var(--text);font-weight:600">${esc(t.operation||'unknown')}</span>
+            <span style="font-size:10px;color:var(--t3)">${t.spans} spans · ${t.total_duration_ms}ms${t.errors>0?` · <span style="color:#f44">${t.errors} err</span>`:''}</span>
+          </div>
+          <div style="font-size:10px;color:var(--t3)">${esc(t.trace_id)}</div>
+        </div>`).join('');
+      tracesDiv.innerHTML=tracesList||'<div style="color:var(--t3);text-align:center;padding:14px;font-size:12px">No traces yet</div>';
     }
   }catch(e){toast(e.message,'error');}
 }
@@ -2966,12 +3054,54 @@ async function runOnePrompt(){
       </div>
       <div id="op-phase" style="font-size:12px;color:var(--t2)">Initializing</div>
     </div>
+    <div id="op-dag-canvas" class="dag-canvas" style="display:none;margin-bottom:14px"></div>
     <div id="op-nodes" style="display:flex;flex-direction:column;gap:8px"></div>
     <div id="op-final"></div>
   `;
 
   const nodeStates={};
+  const nodeIcons={
+    strategy:'👔', product_spec:'📦', design:'🎨',
+    backend:'💻', frontend:'🖥️', marketing:'📢', deploy_config:'🚀',
+    research:'🔬', analysis:'📊', report:'📝',
+    plan:'📋', code:'💻', tests:'🧪', response:'💬',
+  };
+  let dagShown=false;
   let projectId=null;
+
+  function ensureDag(){
+    if(dagShown)return;
+    const canvas=document.getElementById('op-dag-canvas');
+    if(canvas){canvas.style.display='block';dagShown=true;}
+  }
+
+  function renderNode(node, status){
+    nodeStates[node]=status;
+    const canvas=document.getElementById('op-dag-canvas');
+    if(!canvas)return;
+
+    let nodeEl=document.getElementById('dag-'+node);
+    if(!nodeEl){
+      // Group nodes into a single layer for now — can be enhanced with topological detection
+      let layer=canvas.querySelector('.dag-layer');
+      if(!layer){
+        layer=document.createElement('div');
+        layer.className='dag-layer';
+        canvas.appendChild(layer);
+      }
+      nodeEl=document.createElement('div');
+      nodeEl.id='dag-'+node;
+      nodeEl.className='dag-node';
+      nodeEl.innerHTML=`<div class="dag-node-pulse"></div>
+        <div class="dag-node-icon">${nodeIcons[node]||'⚡'}</div>
+        <div class="dag-node-name">${esc(node.replace(/_/g,' '))}</div>
+        <div class="dag-node-status" id="dag-status-${node}">${status}</div>`;
+      layer.appendChild(nodeEl);
+    }
+    nodeEl.dataset.status=status;
+    const st=document.getElementById('dag-status-'+node);
+    if(st)st.textContent=status;
+  }
 
   try{
     const resp=await fetch(API+'/api/core/one-prompt',{
@@ -3014,8 +3144,10 @@ async function runOnePrompt(){
             const nodes=document.getElementById('op-nodes');
 
             if(e.type==='node_start'){
-              if(!nodeStates[e.node]){
-                nodeStates[e.node]=true;
+              ensureDag();
+              renderNode(e.node,'running');
+              if(!nodeStates['_card_'+e.node]){
+                nodeStates['_card_'+e.node]=true;
                 const card=document.createElement('div');
                 card.id='op-node-'+e.node;
                 card.style.cssText='background:var(--bg2);border:1px solid var(--a2);border-radius:10px;padding:12px;display:flex;align-items:center;gap:12px;animation:msgIn .3s ease';
@@ -3023,20 +3155,21 @@ async function runOnePrompt(){
                   <div style="flex:1"><div style="font-size:13px;font-weight:600">${esc(e.node.replace(/_/g,' '))}</div>
                   <div id="op-meta-${e.node}" style="font-size:11px;color:var(--t3)">running...</div></div>`;
                 nodes.appendChild(card);
-                nodes.scrollIntoView({behavior:'smooth',block:'end'});
               }
             }
 
             if(e.type==='node_done'){
+              renderNode(e.node, e.cached?'cached':'done');
               const icon=document.getElementById('op-icon-'+e.node);
               const meta=document.getElementById('op-meta-'+e.node);
               const card=document.getElementById('op-node-'+e.node);
-              if(icon)icon.textContent='✅';
-              if(meta)meta.innerHTML=`<span style="color:var(--a1)">${e.cached?'cached':'completed'}</span> · ${e.model} · ${e.duration_ms}ms`;
-              if(card)card.style.borderColor='var(--a1)';
+              if(icon)icon.textContent=e.cached?'⚡':'✅';
+              if(meta)meta.innerHTML=`<span style="color:var(--a1)">${e.cached?'cached':'completed'}</span> · ${esc(e.provider||'')+'/'+esc(e.model||'')} · ${e.duration_ms}ms`;
+              if(card)card.style.borderColor=e.cached?'#7c3aed':'var(--a1)';
             }
 
             if(e.type==='node_error'){
+              renderNode(e.node,'error');
               const meta=document.getElementById('op-meta-'+e.node);
               if(meta)meta.innerHTML=`<span style="color:#fbbf24">retry ${e.attempt}: ${esc(e.error)}</span>`;
             }

@@ -3126,6 +3126,14 @@ try{
 }catch(e){console.warn('⚠️ Intelligence routes:', e.message);}
 
 try{
+  const systemRoute = require('./routes/system');
+  if (services) {
+    app.use('/api/system', systemRoute(db, services, requireAuth, wrap));
+    console.log('✅ System Observatory loaded (tracer + events + adaptive)');
+  }
+}catch(e){console.warn('⚠️ System routes:', e.message);}
+
+try{
   const deployRoute = require('./routes/deploy-engine');
   app.use('/api/deploy', deployRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap));
   console.log('✅ Real Deploy Engine loaded (GitHub + Vercel + Railway + DNS)');
