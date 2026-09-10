@@ -1,6 +1,13 @@
 node_modules/
+dist/
+*.log
 .env
-*.db
-*.db-wal
-*.db-shm
+.env.local
+nexusai.db
+nexusai.db-journal
+nexusai.db-wal
+nexusai.db-shm
+backups/*.db
+playwright-report/
+test-results/
 .DS_Store

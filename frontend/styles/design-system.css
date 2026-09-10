@@ -1,0 +1,466 @@
+/* ============================================================
+   🌌 NexusAI Elite Design System
+   Cinematic motion · AI presence · Premium materials · Adaptive
+   Layered on top of style.css — does not override base tokens.
+   ============================================================ */
+
+/* ─── Extended design tokens ───────────────────── */
+:root {
+  /* Motion timing — physically believable easings */
+  --ease-out-soft:    cubic-bezier(.16,1,.3,1);
+  --ease-out-expo:    cubic-bezier(.19,1,.22,1);
+  --ease-in-out-soft: cubic-bezier(.65,0,.35,1);
+  --ease-magnetic:    cubic-bezier(.2,.8,.2,1);
+  --ease-elastic:     cubic-bezier(.34,1.56,.64,1);
+
+  /* Duration scale */
+  --dur-instant: 80ms;
+  --dur-fast:    180ms;
+  --dur-base:    260ms;
+  --dur-slow:    420ms;
+  --dur-cine:    680ms;
+
+  /* Depth/elevation — futuristic glass */
+  --glass-1: rgba(255,255,255,.03);
+  --glass-2: rgba(255,255,255,.05);
+  --glass-3: rgba(255,255,255,.08);
+  --glass-border: rgba(255,255,255,.08);
+  --glass-border-2: rgba(255,255,255,.14);
+
+  /* Shadow scale */
+  --shadow-soft:  0 2px 8px rgba(0,0,0,.2);
+  --shadow-mid:   0 8px 24px rgba(0,0,0,.35);
+  --shadow-deep:  0 16px 48px rgba(0,0,0,.45);
+  --shadow-glow:  0 0 40px rgba(120,200,255,.18);
+
+  /* AI presence — operational lighting */
+  --ai-pulse:  rgba(120,200,255,.28);
+  --ai-warm:   rgba(255,180,120,.22);
+  --ai-deep:   rgba(80,120,200,.22);
+  --ai-success:rgba(120,255,160,.22);
+
+  /* Operational atmospheres (mode-aware) */
+  --atmo-focus:    radial-gradient(ellipse at 30% 0%, rgba(40,60,100,.4), transparent 60%);
+  --atmo-creator:  radial-gradient(ellipse at 70% 100%, rgba(180,100,200,.25), transparent 60%);
+  --atmo-strategy: radial-gradient(ellipse at 50% 50%, rgba(80,140,200,.18), transparent 65%);
+  --atmo-calm:     radial-gradient(ellipse at 50% 100%, rgba(60,100,140,.15), transparent 70%);
+}
+
+/* Respect reduced motion globally */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+/* ─── 1. AMBIENT ATMOSPHERE LAYER ─────────────────
+   Subtle living background behind everything. Adapts to mode.
+   ────────────────────────────────────────────────── */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: var(--atmo-calm);
+  opacity: 0;
+  transition: opacity var(--dur-cine) var(--ease-out-soft),
+              background var(--dur-cine) var(--ease-out-soft);
+}
+body.nx-ready::after { opacity: 1; }
+body[data-mode="focus"]::after    { background: var(--atmo-focus); }
+body[data-mode="creator"]::after  { background: var(--atmo-creator); }
+body[data-mode="strategy"]::after { background: var(--atmo-strategy); }
+
+/* Subtle particle / star field — pure CSS, GPU-cheap */
+.nx-ambient-particles {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background-image:
+    radial-gradient(1px 1px at 12% 23%, rgba(255,255,255,.18), transparent),
+    radial-gradient(1px 1px at 87% 41%, rgba(180,210,255,.14), transparent),
+    radial-gradient(1px 1px at 34% 78%, rgba(255,255,255,.12), transparent),
+    radial-gradient(1.5px 1.5px at 62% 14%, rgba(200,180,255,.16), transparent),
+    radial-gradient(1px 1px at 19% 89%, rgba(255,255,255,.1), transparent),
+    radial-gradient(1px 1px at 78% 67%, rgba(160,200,255,.14), transparent);
+  background-repeat: no-repeat;
+  opacity: .5;
+  animation: nxDrift 60s linear infinite;
+}
+
+@keyframes nxDrift {
+  0%   { transform: translate(0, 0); }
+  50%  { transform: translate(-8px, 6px); }
+  100% { transform: translate(0, 0); }
+}
+
+/* ─── 2. AI PRESENCE — Living indicator ───────────
+   A subtle breathing dot that signals AI is alive.
+   ────────────────────────────────────────────────── */
+.nx-ai-presence {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--a2, #35f1c6);
+  display: inline-block;
+  vertical-align: middle;
+  box-shadow: 0 0 8px var(--a2, #35f1c6);
+}
+.nx-ai-presence::before,
+.nx-ai-presence::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1px solid var(--a2, #35f1c6);
+  opacity: 0;
+  animation: nxPulse 2.4s var(--ease-out-soft) infinite;
+}
+.nx-ai-presence::after { animation-delay: 1.2s; }
+.nx-ai-presence.thinking::before,
+.nx-ai-presence.thinking::after { animation-duration: 1s; }
+
+@keyframes nxPulse {
+  0%   { transform: scale(.8); opacity: .8; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+
+/* ─── 3. AI THINKING wave ─────────────────────────
+   Shown while smartCall is in-flight. Calm, intelligent.
+   ────────────────────────────────────────────────── */
+.nx-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 16px;
+}
+.nx-thinking span {
+  width: 3px;
+  height: 100%;
+  background: linear-gradient(180deg, transparent, var(--a2), transparent);
+  border-radius: 2px;
+  animation: nxWave 1.4s var(--ease-in-out-soft) infinite;
+  opacity: .6;
+}
+.nx-thinking span:nth-child(2) { animation-delay: .15s; }
+.nx-thinking span:nth-child(3) { animation-delay: .3s; }
+.nx-thinking span:nth-child(4) { animation-delay: .45s; }
+.nx-thinking span:nth-child(5) { animation-delay: .6s; }
+
+@keyframes nxWave {
+  0%, 100% { transform: scaleY(.3); opacity: .3; }
+  50%      { transform: scaleY(1);  opacity: .9; }
+}
+
+/* ─── 4. PREMIUM GLASS SURFACES ───────────────────
+   Add .nx-glass to any panel for a futuristic material.
+   ────────────────────────────────────────────────── */
+.nx-glass {
+  background: linear-gradient(135deg, var(--glass-2), var(--glass-1));
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-mid), inset 0 1px 0 rgba(255,255,255,.04);
+}
+.nx-glass-bright {
+  background: linear-gradient(135deg, var(--glass-3), var(--glass-2));
+  border-color: var(--glass-border-2);
+  box-shadow: var(--shadow-deep), inset 0 1px 0 rgba(255,255,255,.08);
+}
+
+/* ─── 5. MAGNETIC INTERACTIONS ────────────────────
+   Buttons + cards respond subtly to hover.
+   ────────────────────────────────────────────────── */
+.nx-magnetic {
+  transition: transform var(--dur-base) var(--ease-magnetic),
+              box-shadow var(--dur-base) var(--ease-out-soft),
+              border-color var(--dur-fast) var(--ease-out-soft);
+  will-change: transform;
+}
+.nx-magnetic:hover {
+  transform: translateY(-2px) scale(1.005);
+  box-shadow: var(--shadow-deep), 0 0 24px rgba(120,200,255,.12);
+}
+.nx-magnetic:active { transform: translateY(0) scale(.998); transition-duration: 60ms; }
+
+/* ─── 6. CINEMATIC PAGE TRANSITIONS ───────────────
+   Apply .nx-enter when revealing a new page/view.
+   ────────────────────────────────────────────────── */
+.nx-enter {
+  animation: nxEnter var(--dur-cine) var(--ease-out-expo) both;
+}
+.nx-enter-stagger > * {
+  animation: nxEnter var(--dur-slow) var(--ease-out-expo) both;
+}
+.nx-enter-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.nx-enter-stagger > *:nth-child(2) { animation-delay: 60ms; }
+.nx-enter-stagger > *:nth-child(3) { animation-delay: 120ms; }
+.nx-enter-stagger > *:nth-child(4) { animation-delay: 180ms; }
+.nx-enter-stagger > *:nth-child(5) { animation-delay: 240ms; }
+.nx-enter-stagger > *:nth-child(6) { animation-delay: 300ms; }
+
+@keyframes nxEnter {
+  from { opacity: 0; transform: translateY(12px) scale(.98); filter: blur(4px); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);   filter: blur(0); }
+}
+
+/* ─── 7. CONTINUITY GLOW for active workspace ─────
+   Subtle pulse on whatever the user was last in.
+   ────────────────────────────────────────────────── */
+.nx-active-glow {
+  position: relative;
+  isolation: isolate;
+}
+.nx-active-glow::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, var(--a1, #c6f135), transparent 50%, var(--a2, #35f1c6));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: .35;
+  animation: nxBreath 4s var(--ease-in-out-soft) infinite;
+  pointer-events: none;
+  z-index: -1;
+}
+
+@keyframes nxBreath {
+  0%, 100% { opacity: .25; }
+  50%      { opacity: .55; }
+}
+
+/* ─── 8. CINEMATIC LOADING (replaces spinners) ────
+   ────────────────────────────────────────────────── */
+.nx-loader {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  margin: 0 auto;
+}
+.nx-loader::before,
+.nx-loader::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--a1, #c6f135);
+  border-right-color: var(--a2, #35f1c6);
+  animation: nxOrbit 1.2s var(--ease-in-out-soft) infinite;
+}
+.nx-loader::after {
+  inset: 6px;
+  border-top-color: var(--a2, #35f1c6);
+  border-right-color: transparent;
+  animation-direction: reverse;
+  animation-duration: .8s;
+  opacity: .6;
+}
+
+@keyframes nxOrbit {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ─── 9. FOCUS MODE — calm overlay ────────────────
+   Toggle body.nx-focus to dim non-focus surfaces.
+   ────────────────────────────────────────────────── */
+body.nx-focus .sb,
+body.nx-focus .top,
+body.nx-focus .auth-tabs {
+  filter: brightness(.7) saturate(.85);
+  transition: filter var(--dur-cine) var(--ease-out-soft);
+}
+body.nx-focus .chat-content { filter: none; }
+
+/* ─── 10. MICRO-INTERACTIONS: button feedback ─────
+   ────────────────────────────────────────────────── */
+.nx-btn-magnetic {
+  position: relative;
+  overflow: hidden;
+  transition: transform var(--dur-fast) var(--ease-magnetic);
+}
+.nx-btn-magnetic::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at var(--mx, 50%) var(--my, 50%),
+                              rgba(255,255,255,.1), transparent 50%);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out-soft);
+  pointer-events: none;
+}
+.nx-btn-magnetic:hover::after { opacity: 1; }
+
+/* ─── 11. CONTEXT-AWARE TYPOGRAPHY ────────────────
+   Body adapts type rhythm in focus mode.
+   ────────────────────────────────────────────────── */
+body.nx-focus {
+  --type-tracking: .015em;
+  --line-rhythm: 1.7;
+}
+body.nx-focus .chat-content {
+  letter-spacing: var(--type-tracking, 0);
+  line-height: var(--line-rhythm, 1.5);
+}
+
+/* ─── 12. CONTINUITY TOAST (for resume / momentum) ─
+   ────────────────────────────────────────────────── */
+.nx-resume {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  padding: 14px 22px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: #cde;
+  background: linear-gradient(135deg, rgba(20,30,50,.85), rgba(10,20,40,.85));
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid var(--glass-border-2);
+  border-radius: 100px;
+  box-shadow: var(--shadow-deep);
+  opacity: 0;
+  z-index: 999;
+  transition: transform var(--dur-cine) var(--ease-out-expo),
+              opacity var(--dur-slow) var(--ease-out-soft);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.nx-resume.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.nx-resume:hover { background: linear-gradient(135deg, rgba(30,50,80,.9), rgba(20,30,60,.9)); }
+.nx-resume .nx-ai-presence { margin-right: 4px; }
+
+/* ─── 13. SUBTLE LOGO BREATHING (top-left brand) ──
+   ────────────────────────────────────────────────── */
+.sb-logo, .auth-brand-name {
+  animation: nxLogoBreath 8s var(--ease-in-out-soft) infinite;
+}
+@keyframes nxLogoBreath {
+  0%, 100% { filter: brightness(1); }
+  50%      { filter: brightness(1.12); }
+}
+
+/* ─── 14. ELEVATED FOCUS RINGS ────────────────────
+   Replace browser default with futuristic glow.
+   ────────────────────────────────────────────────── */
+:where(button, input, textarea, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 1px var(--a2, #35f1c6),
+    0 0 0 4px rgba(53,241,198,.18),
+    0 0 16px rgba(53,241,198,.25);
+  transition: box-shadow var(--dur-fast) var(--ease-out-soft);
+}
+
+/* ─── 15. SCROLL EDGE FADE — premium feel ────────
+   ────────────────────────────────────────────────── */
+.nx-scroll-fade {
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
+          mask-image: linear-gradient(180deg, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
+}
+
+/* ─── 16. AI MESSAGE GLOW (when AI responds) ──────
+   ────────────────────────────────────────────────── */
+.nx-ai-msg {
+  position: relative;
+  animation: nxMsgIn var(--dur-cine) var(--ease-out-expo);
+}
+.nx-ai-msg::before {
+  content: "";
+  position: absolute;
+  left: -8px; top: 0; bottom: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, transparent, var(--a2, #35f1c6), transparent);
+  opacity: .6;
+  animation: nxStreamGlow 2s var(--ease-in-out-soft) infinite;
+}
+
+@keyframes nxMsgIn {
+  from { opacity: 0; transform: translateX(-8px); filter: blur(2px); }
+  to   { opacity: 1; transform: translateX(0);    filter: blur(0); }
+}
+@keyframes nxStreamGlow {
+  0%, 100% { opacity: .3; }
+  50%      { opacity: .8; }
+}
+
+/* ─── 17. CHIP / TAG — futuristic pill ────────────
+   ────────────────────────────────────────────────── */
+.nx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  letter-spacing: .4px;
+  color: #cde;
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--glass-border);
+  border-radius: 100px;
+  text-transform: uppercase;
+  transition: all var(--dur-fast) var(--ease-out-soft);
+}
+.nx-chip:hover {
+  background: rgba(120,200,255,.08);
+  border-color: rgba(120,200,255,.3);
+  color: #fff;
+}
+
+/* ─── 18. MODE INDICATOR (top bar) ────────────────
+   ────────────────────────────────────────────────── */
+.nx-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: #89a;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  background: rgba(0,0,0,.3);
+  border: 1px solid var(--glass-border);
+  border-radius: 100px;
+  backdrop-filter: blur(10px);
+}
+.nx-mode .nx-ai-presence { width: 6px; height: 6px; }
+
+/* ─── 19. KEYBOARD SHORTCUT HINT ──────────────────
+   ────────────────────────────────────────────────── */
+.nx-kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+  color: #89a;
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--glass-border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+/* ─── 20. RESPONSIVE — keep elite on mobile ───────
+   ────────────────────────────────────────────────── */
+@media (max-width: 720px) {
+  .nx-ambient-particles { display: none; }
+  .nx-resume { left: 12px; right: 12px; transform: translateY(80px); }
+  .nx-resume.show { transform: translateY(0); }
+}

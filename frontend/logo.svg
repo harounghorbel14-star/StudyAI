@@ -1,64 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="NexusAI">
   <defs>
-    <!-- Background gradient - dark -->
-    <radialGradient id="bgGrad" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#1a1d2e"/>
-      <stop offset="100%" stop-color="#07080b"/>
+    <linearGradient id="nx-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c6f135"/>
+      <stop offset="50%" stop-color="#35f1c6"/>
+      <stop offset="100%" stop-color="#5b8def"/>
+    </linearGradient>
+    <radialGradient id="nx-core" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fff" stop-opacity="1"/>
+      <stop offset="40%" stop-color="#35f1c6" stop-opacity=".9"/>
+      <stop offset="100%" stop-color="#35f1c6" stop-opacity="0"/>
     </radialGradient>
-
-    <!-- Accent glow -->
-    <radialGradient id="glowGrad" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#c6f135" stop-opacity="0.3"/>
-      <stop offset="100%" stop-color="#c6f135" stop-opacity="0"/>
-    </radialGradient>
-
-    <!-- Inner glow filter -->
-    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="2" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-
-    <filter id="softglow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="3" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
+    <filter id="nx-glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
-
-  <!-- Background circle -->
-  <circle cx="50" cy="50" r="50" fill="url(#bgGrad)"/>
-
-  <!-- Subtle glow background -->
-  <circle cx="50" cy="50" r="38" fill="url(#glowGrad)"/>
-
-  <!-- Outer ring - thin accent -->
-  <circle cx="50" cy="50" r="44" fill="none" stroke="#c6f135" stroke-width="0.8" opacity="0.4"/>
-
-  <!-- Middle decorative ring -->
-  <circle cx="50" cy="50" r="38" fill="none" stroke="#ffffff" stroke-width="0.3" opacity="0.1"/>
-
-  <!-- Main N shape - bold, geometric -->
-  <!-- Left vertical bar -->
-  <rect x="24" y="28" width="8" height="44" rx="2" fill="#c6f135" filter="url(#glow)"/>
-
-  <!-- Right vertical bar -->
-  <rect x="68" y="28" width="8" height="44" rx="2" fill="#c6f135" filter="url(#glow)"/>
-
-  <!-- Diagonal stroke of N - from top-left to bottom-right -->
-  <line x1="32" y1="31" x2="68" y2="69" stroke="#c6f135" stroke-width="8" stroke-linecap="round" filter="url(#glow)"/>
-
-  <!-- Small AI dot accent - bottom right -->
-  <circle cx="72" cy="74" r="4" fill="#35f1c6" opacity="0.9" filter="url(#softglow)"/>
-  <circle cx="72" cy="74" r="2" fill="#ffffff"/>
-
-  <!-- Subtle corner dots for tech feel -->
-  <circle cx="20" cy="20" r="1.5" fill="#c6f135" opacity="0.4"/>
-  <circle cx="80" cy="20" r="1.5" fill="#c6f135" opacity="0.4"/>
-  <circle cx="20" cy="80" r="1.5" fill="#c6f135" opacity="0.4"/>
-  <circle cx="80" cy="80" r="1.5" fill="#35f1c6" opacity="0.4"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#nx-grad)" stroke-width="1" opacity=".4"/>
+  <ellipse cx="50" cy="50" rx="36" ry="14" fill="none" stroke="url(#nx-grad)" stroke-width="1.2" opacity=".6" transform="rotate(-30 50 50)"/>
+  <ellipse cx="50" cy="50" rx="36" ry="14" fill="none" stroke="url(#nx-grad)" stroke-width="1.2" opacity=".6" transform="rotate(30 50 50)"/>
+  <g filter="url(#nx-glow)">
+    <circle cx="50" cy="8"  r="2.2" fill="#c6f135"/>
+    <circle cx="86" cy="42" r="2.2" fill="#35f1c6"/>
+    <circle cx="72" cy="78" r="2.2" fill="#5b8def"/>
+    <circle cx="28" cy="78" r="2.2" fill="#35f1c6"/>
+    <circle cx="14" cy="42" r="2.2" fill="#c6f135"/>
+  </g>
+  <g stroke="url(#nx-grad)" stroke-width=".8" opacity=".55" fill="none" stroke-linecap="round">
+    <path d="M50 8 L86 42 L72 78 L28 78 L14 42 Z"/>
+    <path d="M50 8 L72 78"/>
+    <path d="M50 8 L28 78"/>
+    <path d="M86 42 L14 42"/>
+    <path d="M86 42 L28 78"/>
+    <path d="M14 42 L72 78"/>
+  </g>
+  <circle cx="50" cy="50" r="10" fill="url(#nx-core)" opacity=".9"/>
+  <circle cx="50" cy="50" r="3" fill="#fff" filter="url(#nx-glow)">
+    <animate attributeName="r" values="2.5;3.5;2.5" dur="3s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values=".8;1;.8" dur="3s" repeatCount="indefinite"/>
+  </circle>
 </svg>

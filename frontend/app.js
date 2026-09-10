@@ -2217,7 +2217,7 @@ async function navigate_pricing(){
   document.getElementById('tool-sub').textContent='Choose your plan';
 
   let currentPlan='free';
-  try{const d=await api('/api/billing/subscription');currentPlan=d.current_plan;}catch(_){}
+  try{const d=await api('/api/payments/subscription');currentPlan=d.current_plan;}catch(_){}
 
   document.getElementById('messages').innerHTML=`<div class="page-wrap">
     <div class="page-title gradient-text">Choose Your Plan</div>
@@ -2280,7 +2280,7 @@ async function navigate_pricing(){
 async function upgradeTo(plan){
   toast('🚀 Redirecting to checkout...','success');
   try{
-    const d=await api('/api/billing/checkout',{method:'POST',body:{plan}});
+    const d=await api('/api/payments/checkout',{method:'POST',body:{plan}});
     if(d.checkout_url){
       window.location.href=d.checkout_url;
     } else {
@@ -2294,7 +2294,7 @@ async function upgradeTo(plan){
 async function cancelPlan(){
   if(!confirm('Cancel subscription? You will be downgraded to Free.'))return;
   try{
-    await api('/api/billing/cancel',{method:'POST'});
+    await api('/api/payments/cancel',{method:'POST'});
     toast('✅ Subscription cancelled','success');
     setTimeout(()=>navigate_pricing(),1000);
   }catch(e){toast(e.message,'error');}
@@ -5490,28 +5490,105 @@ document.addEventListener('keydown',e=>{
 });
 
 // ── ONBOARDING TOUR ───────────────────────────
+// ============================================================
+// 🌟 ELITE ONBOARDING — Goal-first, cinematic, AI-guided
+// ============================================================
 function startOnboarding(){
-  if(localStorage.getItem('nx_onboarded'))return;
-  const steps=[
-    {sel:'#cat-grid-btn',text:'🔍 Browse 180+ AI tools by category'},
-    {sel:'#search-btn',text:'🌐 Enable web search for real-time info'},
-    {sel:'#send-btn',text:'⚡ Powered by GPT-4o with streaming'},
-  ];
-  let i=0;
-  function show(idx){
-    document.querySelector('.onboard-tip')?.remove();
-    if(idx>=steps.length){localStorage.setItem('nx_onboarded','1');return;}
-    const el=document.querySelector(steps[idx].sel);
-    if(!el){show(idx+1);return;}
-    const rect=el.getBoundingClientRect();
-    const tip=document.createElement('div');
-    tip.className='onboard-tip';
-    tip.style.cssText=`position:fixed;z-index:500;background:var(--grad);color:#000;padding:12px 16px;border-radius:12px;font-size:13px;font-weight:500;max-width:220px;box-shadow:0 8px 30px #0008;left:${Math.min(rect.left,window.innerWidth-240)}px;top:${rect.bottom+10}px`;
-    tip.innerHTML=`${steps[idx].text}<br/><button onclick="document.querySelector('.onboard-tip')?.remove();show(${idx+1})" style="margin-top:8px;background:#0003;border:none;padding:4px 10px;border-radius:6px;color:#000;font-size:12px;cursor:pointer">${idx<steps.length-1?'Next →':'Done ✓'}</button>`;
-    document.body.appendChild(tip);
-    i=idx;
+  if(localStorage.getItem('nx_onboarded_v2'))return;
+
+  // Inject styles once
+  if(!document.getElementById('nx-onboard-styles')){
+    const s=document.createElement('style');
+    s.id='nx-onboard-styles';
+    s.textContent=`
+      .nx-onb-overlay{position:fixed;inset:0;z-index:9999;background:radial-gradient(ellipse at 50% 30%,rgba(20,30,60,.92),rgba(0,0,0,.96));backdrop-filter:blur(20px);display:flex;align-items:center;justify-content:center;animation:nxFade .6s ease-out;font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif}
+      .nx-onb-panel{max-width:560px;width:90%;padding:48px 40px;text-align:center;animation:nxRise .8s cubic-bezier(.2,.8,.2,1)}
+      .nx-onb-logo{font-size:42px;font-weight:200;letter-spacing:8px;background:linear-gradient(135deg,#7df,#a8f,#f7a);-webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:8px;animation:nxGlow 3s ease-in-out infinite}
+      .nx-onb-tag{color:#89a;font-size:13px;letter-spacing:3px;text-transform:uppercase;margin-bottom:40px;opacity:.7}
+      .nx-onb-q{color:#fff;font-size:24px;font-weight:300;margin-bottom:32px;line-height:1.4}
+      .nx-onb-goals{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px}
+      .nx-onb-goal{padding:18px 16px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:14px;cursor:pointer;transition:all .25s cubic-bezier(.2,.8,.2,1);text-align:left;color:#cde;font-size:14px;display:flex;align-items:center;gap:12px;backdrop-filter:blur(8px)}
+      .nx-onb-goal:hover{background:rgba(120,200,255,.08);border-color:rgba(120,200,255,.4);transform:translateY(-2px);box-shadow:0 8px 24px rgba(120,200,255,.15)}
+      .nx-onb-goal .ico{font-size:22px;flex-shrink:0}
+      .nx-onb-goal .nm{font-weight:500;color:#fff;display:block;margin-bottom:2px}
+      .nx-onb-goal .ds{font-size:11px;color:#789;letter-spacing:.3px}
+      .nx-onb-skip{margin-top:24px;background:none;border:none;color:#567;font-size:12px;cursor:pointer;letter-spacing:1px;transition:color .2s}
+      .nx-onb-skip:hover{color:#9ab}
+      .nx-onb-progress{height:2px;width:80px;background:rgba(255,255,255,.1);border-radius:2px;margin:0 auto 32px;overflow:hidden}
+      .nx-onb-progress div{height:100%;width:33%;background:linear-gradient(90deg,#7df,#a8f);animation:nxBar 2s ease-in-out infinite}
+      .nx-onb-confirm{padding:32px;background:rgba(255,255,255,.03);border-radius:16px;color:#cde;line-height:1.6;border:1px solid rgba(120,200,255,.15)}
+      .nx-onb-confirm h3{color:#fff;font-weight:400;margin-bottom:12px;font-size:20px}
+      .nx-onb-confirm p{font-size:14px;color:#89a;margin-bottom:20px}
+      .nx-onb-go{padding:12px 32px;background:linear-gradient(135deg,#7df,#a8f);border:none;border-radius:10px;color:#000;font-weight:600;font-size:14px;cursor:pointer;letter-spacing:.5px;transition:transform .15s;box-shadow:0 6px 20px rgba(120,200,255,.3)}
+      .nx-onb-go:hover{transform:translateY(-1px) scale(1.02)}
+      @keyframes nxFade{from{opacity:0}to{opacity:1}}
+      @keyframes nxRise{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+      @keyframes nxGlow{0%,100%{filter:brightness(1)}50%{filter:brightness(1.2)}}
+      @keyframes nxBar{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
+      @media(max-width:520px){.nx-onb-goals{grid-template-columns:1fr}.nx-onb-panel{padding:32px 20px}.nx-onb-q{font-size:20px}}
+    `;
+    document.head.appendChild(s);
   }
-  setTimeout(()=>show(0),2000);
+
+  const goals=[
+    {id:'startup',ico:'🚀',nm:'Build a startup',ds:'Idea → launch → growth'},
+    {id:'code',ico:'💻',nm:'Code & debug',ds:'Repo intelligence, reviews'},
+    {id:'create',ico:'🎨',nm:'Create content',ds:'Images, video, voice, 3D'},
+    {id:'study',ico:'📚',nm:'Learn & research',ds:'Knowledge with citations'},
+    {id:'analyze',ico:'📊',nm:'Analyze business',ds:'Growth, metrics, strategy'},
+    {id:'team',ico:'👥',nm:'Collaborate',ds:'Shared workspaces'},
+  ];
+
+  const overlay=document.createElement('div');
+  overlay.className='nx-onb-overlay';
+  overlay.innerHTML=`
+    <div class="nx-onb-panel">
+      <div class="nx-onb-logo">NEXUS</div>
+      <div class="nx-onb-tag">AI Operating System</div>
+      <div class="nx-onb-progress"><div></div></div>
+      <div class="nx-onb-q">What do you want to do today?</div>
+      <div class="nx-onb-goals">
+        ${goals.map(g=>`<div class="nx-onb-goal" data-goal="${g.id}"><span class="ico">${g.ico}</span><div><span class="nm">${g.nm}</span><span class="ds">${g.ds}</span></div></div>`).join('')}
+      </div>
+      <button class="nx-onb-skip">Skip for now</button>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('.nx-onb-skip').onclick=()=>{
+    localStorage.setItem('nx_onboarded_v2','skipped');
+    overlay.style.animation='nxFade .4s reverse';
+    setTimeout(()=>overlay.remove(),400);
+  };
+
+  overlay.querySelectorAll('.nx-onb-goal').forEach(el=>{
+    el.onclick=()=>{
+      const goal=el.dataset.goal;
+      localStorage.setItem('nx_onboarded_v2',goal);
+      localStorage.setItem('nx_user_goal',goal);
+      const goalData=goals.find(g=>g.id===goal);
+      const panel=overlay.querySelector('.nx-onb-panel');
+      panel.style.animation='nxRise .5s reverse';
+      setTimeout(()=>{
+        panel.innerHTML=`
+          <div class="nx-onb-logo">${goalData.ico}</div>
+          <div class="nx-onb-tag">Configured for ${goalData.nm.toLowerCase()}</div>
+          <div class="nx-onb-confirm">
+            <h3>Ready to operate</h3>
+            <p>NexusAI will adapt workflows, recommendations, and AI behavior around ${goalData.nm.toLowerCase()}. You can change this anytime in settings.</p>
+            <button class="nx-onb-go">Enter Nexus →</button>
+          </div>`;
+        panel.style.animation='nxRise .6s cubic-bezier(.2,.8,.2,1)';
+        panel.querySelector('.nx-onb-go').onclick=()=>{
+          overlay.style.animation='nxFade .5s reverse';
+          setTimeout(()=>{
+            overlay.remove();
+            // Hook for downstream personalization
+            window.dispatchEvent(new CustomEvent('nx:onboarded',{detail:{goal}}));
+          },500);
+        };
+      },500);
+    };
+  });
 }
 
 // cursor blink
@@ -5664,3 +5741,3791 @@ document.addEventListener('DOMContentLoaded',()=>{
 function selectToolFromGrid(id){
   selectTool(id);closeCatGrid();showActiveToolBar();
 }
+
+
+// ============================================================
+// 📦 MERGED FRONTEND BUNDLES (was: 4 separate files)
+// design-system.js · cinematic.js · visual-components.js · ui-panels.js
+// ============================================================
+
+// ============================================================
+// 🌌 NexusAI Design System Runtime
+// AI presence · cinematic transitions · adaptive atmospheres
+// magnetic interactions · continuity · momentum protection
+// ============================================================
+(function () {
+  'use strict';
+
+  const NX = window.NX = window.NX || {};
+
+  // ─── 1. Bootstrap ambient layer ─────────────────
+  function mountAmbient() {
+    if (document.querySelector('.nx-ambient-particles')) return;
+    const p = document.createElement('div');
+    p.className = 'nx-ambient-particles';
+    p.setAttribute('aria-hidden', 'true');
+    document.body.prepend(p);
+    requestAnimationFrame(() => document.body.classList.add('nx-ready'));
+  }
+
+  // ─── 2. Operational mode (adapts atmosphere) ────
+  const MODES = ['calm', 'focus', 'creator', 'strategy'];
+  NX.setMode = function (mode) {
+    if (!MODES.includes(mode)) mode = 'calm';
+    document.body.setAttribute('data-mode', mode);
+    try { localStorage.setItem('nx_mode', mode); } catch (_) {}
+    window.dispatchEvent(new CustomEvent('nx:mode', { detail: { mode } }));
+  };
+  NX.getMode = function () {
+    return document.body.getAttribute('data-mode') || 'calm';
+  };
+  // Restore last mode
+  try {
+    const saved = localStorage.getItem('nx_mode');
+    if (saved) NX.setMode(saved);
+  } catch (_) {}
+
+  // ─── 3. Focus mode toggle ───────────────────────
+  NX.toggleFocus = function (on) {
+    const enabled = on === undefined ? !document.body.classList.contains('nx-focus') : !!on;
+    document.body.classList.toggle('nx-focus', enabled);
+    try { localStorage.setItem('nx_focus', enabled ? '1' : '0'); } catch (_) {}
+    return enabled;
+  };
+  try {
+    if (localStorage.getItem('nx_focus') === '1') document.body.classList.add('nx-focus');
+  } catch (_) {}
+
+  // ─── 4. AI Presence indicator API ───────────────
+  // Usage: <span class="nx-ai-presence"></span>  → renders living dot
+  // Programmatic: NX.aiPresence.thinking(true|false) → adds .thinking on all
+  NX.aiPresence = {
+    thinking(on) {
+      document.querySelectorAll('.nx-ai-presence')
+        .forEach(el => el.classList.toggle('thinking', !!on));
+    },
+    mount(parent) {
+      const el = document.createElement('span');
+      el.className = 'nx-ai-presence';
+      (parent || document.body).appendChild(el);
+      return el;
+    },
+  };
+
+  // ─── 5. Thinking wave inline ────────────────────
+  // NX.thinking.show(targetEl) → injects animated bars
+  NX.thinking = {
+    show(target, label) {
+      if (!target) return null;
+      const w = document.createElement('div');
+      w.className = 'nx-thinking-wrap';
+      w.style.cssText = 'display:inline-flex;align-items:center;gap:10px;color:#89a;font-size:12px;letter-spacing:.5px';
+      w.innerHTML = `
+        <span class="nx-thinking"><span></span><span></span><span></span><span></span><span></span></span>
+        ${label ? `<span>${label}</span>` : ''}
+      `;
+      target.appendChild(w);
+      return w;
+    },
+    hide(node) { node?.remove(); },
+  };
+
+  // ─── 6. Magnetic button effect ──────────────────
+  // Add data-magnetic to any element → mouse-tracking glow
+  function bindMagnetic(el) {
+    if (el.__nxMagBound) return;
+    el.__nxMagBound = true;
+    el.classList.add('nx-btn-magnetic');
+    el.addEventListener('mousemove', (e) => {
+      const r = el.getBoundingClientRect();
+      const x = ((e.clientX - r.left) / r.width) * 100;
+      const y = ((e.clientY - r.top) / r.height) * 100;
+      el.style.setProperty('--mx', x + '%');
+      el.style.setProperty('--my', y + '%');
+    });
+  }
+  function scanMagnetic() {
+    document.querySelectorAll('[data-magnetic],.nx-magnetic-target').forEach(bindMagnetic);
+  }
+
+  // ─── 7. Cinematic enter — stagger reveal ────────
+  // NX.enter(container) → adds .nx-enter-stagger to fade children in
+  NX.enter = function (container) {
+    if (!container) return;
+    container.classList.remove('nx-enter-stagger');
+    void container.offsetWidth; // reflow
+    container.classList.add('nx-enter-stagger');
+  };
+
+  // ─── 8. Continuity / Resume toast ───────────────
+  // NX.resume({ text, action, onClick })
+  NX.resume = function (opts) {
+    const { text = 'Welcome back', action = 'Resume →', onClick } = opts || {};
+    document.querySelectorAll('.nx-resume').forEach(n => n.remove());
+    const node = document.createElement('div');
+    node.className = 'nx-resume';
+    node.innerHTML = `
+      <span class="nx-ai-presence"></span>
+      <span>${text}</span>
+      <span class="nx-chip" style="background:rgba(120,200,255,.12);border-color:rgba(120,200,255,.3);color:#cde">${action}</span>
+    `;
+    if (onClick) node.addEventListener('click', () => { onClick(); node.classList.remove('show'); setTimeout(() => node.remove(), 500); });
+    document.body.appendChild(node);
+    requestAnimationFrame(() => node.classList.add('show'));
+    setTimeout(() => { node.classList.remove('show'); setTimeout(() => node.remove(), 500); }, 12000);
+    return node;
+  };
+
+  // ─── 9. Last-seen / session continuity ──────────
+  NX.session = {
+    markActivity() {
+      try { localStorage.setItem('nx_last_seen', String(Date.now())); } catch (_) {}
+    },
+    lastSeen() {
+      try { return Number(localStorage.getItem('nx_last_seen') || 0); } catch (_) { return 0; }
+    },
+    awayMinutes() {
+      const t = this.lastSeen();
+      if (!t) return 0;
+      return Math.floor((Date.now() - t) / 60000);
+    },
+    isResuming() {
+      const m = this.awayMinutes();
+      return m >= 5 && m < 60 * 24 * 7; // between 5min and 7 days
+    },
+  };
+
+  // Auto-track activity
+  ['click', 'keydown', 'visibilitychange'].forEach(ev =>
+    window.addEventListener(ev, () => NX.session.markActivity(), { passive: true })
+  );
+
+  // ─── 10. AI thinking lifecycle — global hook ────
+  // Any code can do: window.dispatchEvent(new CustomEvent('nx:ai-start'))
+  //                  window.dispatchEvent(new CustomEvent('nx:ai-end'))
+  let _aiInflight = 0;
+  window.addEventListener('nx:ai-start', () => {
+    _aiInflight++;
+    NX.aiPresence.thinking(true);
+  });
+  window.addEventListener('nx:ai-end', () => {
+    _aiInflight = Math.max(0, _aiInflight - 1);
+    if (_aiInflight === 0) NX.aiPresence.thinking(false);
+  });
+
+  // ─── 11. Cinematic AI loader (replaces spinners) ─
+  NX.loader = function (target) {
+    if (!target) return null;
+    const el = document.createElement('div');
+    el.className = 'nx-loader';
+    target.appendChild(el);
+    return el;
+  };
+
+  // ─── 12. Auto-stagger on page change ────────────
+  // If your app uses ?page=... or similar SPA pattern,
+  // call NX.enter(mainContainer) on every page swap.
+
+  // ─── 13. Boot ───────────────────────────────────
+  function boot() {
+    mountAmbient();
+    scanMagnetic();
+
+    // Observer for dynamically added [data-magnetic]
+    const mo = new MutationObserver(() => scanMagnetic());
+    mo.observe(document.body, { childList: true, subtree: true });
+
+    // Continuity check after first paint
+    setTimeout(() => {
+      const minutes = NX.session.awayMinutes();
+      if (NX.session.isResuming()) {
+        const goal = (() => { try { return localStorage.getItem('nx_user_goal') || ''; } catch (_) { return ''; } })();
+        const goalLabels = {
+          startup: 'your startup workflow',
+          code: 'your code session',
+          create: 'your creative session',
+          study: 'your research',
+          analyze: 'your analysis',
+          team: 'your workspace',
+        };
+        const label = goalLabels[goal] || 'where you left off';
+        NX.resume({
+          text: `Resume ${label}`,
+          action: `Continue →`,
+        });
+      }
+      NX.session.markActivity();
+    }, 1500);
+
+    // Listen for onboarding completion → set mode based on goal
+    window.addEventListener('nx:onboarded', (e) => {
+      const goal = e.detail?.goal;
+      const goalToMode = {
+        startup: 'strategy',
+        code: 'focus',
+        create: 'creator',
+        study: 'focus',
+        analyze: 'strategy',
+        team: 'calm',
+      };
+      NX.setMode(goalToMode[goal] || 'calm');
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot, { once: true });
+  } else {
+    boot();
+  }
+})();
+
+// ============================================================
+// 🎬 cinematic.js — Documents 22 + 24 + 25 + 26 Runtime
+// Wires cinematic UX into the existing app without rewrite.
+// AI typing · portal transitions · deep work · operational pulse
+// ============================================================
+(function () {
+  'use strict';
+
+  const Cine = window.Cine = window.Cine || {};
+
+  // ─── Mode color mapping (matches design-system) ─────
+  const MODE_COLORS = {
+    calm:     '#35f1c6',
+    focus:    '#5b8def',
+    creator:  '#c87bef',
+    strategy: '#c6f135',
+  };
+
+  // ─── 1. "Into the system" portal transition ─────
+  Cine.portal = function (onComplete) {
+    const overlay = document.createElement('div');
+    overlay.className = 'cine-portal active';
+    document.body.appendChild(overlay);
+    setTimeout(() => {
+      onComplete?.();
+      setTimeout(() => overlay.remove(), 100);
+    }, 400);
+  };
+
+  // ─── 2. Operational mode bar (top-right) ────────
+  Cine.mountModeBar = function () {
+    if (document.querySelector('.cine-mode-bar')) return;
+    const bar = document.createElement('div');
+    bar.className = 'cine-mode-bar';
+    document.body.appendChild(bar);
+    updateModeBar();
+  };
+  function updateModeBar() {
+    const bar = document.querySelector('.cine-mode-bar');
+    if (!bar) return;
+    const mode = (window.NX?.getMode?.() || 'calm');
+    bar.style.setProperty('--mode-color', MODE_COLORS[mode] || '#35f1c6');
+    bar.textContent = mode;
+    bar.title = `Operational mode: ${mode}`;
+    bar.onclick = () => Cine.cycleMode();
+  }
+  Cine.cycleMode = function () {
+    const modes = ['calm', 'focus', 'creator', 'strategy'];
+    const current = window.NX?.getMode?.() || 'calm';
+    const next = modes[(modes.indexOf(current) + 1) % modes.length];
+    window.NX?.setMode?.(next);
+    updateModeBar();
+  };
+
+  // ─── 3. Deep work mode toggle (keyboard: Ctrl/Cmd+Shift+D) ─
+  Cine.toggleDeepWork = function (on) {
+    const enabled = on === undefined
+      ? !document.body.classList.contains('cine-deep-work')
+      : !!on;
+    document.body.classList.toggle('cine-deep-work', enabled);
+    try { localStorage.setItem('cine_deep_work', enabled ? '1' : '0'); } catch (_) {}
+    return enabled;
+  };
+  try {
+    if (localStorage.getItem('cine_deep_work') === '1') {
+      document.body.classList.add('cine-deep-work');
+    }
+  } catch (_) {}
+
+  // ─── 4. AI cinematic typing (replaces basic typing) ─
+  Cine.typeInto = function (element, text, options = {}) {
+    if (!element) return;
+    const speed = options.speed || 20; // chars per ~16ms
+    const onDone = options.onDone || (() => {});
+    element.textContent = '';
+    element.classList.add('cine-typing');
+    let i = 0;
+    function tick() {
+      if (i >= text.length) {
+        element.classList.remove('cine-typing');
+        onDone();
+        return;
+      }
+      const chunk = text.slice(i, i + speed);
+      const span = document.createElement('span');
+      span.className = 'cine-stream';
+      span.textContent = chunk;
+      element.appendChild(span);
+      i += speed;
+      requestAnimationFrame(tick);
+    }
+    tick();
+  };
+
+  // ─── 5. AI thinking indicator (use in chat) ─────
+  Cine.thinking = function (target, label = 'Thinking') {
+    if (!target) return null;
+    const node = document.createElement('div');
+    node.className = 'cine-ai-pulse';
+    node.textContent = label;
+    target.appendChild(node);
+    return {
+      update(newLabel) { node.textContent = newLabel; },
+      remove() { node.remove(); },
+    };
+  };
+
+  // ─── 6. Timeline / orchestration replay ─────────
+  Cine.renderTimeline = function (target, events) {
+    if (!target || !Array.isArray(events)) return;
+    target.classList.add('cine-timeline');
+    target.innerHTML = '';
+    events.forEach((e, i) => {
+      const item = document.createElement('div');
+      item.className = 'cine-timeline-item';
+      if (e.status) item.classList.add(e.status);
+      item.style.animationDelay = (i * 80) + 'ms';
+      item.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+          <strong style="color:#fff;font-size:13px;font-weight:500">${escapeHtml(e.label || e.type)}</strong>
+          <span style="color:#789;font-size:11px">${e.time || ''}</span>
+        </div>
+        ${e.detail ? `<div style="color:#89a;font-size:12px;margin-top:4px">${escapeHtml(e.detail)}</div>` : ''}
+      `;
+      target.appendChild(item);
+    });
+  };
+
+  // ─── 7. Apply hologram material to selector ─────
+  Cine.applyHologram = function (selector) {
+    document.querySelectorAll(selector).forEach(el => el.classList.add('cine-hologram'));
+  };
+
+  // ─── 8. Page enter animation ────────────────────
+  Cine.pageEnter = function (container) {
+    if (!container) return;
+    container.classList.remove('cine-page-transition');
+    void container.offsetWidth;
+    container.classList.add('cine-page-transition');
+  };
+
+  // ─── 9. Hook into AI thinking events ────────────
+  let _aiBadge = null;
+  window.addEventListener('nx:ai-start', () => {
+    if (_aiBadge) return;
+    const target = document.querySelector('#chat-messages') || document.querySelector('.chat-content') || document.body;
+    if (target && target !== document.body) {
+      _aiBadge = Cine.thinking(target, 'AI processing');
+    }
+  });
+  window.addEventListener('nx:ai-end', () => {
+    _aiBadge?.remove();
+    _aiBadge = null;
+  });
+
+  // ─── 10. Keyboard shortcuts ─────────────────────
+  document.addEventListener('keydown', (e) => {
+    // Cmd/Ctrl + Shift + D = deep work
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'D') {
+      e.preventDefault();
+      Cine.toggleDeepWork();
+    }
+    // Cmd/Ctrl + Shift + M = cycle mode
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'M') {
+      e.preventDefault();
+      Cine.cycleMode();
+    }
+  });
+
+  // ─── 11. Listen for mode changes ────────────────
+  window.addEventListener('nx:mode', updateModeBar);
+
+  // ─── Helpers ────────────────────────────────────
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[c]);
+  }
+
+  // ─── Boot ───────────────────────────────────────
+  function boot() {
+    Cine.mountModeBar();
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot, { once: true });
+  } else {
+    boot();
+  }
+})();
+
+// ============================================================
+// 🎨 visual-components.js — Reusable visual building blocks
+// DAG visualizer · Voice waveform · Workflow timeline · Heatmap
+// Pure SVG/Canvas, no dependencies, zero framework lock-in.
+// ============================================================
+(function () {
+  'use strict';
+
+  const NXV = window.NXV = window.NXV || {};
+
+  // ─── 1. DAG Visualizer ───────────────────────────
+  // Renders orchestration graph as animated SVG nodes + edges
+  NXV.renderDAG = function (target, graph, options = {}) {
+    if (!target || !graph?.nodes) return null;
+    const w = options.width || target.clientWidth || 600;
+    const h = options.height || 360;
+    const nodes = graph.nodes.map(n => ({ ...n, deps: n.dependsOn || [] }));
+
+    // ── Topological layout: assign each node to a layer ──
+    const layers = [];
+    const placed = new Map();
+    let remaining = [...nodes];
+    let safety = 50;
+    while (remaining.length && safety--) {
+      const next = remaining.filter(n => n.deps.every(d => placed.has(d)));
+      if (!next.length) break;
+      layers.push(next);
+      next.forEach(n => placed.set(n.id, layers.length - 1));
+      remaining = remaining.filter(n => !placed.has(n.id));
+    }
+
+    const xStep = w / (layers.length + 1);
+    const positions = new Map();
+    layers.forEach((layer, li) => {
+      const yStep = h / (layer.length + 1);
+      layer.forEach((n, ni) => {
+        positions.set(n.id, { x: xStep * (li + 1), y: yStep * (ni + 1) });
+      });
+    });
+
+    // ── Render SVG ──
+    target.innerHTML = '';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    svg.setAttribute('width', '100%');
+    svg.setAttribute('height', h);
+    svg.style.cssText = 'display:block;background:rgba(0,0,0,.15);border-radius:14px';
+
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    defs.innerHTML = `
+      <linearGradient id="nxv-edge" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="#c6f135" stop-opacity=".15"/>
+        <stop offset="50%" stop-color="#35f1c6" stop-opacity=".7"/>
+        <stop offset="100%" stop-color="#c6f135" stop-opacity=".15"/>
+      </linearGradient>
+      <filter id="nxv-glow" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur stdDeviation="2" />
+      </filter>
+    `;
+    svg.appendChild(defs);
+
+    // Draw edges first (behind nodes)
+    nodes.forEach(n => {
+      const to = positions.get(n.id);
+      n.deps.forEach(depId => {
+        const from = positions.get(depId);
+        if (!from) return;
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const mx = (from.x + to.x) / 2;
+        path.setAttribute('d', `M ${from.x} ${from.y} C ${mx} ${from.y}, ${mx} ${to.y}, ${to.x} ${to.y}`);
+        path.setAttribute('stroke', 'url(#nxv-edge)');
+        path.setAttribute('stroke-width', '1.5');
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke-dasharray', '4 4');
+        path.style.animation = 'nxvFlow 2s linear infinite';
+        svg.appendChild(path);
+      });
+    });
+
+    // Draw nodes
+    nodes.forEach(n => {
+      const p = positions.get(n.id);
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('transform', `translate(${p.x},${p.y})`);
+      g.style.cursor = 'pointer';
+      g.dataset.nodeId = n.id;
+
+      // Status-aware fill
+      const status = n.status || 'pending';
+      const fill = {
+        pending: '#3d3d5c',
+        running: '#c6f135',
+        done: '#35f1c6',
+        error: '#ef4444',
+      }[status];
+
+      const halo = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      halo.setAttribute('r', '18');
+      halo.setAttribute('fill', fill);
+      halo.setAttribute('opacity', status === 'running' ? '.4' : '.15');
+      halo.setAttribute('filter', 'url(#nxv-glow)');
+      if (status === 'running') halo.style.animation = 'nxvPulse 1.4s ease-in-out infinite';
+      g.appendChild(halo);
+
+      const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot.setAttribute('r', '7');
+      dot.setAttribute('fill', fill);
+      dot.setAttribute('stroke', '#fff');
+      dot.setAttribute('stroke-width', '1.5');
+      dot.setAttribute('stroke-opacity', '.4');
+      g.appendChild(dot);
+
+      const lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      lbl.setAttribute('text-anchor', 'middle');
+      lbl.setAttribute('y', '32');
+      lbl.setAttribute('fill', '#cde');
+      lbl.setAttribute('font-size', '11');
+      lbl.setAttribute('font-family', 'Inter, sans-serif');
+      lbl.textContent = (n.label || n.id).slice(0, 18);
+      g.appendChild(lbl);
+
+      if (options.onClick) g.addEventListener('click', () => options.onClick(n));
+      svg.appendChild(g);
+    });
+
+    target.appendChild(svg);
+
+    // Inject keyframes once
+    if (!document.getElementById('nxv-keyframes')) {
+      const s = document.createElement('style');
+      s.id = 'nxv-keyframes';
+      s.textContent = `
+        @keyframes nxvFlow { to { stroke-dashoffset: -16; } }
+        @keyframes nxvPulse {
+          0%,100% { opacity: .25; transform: scale(1); transform-origin: center; }
+          50% { opacity: .55; transform: scale(1.15); }
+        }
+      `;
+      document.head.appendChild(s);
+    }
+
+    return {
+      svg,
+      updateStatus(nodeId, status) {
+        const g = svg.querySelector(`[data-node-id="${nodeId}"]`);
+        if (!g) return;
+        const node = nodes.find(n => n.id === nodeId);
+        if (node) node.status = status;
+        const fill = { pending: '#3d3d5c', running: '#c6f135', done: '#35f1c6', error: '#ef4444' }[status];
+        const [halo, dot] = g.children;
+        halo.setAttribute('fill', fill);
+        dot.setAttribute('fill', fill);
+        halo.setAttribute('opacity', status === 'running' ? '.4' : '.15');
+        if (status === 'running') halo.style.animation = 'nxvPulse 1.4s ease-in-out infinite';
+        else halo.style.animation = 'none';
+      },
+    };
+  };
+
+  // ─── 2. Voice Waveform ───────────────────────────
+  // Animated bars while recording / playing audio
+  NXV.renderWaveform = function (target, options = {}) {
+    if (!target) return null;
+    const bars = options.bars || 32;
+    target.innerHTML = '';
+    target.style.cssText = (target.style.cssText || '') +
+      ';display:flex;align-items:center;justify-content:center;gap:2px;height:48px;padding:8px';
+
+    const els = [];
+    for (let i = 0; i < bars; i++) {
+      const b = document.createElement('div');
+      b.style.cssText = `
+        width:3px;
+        background:linear-gradient(180deg,#c6f135,#35f1c6);
+        border-radius:2px;
+        height:20%;
+        transition:height 80ms cubic-bezier(.2,.8,.2,1);
+        opacity:.7;
+      `;
+      target.appendChild(b);
+      els.push(b);
+    }
+
+    let raf = null;
+    let active = false;
+    let analyser = null;
+    let dataArr = null;
+
+    function animate() {
+      if (!active) return;
+      if (analyser) {
+        analyser.getByteFrequencyData(dataArr);
+        const step = Math.floor(dataArr.length / bars);
+        els.forEach((el, i) => {
+          const v = dataArr[i * step] || 0;
+          el.style.height = Math.max(10, (v / 255) * 100) + '%';
+          el.style.opacity = .4 + (v / 255) * .6;
+        });
+      } else {
+        // Synthetic idle animation
+        const t = Date.now() / 100;
+        els.forEach((el, i) => {
+          const v = (Math.sin(t + i * .3) + Math.sin(t * 1.7 + i * .5)) * 25 + 40;
+          el.style.height = Math.max(10, v) + '%';
+        });
+      }
+      raf = requestAnimationFrame(animate);
+    }
+
+    return {
+      start(stream) {
+        active = true;
+        if (stream && window.AudioContext) {
+          try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const source = ctx.createMediaStreamSource(stream);
+            analyser = ctx.createAnalyser();
+            analyser.fftSize = 128;
+            dataArr = new Uint8Array(analyser.frequencyBinCount);
+            source.connect(analyser);
+          } catch (_) { analyser = null; }
+        }
+        animate();
+      },
+      stop() {
+        active = false;
+        if (raf) cancelAnimationFrame(raf);
+        els.forEach(el => { el.style.height = '20%'; el.style.opacity = '.5'; });
+      },
+      setLevel(level) {
+        // 0..1 manual level (when no stream)
+        els.forEach((el, i) => {
+          const offset = Math.sin(i * .8) * 20;
+          el.style.height = Math.max(10, level * 100 + offset) + '%';
+        });
+      },
+    };
+  };
+
+  // ─── 3. Operational Heatmap ──────────────────────
+  // GitHub-style activity grid
+  NXV.renderHeatmap = function (target, data, options = {}) {
+    if (!target) return;
+    const days = options.days || 90;
+    const cell = options.cellSize || 12;
+    const gap = 2;
+    const cols = Math.ceil(days / 7);
+
+    target.innerHTML = '';
+    target.style.cssText = (target.style.cssText || '') + ';display:flex;gap:2px;align-items:flex-start';
+
+    // Normalize data
+    const max = Math.max(...Object.values(data || {}), 1);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    for (let c = 0; c < cols; c++) {
+      const colDiv = document.createElement('div');
+      colDiv.style.cssText = `display:flex;flex-direction:column;gap:${gap}px`;
+      for (let r = 0; r < 7; r++) {
+        const idx = (cols - 1 - c) * 7 + r;
+        if (idx >= days) continue;
+        const date = new Date(today);
+        date.setDate(date.getDate() - idx);
+        const key = date.toISOString().slice(0, 10);
+        const val = data?.[key] || 0;
+        const intensity = val / max;
+        const sq = document.createElement('div');
+        sq.title = `${key}: ${val}`;
+        sq.style.cssText = `
+          width:${cell}px;height:${cell}px;border-radius:3px;
+          background:rgba(198,241,53,${0.08 + intensity * 0.7});
+          border:1px solid rgba(255,255,255,${0.04 + intensity * 0.06});
+          cursor:pointer;
+          transition:transform .15s;
+        `;
+        sq.onmouseenter = () => sq.style.transform = 'scale(1.4)';
+        sq.onmouseleave = () => sq.style.transform = 'scale(1)';
+        colDiv.appendChild(sq);
+      }
+      target.appendChild(colDiv);
+    }
+  };
+
+  // ─── 4. Workflow Timeline (replay) ───────────────
+  NXV.renderTimeline = function (target, events) {
+    if (!target || !events?.length) return;
+    target.innerHTML = '';
+    target.style.cssText = (target.style.cssText || '') +
+      ';position:relative;padding-left:24px;display:flex;flex-direction:column;gap:14px';
+
+    // Vertical spine
+    const spine = document.createElement('div');
+    spine.style.cssText = 'position:absolute;left:7px;top:0;bottom:0;width:2px;background:linear-gradient(180deg,transparent,#35f1c660 20%,#35f1c660 80%,transparent);border-radius:2px';
+    target.appendChild(spine);
+
+    events.forEach((e, i) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'position:relative;animation:nxvFadeIn .5s cubic-bezier(.2,.8,.2,1) both';
+      row.style.animationDelay = (i * 60) + 'ms';
+
+      const dot = document.createElement('div');
+      const statusColor = { ok: '#35f1c6', error: '#ef4444', running: '#c6f135', pending: '#3d3d5c' }[e.status] || '#7df';
+      dot.style.cssText = `
+        position:absolute;left:-21px;top:6px;width:10px;height:10px;border-radius:50%;
+        background:${statusColor};box-shadow:0 0 8px ${statusColor}
+      `;
+      row.appendChild(dot);
+
+      const content = document.createElement('div');
+      content.style.cssText = 'background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px 14px';
+      content.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+          <div style="color:#cde;font-size:13px;font-weight:500">${escapeHtml(e.label || e.type)}</div>
+          <div style="color:#789;font-size:11px;letter-spacing:.5px">${e.time || ''}</div>
+        </div>
+        ${e.detail ? `<div style="color:#89a;font-size:12px;margin-top:4px">${escapeHtml(e.detail)}</div>` : ''}
+        ${e.duration_ms != null ? `<div style="color:#567;font-size:11px;margin-top:4px">${e.duration_ms}ms</div>` : ''}
+      `;
+      row.appendChild(content);
+      target.appendChild(row);
+    });
+
+    if (!document.getElementById('nxv-fadein')) {
+      const s = document.createElement('style');
+      s.id = 'nxv-fadein';
+      s.textContent = '@keyframes nxvFadeIn { from { opacity:0; transform:translateX(-8px) } to { opacity:1; transform:translateX(0) } }';
+      document.head.appendChild(s);
+    }
+  };
+
+  // ─── 5. Inline sparkline ─────────────────────────
+  NXV.renderSparkline = function (target, values, options = {}) {
+    if (!target || !values?.length) return;
+    const w = options.width || 120;
+    const h = options.height || 32;
+    const max = Math.max(...values, 1);
+    const min = Math.min(...values, 0);
+    const range = max - min || 1;
+    const step = w / (values.length - 1 || 1);
+
+    const points = values.map((v, i) => {
+      const x = i * step;
+      const y = h - ((v - min) / range) * h;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+
+    target.innerHTML = `
+      <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="overflow:visible">
+        <defs>
+          <linearGradient id="nxv-spark-${Math.random().toString(36).slice(2,8)}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#35f1c6" stop-opacity=".4"/>
+            <stop offset="100%" stop-color="#35f1c6" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <polyline fill="none" stroke="#35f1c6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" points="${points}"/>
+      </svg>
+    `;
+  };
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[c]);
+  }
+})();
+
+// ============================================================
+// 🎛️ ui-panels.js — All 6 service panels
+// Knowledge · Media · Code · Business · Workspaces · Voice
+// Renders into target containers. Uses NX design system + NXV visuals.
+// ============================================================
+(function () {
+  'use strict';
+
+  const NXUI = window.NXUI = window.NXUI || {};
+
+  // ─── API helper (uses existing auth token) ─────
+  async function api(path, opts = {}) {
+    const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    window.dispatchEvent(new CustomEvent('nx:ai-start'));
+    try {
+      const r = await fetch(path, { ...opts, headers });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      return data;
+    } finally {
+      window.dispatchEvent(new CustomEvent('nx:ai-end'));
+    }
+  }
+
+  // ─── Shared panel chrome ───────────────────────
+  function panelShell(title, subtitle, bodyHtml, opts = {}) {
+    return `
+      <div class="nxui-panel nx-enter" data-magnetic>
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">${escapeHtml(title)}</h2>
+            ${subtitle ? `<p class="nxui-sub">${escapeHtml(subtitle)}</p>` : ''}
+          </div>
+          ${opts.badge ? `<span class="nx-chip">${escapeHtml(opts.badge)}</span>` : ''}
+        </header>
+        <div class="nxui-body">${bodyHtml}</div>
+      </div>
+    `;
+  }
+
+  function injectStyles() {
+    if (document.getElementById('nxui-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'nxui-styles';
+    s.textContent = `
+      .nxui-panel{background:linear-gradient(135deg,rgba(255,255,255,.03),rgba(255,255,255,.01));border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:28px;margin-bottom:16px;backdrop-filter:blur(12px)}
+      .nxui-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:24px}
+      .nxui-title{font-size:18px;font-weight:500;color:#fff;letter-spacing:-.2px;margin:0}
+      .nxui-sub{color:#789;font-size:12px;margin-top:4px;letter-spacing:.3px}
+      .nxui-body{display:flex;flex-direction:column;gap:16px}
+      .nxui-input{width:100%;padding:12px 14px;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:#fff;font-size:14px;font-family:inherit;outline:none;transition:border-color .2s}
+      .nxui-input:focus{border-color:#35f1c6;box-shadow:0 0 0 3px rgba(53,241,198,.15)}
+      .nxui-textarea{min-height:120px;resize:vertical;font-family:inherit}
+      .nxui-btn{padding:10px 18px;background:linear-gradient(135deg,#c6f135,#35f1c6);color:#000;font-weight:600;border:none;border-radius:10px;font-size:13px;cursor:pointer;transition:transform .15s;letter-spacing:.3px}
+      .nxui-btn:hover{transform:translateY(-1px) scale(1.01)}
+      .nxui-btn:disabled{opacity:.5;cursor:wait}
+      .nxui-btn-secondary{padding:10px 18px;background:rgba(255,255,255,.05);color:#cde;border:1px solid rgba(255,255,255,.08);border-radius:10px;font-size:13px;cursor:pointer}
+      .nxui-btn-secondary:hover{background:rgba(255,255,255,.08)}
+      .nxui-result{padding:16px;background:rgba(0,0,0,.2);border-radius:12px;border:1px solid rgba(53,241,198,.15);color:#cde;font-size:13px;line-height:1.6;white-space:pre-wrap;font-family:ui-monospace,monospace}
+      .nxui-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+      .nxui-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+      .nxui-card{padding:16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:12px;transition:all .2s}
+      .nxui-card:hover{border-color:rgba(53,241,198,.3);transform:translateY(-2px)}
+      .nxui-label{font-size:11px;color:#789;letter-spacing:1.5px;text-transform:uppercase;display:block;margin-bottom:6px}
+      .nxui-select{padding:10px 14px;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:#fff;font-size:14px;outline:none}
+      .nxui-empty{color:#567;font-size:13px;text-align:center;padding:24px;font-style:italic}
+      .nxui-member{display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(255,255,255,.02);border-radius:8px}
+      .nxui-avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#c6f135,#35f1c6);display:flex;align-items:center;justify-content:center;color:#000;font-weight:700;font-size:13px}
+      .nxui-tabs{display:flex;gap:4px;border-bottom:1px solid rgba(255,255,255,.06);margin-bottom:16px;overflow-x:auto}
+      .nxui-tab{padding:10px 16px;color:#789;font-size:13px;cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;white-space:nowrap}
+      .nxui-tab.active{color:#fff;border-bottom-color:#35f1c6}
+      .nxui-tab:hover{color:#cde}
+      .nxui-list{display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto}
+      .nxui-list::-webkit-scrollbar{width:6px}
+      .nxui-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:3px}
+      .nxui-img{max-width:100%;border-radius:12px;display:block}
+      .nxui-meta{font-size:11px;color:#567;letter-spacing:.5px}
+    `;
+    document.head.appendChild(s);
+  }
+  injectStyles();
+
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  }
+
+  // ─────────────────────────────────────────
+  // 1. KNOWLEDGE HUB
+  // ─────────────────────────────────────────
+  NXUI.renderKnowledge = function (target) {
+    target.innerHTML = panelShell('Knowledge Hub', 'Research with citations — grounded answers from the web', `
+      <div class="nxui-row">
+        <input class="nxui-input" id="nxui-k-q" placeholder="Ask anything — citations included..."/>
+        <button class="nxui-btn" id="nxui-k-go">Search</button>
+      </div>
+      <div id="nxui-k-out"></div>
+    `, { badge: 'RAG' });
+
+    const out = target.querySelector('#nxui-k-out');
+    const go = async () => {
+      const q = target.querySelector('#nxui-k-q').value.trim();
+      if (!q) return;
+      out.innerHTML = `<div class="nxui-result"><span class="nx-thinking"><span></span><span></span><span></span><span></span><span></span></span> Researching…</div>`;
+      try {
+        const r = await api('/api/intelligence/multi-model', {
+          method: 'POST',
+          body: JSON.stringify({ prompt: q, task: 'reasoning-deep' }),
+        });
+        out.innerHTML = `
+          <div class="nxui-result">
+            <div style="color:#35f1c6;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Synthesis</div>
+            ${escapeHtml(typeof r.synthesis === 'string' ? r.synthesis : JSON.stringify(r.synthesis || r, null, 2))}
+          </div>
+        `;
+      } catch (e) {
+        out.innerHTML = `<div class="nxui-result" style="border-color:rgba(239,68,68,.3);color:#fca5a5">${escapeHtml(e.message)}</div>`;
+      }
+    };
+    target.querySelector('#nxui-k-go').onclick = go;
+    target.querySelector('#nxui-k-q').addEventListener('keydown', e => e.key === 'Enter' && go());
+  };
+
+  // ─────────────────────────────────────────
+  // 2. MEDIA STUDIO
+  // ─────────────────────────────────────────
+  NXUI.renderMedia = function (target) {
+    target.innerHTML = panelShell('Media Studio', 'Generate images · video · 3D · audio', `
+      <div class="nxui-tabs">
+        <div class="nxui-tab active" data-tab="image">Image</div>
+        <div class="nxui-tab" data-tab="video">Video</div>
+        <div class="nxui-tab" data-tab="3d">3D</div>
+        <div class="nxui-tab" data-tab="audio">Audio</div>
+      </div>
+      <textarea class="nxui-input nxui-textarea" id="nxui-m-prompt" placeholder="Describe what to generate..."></textarea>
+      <div class="nxui-row">
+        <select class="nxui-select" id="nxui-m-model"></select>
+        <button class="nxui-btn" id="nxui-m-go">Generate</button>
+      </div>
+      <div id="nxui-m-out"></div>
+    `, { badge: 'Multimodal' });
+
+    let activeType = 'image';
+    let modelsCache = null;
+
+    async function loadModels(type) {
+      if (!modelsCache) {
+        try { modelsCache = await api('/api/media/models'); } catch (_) { modelsCache = {}; }
+      }
+      const sel = target.querySelector('#nxui-m-model');
+      const models = modelsCache[type] || {};
+      sel.innerHTML = Object.keys(models).map(k => `<option value="${k}">${k}</option>`).join('') || '<option value="">No models available</option>';
+    }
+    loadModels('image');
+
+    target.querySelectorAll('.nxui-tab').forEach(t => {
+      t.onclick = () => {
+        target.querySelectorAll('.nxui-tab').forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        activeType = t.dataset.tab;
+        loadModels(activeType);
+      };
+    });
+
+    target.querySelector('#nxui-m-go').onclick = async () => {
+      const prompt = target.querySelector('#nxui-m-prompt').value.trim();
+      const model = target.querySelector('#nxui-m-model').value;
+      if (!prompt) return;
+      const out = target.querySelector('#nxui-m-out');
+      out.innerHTML = `<div class="nxui-result"><span class="nx-thinking"><span></span><span></span><span></span><span></span><span></span></span> Generating ${activeType}...</div>`;
+      try {
+        const r = await api('/api/media/generate', {
+          method: 'POST',
+          body: JSON.stringify({ type: activeType, prompt, model }),
+        });
+        if (r.url && activeType === 'image') {
+          out.innerHTML = `<img class="nxui-img" src="${escapeHtml(r.url)}" alt="${escapeHtml(prompt)}"/><div class="nxui-meta" style="margin-top:8px">${escapeHtml(r.model)} · ${r.duration_ms}ms</div>`;
+        } else if (r.url && (activeType === 'video' || activeType === '3d')) {
+          out.innerHTML = `<video class="nxui-img" controls src="${escapeHtml(r.url)}"></video><div class="nxui-meta" style="margin-top:8px">${escapeHtml(r.model)}</div>`;
+        } else if (r.url && activeType === 'audio') {
+          out.innerHTML = `<audio controls src="${escapeHtml(r.url)}" style="width:100%"></audio>`;
+        } else {
+          out.innerHTML = `<div class="nxui-result">${escapeHtml(JSON.stringify(r, null, 2))}</div>`;
+        }
+      } catch (e) {
+        out.innerHTML = `<div class="nxui-result" style="border-color:rgba(239,68,68,.3);color:#fca5a5">${escapeHtml(e.message)}</div>`;
+      }
+    };
+  };
+
+  // ─────────────────────────────────────────
+  // 3. CODE INTELLIGENCE
+  // ─────────────────────────────────────────
+  NXUI.renderCode = function (target) {
+    target.innerHTML = panelShell('Code Intelligence', 'Repo-aware analysis · reviews · debugging', `
+      <div class="nxui-tabs">
+        <div class="nxui-tab active" data-tab="analyze">Analyze</div>
+        <div class="nxui-tab" data-tab="review">Review</div>
+        <div class="nxui-tab" data-tab="debug">Debug</div>
+      </div>
+      <textarea class="nxui-input nxui-textarea" id="nxui-c-code" placeholder="Paste code here..." style="font-family:ui-monospace,monospace;min-height:180px"></textarea>
+      <textarea class="nxui-input" id="nxui-c-err" placeholder="Error message (for debug only)" style="display:none"></textarea>
+      <div class="nxui-row">
+        <select class="nxui-select" id="nxui-c-lang">
+          <option>javascript</option><option>python</option><option>typescript</option><option>rust</option><option>go</option>
+        </select>
+        <button class="nxui-btn" id="nxui-c-go">Run Analysis</button>
+      </div>
+      <div id="nxui-c-out"></div>
+    `, { badge: 'Cursor-level' });
+
+    let mode = 'analyze';
+    target.querySelectorAll('.nxui-tab').forEach(t => {
+      t.onclick = () => {
+        target.querySelectorAll('.nxui-tab').forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        mode = t.dataset.tab;
+        target.querySelector('#nxui-c-err').style.display = mode === 'debug' ? 'block' : 'none';
+      };
+    });
+
+    target.querySelector('#nxui-c-go').onclick = async () => {
+      const code = target.querySelector('#nxui-c-code').value.trim();
+      const language = target.querySelector('#nxui-c-lang').value;
+      const error = target.querySelector('#nxui-c-err').value.trim();
+      if (!code) return;
+      const out = target.querySelector('#nxui-c-out');
+      out.innerHTML = `<div class="nxui-result"><span class="nx-thinking"><span></span><span></span><span></span><span></span><span></span></span> Analyzing…</div>`;
+
+      const endpoint = { analyze: '/api/repo/analyze', review: '/api/repo/review', debug: '/api/repo/debug' }[mode];
+      const body = mode === 'debug' ? { code, error, language } : { code, language };
+      try {
+        const r = await api(endpoint, { method: 'POST', body: JSON.stringify(body) });
+        out.innerHTML = `<div class="nxui-result">${escapeHtml(JSON.stringify(r, null, 2))}</div>`;
+      } catch (e) {
+        out.innerHTML = `<div class="nxui-result" style="border-color:rgba(239,68,68,.3);color:#fca5a5">${escapeHtml(e.message)}</div>`;
+      }
+    };
+  };
+
+  // ─────────────────────────────────────────
+  // 4. BUSINESS DASHBOARD
+  // ─────────────────────────────────────────
+  NXUI.renderBusiness = function (target) {
+    target.innerHTML = panelShell('Business Operations', 'Metrics · growth intelligence · strategic playbooks', `
+      <div class="nxui-tabs">
+        <div class="nxui-tab active" data-tab="record">Record</div>
+        <div class="nxui-tab" data-tab="analyze">Analyze</div>
+        <div class="nxui-tab" data-tab="growth">Growth</div>
+        <div class="nxui-tab" data-tab="marketing">Marketing</div>
+      </div>
+      <div id="nxui-b-body"></div>
+      <div id="nxui-b-out"></div>
+    `, { badge: 'Ops AI' });
+
+    const body = target.querySelector('#nxui-b-body');
+    const out = target.querySelector('#nxui-b-out');
+
+    function showRecord() {
+      body.innerHTML = `
+        <input class="nxui-input" id="nxui-b-type" placeholder="metric_type (e.g. acquisition)"/>
+        <input class="nxui-input" id="nxui-b-name" placeholder="metric_name (e.g. signups)"/>
+        <input class="nxui-input" id="nxui-b-val" type="number" placeholder="value"/>
+        <div class="nxui-row"><button class="nxui-btn" id="nxui-b-rec">Record metric</button></div>
+      `;
+      body.querySelector('#nxui-b-rec').onclick = async () => {
+        try {
+          await api('/api/business/metric', {
+            method: 'POST',
+            body: JSON.stringify({
+              metric_type: body.querySelector('#nxui-b-type').value,
+              metric_name: body.querySelector('#nxui-b-name').value,
+              value: Number(body.querySelector('#nxui-b-val').value),
+            }),
+          });
+          out.innerHTML = `<div class="nxui-result" style="border-color:rgba(53,241,198,.4)">✓ Recorded</div>`;
+        } catch (e) { out.innerHTML = `<div class="nxui-result" style="border-color:rgba(239,68,68,.3);color:#fca5a5">${escapeHtml(e.message)}</div>`; }
+      };
+    }
+
+    async function runAnalysis(endpoint, payload = {}) {
+      out.innerHTML = `<div class="nxui-result"><span class="nx-thinking"><span></span><span></span><span></span><span></span><span></span></span> Analyzing…</div>`;
+      try {
+        const r = await api(endpoint, { method: 'POST', body: JSON.stringify(payload) });
+        out.innerHTML = `<div class="nxui-result">${escapeHtml(JSON.stringify(r, null, 2))}</div>`;
+      } catch (e) { out.innerHTML = `<div class="nxui-result" style="border-color:rgba(239,68,68,.3);color:#fca5a5">${escapeHtml(e.message)}</div>`; }
+    }
+
+    function showAnalyze() {
+      body.innerHTML = `<div class="nxui-row"><button class="nxui-btn" id="nxui-b-ana">Analyze last 7 days</button></div>`;
+      body.querySelector('#nxui-b-ana').onclick = () => runAnalysis('/api/business/analyze', { period_days: 7 });
+    }
+    function showGrowth() {
+      body.innerHTML = `<div class="nxui-row"><button class="nxui-btn" id="nxui-b-gr">Run growth intelligence</button></div>`;
+      body.querySelector('#nxui-b-gr').onclick = () => runAnalysis('/api/business/growth');
+    }
+    function showMarketing() {
+      body.innerHTML = `
+        <input class="nxui-input" id="nxui-mk-prod" placeholder="Product"/>
+        <input class="nxui-input" id="nxui-mk-aud" placeholder="Target audience"/>
+        <select class="nxui-select" id="nxui-mk-bud"><option>low</option><option>medium</option><option>high</option></select>
+        <div class="nxui-row"><button class="nxui-btn" id="nxui-mk-go">Generate strategy</button></div>
+      `;
+      body.querySelector('#nxui-mk-go').onclick = () => runAnalysis('/api/business/marketing', {
+        product: body.querySelector('#nxui-mk-prod').value,
+        audience: body.querySelector('#nxui-mk-aud').value,
+        budget: body.querySelector('#nxui-mk-bud').value,
+      });
+    }
+
+    const tabHandlers = { record: showRecord, analyze: showAnalyze, growth: showGrowth, marketing: showMarketing };
+    target.querySelectorAll('.nxui-tab').forEach(t => {
+      t.onclick = () => {
+        target.querySelectorAll('.nxui-tab').forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        tabHandlers[t.dataset.tab]();
+      };
+    });
+    showRecord();
+  };
+
+  // ─────────────────────────────────────────
+  // 5. WORKSPACES
+  // ─────────────────────────────────────────
+  NXUI.renderWorkspaces = function (target) {
+    target.innerHTML = panelShell('Workspaces', 'Team collaboration with real-time presence', `
+      <div class="nxui-row">
+        <input class="nxui-input" id="nxui-ws-name" placeholder="Workspace name..." style="flex:1"/>
+        <button class="nxui-btn" id="nxui-ws-create">Create</button>
+      </div>
+      <div id="nxui-ws-list" class="nxui-list"></div>
+      <div id="nxui-ws-detail"></div>
+    `, { badge: 'Team' });
+
+    const list = target.querySelector('#nxui-ws-list');
+    const detail = target.querySelector('#nxui-ws-detail');
+
+    async function loadList() {
+      try {
+        const r = await api('/api/workspaces');
+        if (!r.workspaces?.length) {
+          list.innerHTML = `<div class="nxui-empty">No workspaces yet — create one above</div>`;
+          return;
+        }
+        list.innerHTML = r.workspaces.map(ws => `
+          <div class="nxui-card" data-ws-id="${ws.id}" style="cursor:pointer">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <div style="color:#fff;font-weight:500;font-size:14px">${escapeHtml(ws.name)}</div>
+                <div class="nxui-meta">${escapeHtml(ws.role)} · ${escapeHtml(ws.slug || '')}</div>
+              </div>
+              <span class="nx-chip">${escapeHtml(ws.role)}</span>
+            </div>
+          </div>
+        `).join('');
+        list.querySelectorAll('[data-ws-id]').forEach(el => {
+          el.onclick = () => openWs(Number(el.dataset.wsId));
+        });
+      } catch (e) {
+        list.innerHTML = `<div class="nxui-empty">${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    async function openWs(id) {
+      detail.innerHTML = `<div class="nxui-result"><span class="nx-thinking"><span></span><span></span><span></span><span></span><span></span></span> Loading…</div>`;
+      try {
+        const ws = await api(`/api/workspaces/${id}`);
+        detail.innerHTML = `
+          <div class="nxui-card nx-active-glow">
+            <h3 style="color:#fff;margin-bottom:8px">${escapeHtml(ws.name)}</h3>
+            <p style="color:#789;font-size:13px;margin-bottom:16px">${escapeHtml(ws.description || 'No description')}</p>
+            <div class="nxui-label">Members (${ws.members?.length || 0})</div>
+            <div class="nxui-list" style="max-height:200px;margin-top:8px">
+              ${(ws.members || []).map(m => `
+                <div class="nxui-member">
+                  <div class="nxui-avatar">${(m.name || m.email || '?').slice(0, 1).toUpperCase()}</div>
+                  <div style="flex:1">
+                    <div style="color:#fff;font-size:13px">${escapeHtml(m.name || m.email || 'User')}</div>
+                    <div class="nxui-meta">${escapeHtml(m.role)}</div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+            <div class="nxui-row" style="margin-top:16px">
+              <input class="nxui-input" id="nxui-ws-invite" placeholder="invite@email.com" style="flex:1"/>
+              <button class="nxui-btn-secondary" id="nxui-ws-invite-go">Send invite</button>
+            </div>
+            <div id="nxui-ws-invite-out" style="margin-top:8px"></div>
+          </div>
+        `;
+        detail.querySelector('#nxui-ws-invite-go').onclick = async () => {
+          const email = detail.querySelector('#nxui-ws-invite').value.trim();
+          if (!email) return;
+          try {
+            const r = await api(`/api/workspaces/${id}/invite`, {
+              method: 'POST', body: JSON.stringify({ email, role: 'member' }),
+            });
+            detail.querySelector('#nxui-ws-invite-out').innerHTML = `<div class="nxui-result" style="border-color:rgba(53,241,198,.4)">Invite sent: <code>${escapeHtml(r.invite_url)}</code></div>`;
+          } catch (e) {
+            detail.querySelector('#nxui-ws-invite-out').innerHTML = `<div class="nxui-result" style="border-color:rgba(239,68,68,.3);color:#fca5a5">${escapeHtml(e.message)}</div>`;
+          }
+        };
+      } catch (e) {
+        detail.innerHTML = `<div class="nxui-result" style="border-color:rgba(239,68,68,.3);color:#fca5a5">${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    target.querySelector('#nxui-ws-create').onclick = async () => {
+      const name = target.querySelector('#nxui-ws-name').value.trim();
+      if (!name) return;
+      try {
+        await api('/api/workspaces', { method: 'POST', body: JSON.stringify({ name }) });
+        target.querySelector('#nxui-ws-name').value = '';
+        loadList();
+      } catch (e) { detail.innerHTML = `<div class="nxui-result" style="border-color:rgba(239,68,68,.3);color:#fca5a5">${escapeHtml(e.message)}</div>`; }
+    };
+
+    loadList();
+  };
+
+  // ─────────────────────────────────────────
+  // 6. VOICE CONSOLE
+  // ─────────────────────────────────────────
+  NXUI.renderVoice = function (target) {
+    target.innerHTML = panelShell('Voice Console', 'Transcribe · synthesize · voice chat', `
+      <div class="nxui-tabs">
+        <div class="nxui-tab active" data-tab="tts">Text → Speech</div>
+        <div class="nxui-tab" data-tab="record">Voice chat</div>
+      </div>
+      <div id="nxui-v-body"></div>
+    `, { badge: 'Voice AI' });
+
+    const body = target.querySelector('#nxui-v-body');
+
+    function showTTS() {
+      body.innerHTML = `
+        <textarea class="nxui-input nxui-textarea" id="nxui-v-text" placeholder="Type text to convert to speech..."></textarea>
+        <div class="nxui-row">
+          <select class="nxui-select" id="nxui-v-voice">
+            <option value="alloy">Alloy</option>
+            <option value="echo">Echo</option>
+            <option value="fable">Fable</option>
+            <option value="onyx">Onyx</option>
+            <option value="nova">Nova</option>
+            <option value="shimmer">Shimmer</option>
+          </select>
+          <button class="nxui-btn" id="nxui-v-tts-go">Synthesize</button>
+        </div>
+        <div id="nxui-v-tts-out"></div>
+      `;
+      body.querySelector('#nxui-v-tts-go').onclick = async () => {
+        const text = body.querySelector('#nxui-v-text').value.trim();
+        const voice = body.querySelector('#nxui-v-voice').value;
+        if (!text) return;
+        const out = body.querySelector('#nxui-v-tts-out');
+        out.innerHTML = `<div class="nxui-result"><span class="nx-thinking"><span></span><span></span><span></span><span></span><span></span></span> Synthesizing…</div>`;
+        try {
+          const r = await api('/api/voice/tts', { method: 'POST', body: JSON.stringify({ text, voice }) });
+          out.innerHTML = `<audio controls src="${r.audio_url}" style="width:100%;margin-top:8px"></audio>`;
+        } catch (e) { out.innerHTML = `<div class="nxui-result" style="border-color:rgba(239,68,68,.3);color:#fca5a5">${escapeHtml(e.message)}</div>`; }
+      };
+    }
+
+    function showRecord() {
+      body.innerHTML = `
+        <div id="nxui-v-wave" style="background:rgba(0,0,0,.3);border-radius:12px;padding:8px"></div>
+        <div class="nxui-row">
+          <button class="nxui-btn" id="nxui-v-start">● Start recording</button>
+          <button class="nxui-btn-secondary" id="nxui-v-stop" disabled>Stop & transcribe</button>
+        </div>
+        <div id="nxui-v-rec-out"></div>
+      `;
+      const wave = window.NXV?.renderWaveform?.(body.querySelector('#nxui-v-wave'), { bars: 40 });
+      let mediaRecorder = null;
+      let chunks = [];
+      body.querySelector('#nxui-v-start').onclick = async () => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder = new MediaRecorder(stream);
+          chunks = [];
+          mediaRecorder.ondataavailable = e => chunks.push(e.data);
+          mediaRecorder.start();
+          wave?.start(stream);
+          body.querySelector('#nxui-v-start').disabled = true;
+          body.querySelector('#nxui-v-stop').disabled = false;
+        } catch (e) {
+          body.querySelector('#nxui-v-rec-out').innerHTML = `<div class="nxui-result" style="border-color:rgba(239,68,68,.3);color:#fca5a5">Microphone access denied</div>`;
+        }
+      };
+      body.querySelector('#nxui-v-stop').onclick = async () => {
+        mediaRecorder?.stop();
+        wave?.stop();
+        body.querySelector('#nxui-v-start').disabled = false;
+        body.querySelector('#nxui-v-stop').disabled = true;
+        await new Promise(r => mediaRecorder.onstop = r);
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.onload = async () => {
+          const audio = reader.result.split(',')[1];
+          const out = body.querySelector('#nxui-v-rec-out');
+          out.innerHTML = `<div class="nxui-result"><span class="nx-thinking"><span></span><span></span><span></span><span></span><span></span></span> Transcribing…</div>`;
+          try {
+            const r = await api('/api/voice/transcribe', {
+              method: 'POST', body: JSON.stringify({ audio, format: 'webm' }),
+            });
+            out.innerHTML = `<div class="nxui-result">${escapeHtml(r.text || '(empty)')}</div>`;
+          } catch (e) { out.innerHTML = `<div class="nxui-result" style="border-color:rgba(239,68,68,.3);color:#fca5a5">${escapeHtml(e.message)}</div>`; }
+        };
+        reader.readAsDataURL(blob);
+      };
+    }
+
+    target.querySelectorAll('.nxui-tab').forEach(t => {
+      t.onclick = () => {
+        target.querySelectorAll('.nxui-tab').forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        (t.dataset.tab === 'tts' ? showTTS : showRecord)();
+      };
+    });
+    showTTS();
+  };
+
+  // ─────────────────────────────────────────
+  // 7. Multi-panel router
+  // ─────────────────────────────────────────
+  NXUI.renderAll = function (container) {
+    if (!container) return;
+    container.innerHTML = `
+      <div class="nxui-tabs" id="nxui-main-tabs">
+        <div class="nxui-tab active" data-panel="knowledge">🔍 Knowledge</div>
+        <div class="nxui-tab" data-panel="media">🎨 Media</div>
+        <div class="nxui-tab" data-panel="code">💻 Code</div>
+        <div class="nxui-tab" data-panel="business">📊 Business</div>
+        <div class="nxui-tab" data-panel="workspaces">👥 Teams</div>
+        <div class="nxui-tab" data-panel="voice">🎤 Voice</div>
+      </div>
+      <div id="nxui-panel-target"></div>
+    `;
+    const target = container.querySelector('#nxui-panel-target');
+    const renderers = {
+      knowledge: NXUI.renderKnowledge,
+      media: NXUI.renderMedia,
+      code: NXUI.renderCode,
+      business: NXUI.renderBusiness,
+      workspaces: NXUI.renderWorkspaces,
+      voice: NXUI.renderVoice,
+    };
+    container.querySelectorAll('#nxui-main-tabs .nxui-tab').forEach(t => {
+      t.onclick = () => {
+        container.querySelectorAll('#nxui-main-tabs .nxui-tab').forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        renderers[t.dataset.panel]?.(target);
+      };
+    });
+    renderers.knowledge(target);
+  };
+})();
+
+// ============================================================
+// 🏆 EXTENDED UI PANELS — Community + PMF + Twin + Fabric + Temporal
+// Documents 6, 12, 13, 15, 16, 18, 24, 26
+// ============================================================
+(function(){
+  'use strict';
+  const NXUI = window.NXUI = window.NXUI || {};
+
+  async function api(path, opts = {}) {
+    const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    window.dispatchEvent(new CustomEvent('nx:ai-start'));
+    try {
+      const r = await fetch(path, { ...opts, headers });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      return data;
+    } finally {
+      window.dispatchEvent(new CustomEvent('nx:ai-end'));
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  }
+
+  // ─────────────────────────────────────────
+  // 🏆 REPUTATION + LEADERBOARD
+  // ─────────────────────────────────────────
+  NXUI.renderReputation = function (target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">Reputation</h2>
+            <p class="nxui-sub">Your standing in the Nexus ecosystem</p>
+          </div>
+          <span class="nx-chip">Live</span>
+        </header>
+        <div id="nxui-rep-me"></div>
+        <div style="margin-top:24px">
+          <span class="nxui-label">Global leaderboard</span>
+          <div id="nxui-rep-board" class="nxui-list"></div>
+        </div>
+      </div>
+    `;
+
+    (async () => {
+      try {
+        const me = await api('/api/community/reputation');
+        target.querySelector('#nxui-rep-me').innerHTML = `
+          <div class="nxui-card nx-active-glow" style="padding:20px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:16px">
+              <div>
+                <div style="color:${me.rank?.color || '#fff'};font-size:20px;font-weight:600;margin-bottom:4px">${escapeHtml(me.rank?.name || 'Operator')}</div>
+                <div style="color:#789;font-size:12px">${me.observations || 0} lifetime · ${me.workflows_shared || 0} workflows shared</div>
+              </div>
+              <div style="text-align:right">
+                <div style="color:#fff;font-size:32px;font-weight:300">${me.points || 0}</div>
+                <div style="color:#567;font-size:11px;letter-spacing:1px">POINTS</div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        const board = await api('/api/community/leaderboard?limit=10');
+        const boardEl = target.querySelector('#nxui-rep-board');
+        boardEl.innerHTML = (board.leaderboard || []).map((r, i) => `
+          <div class="nxui-card" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px">
+            <div style="display:flex;gap:12px;align-items:center">
+              <div style="color:${['#c6f135','#35f1c6','#5b8def'][i] || '#789'};font-size:14px;font-weight:600;width:24px">#${i+1}</div>
+              <div style="color:#cde;font-size:13px">User ${r.user_id}</div>
+            </div>
+            <div style="display:flex;gap:12px;align-items:center">
+              <span style="color:${r.rank?.color || '#789'};font-size:11px">${r.rank?.name || 'Operator'}</span>
+              <span style="color:#fff;font-weight:600">${r.points}</span>
+            </div>
+          </div>
+        `).join('') || `<div class="nxui-empty">No entries yet — be the first!</div>`;
+      } catch (e) {
+        target.querySelector('#nxui-rep-me').innerHTML = `<div class="nxui-empty">${escapeHtml(e.message)}</div>`;
+      }
+    })();
+  };
+
+  // ─────────────────────────────────────────
+  // 🛒 MARKETPLACE
+  // ─────────────────────────────────────────
+  NXUI.renderMarketplace = function (target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">Workflow Marketplace</h2>
+            <p class="nxui-sub">Discover, share, and install proven workflows</p>
+          </div>
+          <span class="nx-chip">Community</span>
+        </header>
+        <div class="nxui-tabs">
+          <div class="nxui-tab active" data-mp-tab="browse">Browse</div>
+          <div class="nxui-tab" data-mp-tab="publish">Publish</div>
+        </div>
+        <div id="nxui-mp-body"></div>
+      </div>
+    `;
+
+    const body = target.querySelector('#nxui-mp-body');
+
+    function showBrowse() {
+      body.innerHTML = `
+        <div class="nxui-row">
+          <select class="nxui-select" id="nxui-mp-kind">
+            <option value="">All types</option>
+            <option value="workflow">Workflow</option>
+            <option value="template">Template</option>
+            <option value="agent">Agent</option>
+            <option value="prompt-pack">Prompt pack</option>
+          </select>
+          <select class="nxui-select" id="nxui-mp-sort">
+            <option value="popular">Most popular</option>
+            <option value="newest">Newest</option>
+            <option value="stars">Most starred</option>
+          </select>
+        </div>
+        <div id="nxui-mp-list" class="nxui-grid" style="margin-top:16px"></div>
+      `;
+      const list = body.querySelector('#nxui-mp-list');
+      async function load() {
+        const kind = body.querySelector('#nxui-mp-kind').value;
+        const sort = body.querySelector('#nxui-mp-sort').value;
+        list.innerHTML = `<div class="nxui-empty"><span class="nx-thinking"><span></span><span></span><span></span><span></span><span></span></span> Loading marketplace...</div>`;
+        try {
+          const r = await api(`/api/community/marketplace?${kind ? `kind=${kind}&` : ''}sort=${sort}`);
+          if (!r.items?.length) {
+            list.innerHTML = `<div class="nxui-empty">No items yet</div>`;
+            return;
+          }
+          list.innerHTML = r.items.map(item => `
+            <div class="nxui-card cine-hologram" style="padding:20px">
+              <div class="nxui-label" style="color:#35f1c6">${escapeHtml(item.kind)}</div>
+              <h3 style="color:#fff;font-size:16px;margin:8px 0">${escapeHtml(item.title)}</h3>
+              <p style="color:#789;font-size:12px;margin-bottom:12px;min-height:32px">${escapeHtml(item.description || '')}</p>
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <div style="color:#567;font-size:11px">⬇ ${item.installs} · ⭐ ${item.stars}</div>
+                <button class="nxui-btn" data-install="${item.id}" style="padding:6px 14px;font-size:12px">Install</button>
+              </div>
+            </div>
+          `).join('');
+          list.querySelectorAll('[data-install]').forEach(btn => {
+            btn.onclick = async () => {
+              btn.textContent = '...';
+              try {
+                await api(`/api/community/marketplace/${btn.dataset.install}/install`, { method: 'POST' });
+                btn.textContent = '✓ Installed';
+                btn.style.background = 'rgba(53,241,198,.3)';
+              } catch (e) { btn.textContent = 'Error'; }
+            };
+          });
+        } catch (e) { list.innerHTML = `<div class="nxui-empty">${escapeHtml(e.message)}</div>`; }
+      }
+      body.querySelector('#nxui-mp-kind').onchange = load;
+      body.querySelector('#nxui-mp-sort').onchange = load;
+      load();
+    }
+
+    function showPublish() {
+      body.innerHTML = `
+        <select class="nxui-select" id="nxui-pb-kind">
+          <option value="workflow">Workflow</option>
+          <option value="template">Template</option>
+          <option value="agent">Agent</option>
+          <option value="prompt-pack">Prompt pack</option>
+        </select>
+        <input class="nxui-input" id="nxui-pb-title" placeholder="Title..."/>
+        <textarea class="nxui-input nxui-textarea" id="nxui-pb-desc" placeholder="Short description..."></textarea>
+        <textarea class="nxui-input nxui-textarea" id="nxui-pb-content" placeholder='JSON content: {"steps": [...]}' style="font-family:ui-monospace,monospace"></textarea>
+        <button class="nxui-btn" id="nxui-pb-go">Publish · Earn 25 pts</button>
+        <div id="nxui-pb-out"></div>
+      `;
+      body.querySelector('#nxui-pb-go').onclick = async () => {
+        try {
+          const content = JSON.parse(body.querySelector('#nxui-pb-content').value || '{}');
+          const r = await api('/api/community/marketplace/publish', {
+            method: 'POST',
+            body: JSON.stringify({
+              kind: body.querySelector('#nxui-pb-kind').value,
+              title: body.querySelector('#nxui-pb-title').value,
+              description: body.querySelector('#nxui-pb-desc').value,
+              content,
+            }),
+          });
+          body.querySelector('#nxui-pb-out').innerHTML = `<div class="nxui-result" style="border-color:rgba(53,241,198,.4);color:#35f1c6">✓ Published: <code>${escapeHtml(r.slug)}</code></div>`;
+        } catch (e) {
+          body.querySelector('#nxui-pb-out').innerHTML = `<div class="nxui-result" style="border-color:rgba(239,68,68,.3);color:#fca5a5">${escapeHtml(e.message)}</div>`;
+        }
+      };
+    }
+
+    target.querySelectorAll('[data-mp-tab]').forEach(t => {
+      t.onclick = () => {
+        target.querySelectorAll('[data-mp-tab]').forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        (t.dataset.mpTab === 'browse' ? showBrowse : showPublish)();
+      };
+    });
+    showBrowse();
+  };
+
+  // ─────────────────────────────────────────
+  // 🌍 SEASONS
+  // ─────────────────────────────────────────
+  NXUI.renderSeasons = function (target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">Operational Seasons</h2>
+            <p class="nxui-sub">Monthly themes · Compete · Level up</p>
+          </div>
+          <span class="nx-chip">This month</span>
+        </header>
+        <div id="nxui-ss-current"></div>
+        <div style="margin-top:24px">
+          <span class="nxui-label">All 12 seasons</span>
+          <div id="nxui-ss-all" class="nxui-grid" style="margin-top:8px"></div>
+        </div>
+      </div>
+    `;
+
+    (async () => {
+      try {
+        const r = await api('/api/community/seasons');
+        const current = r.current;
+        target.querySelector('#nxui-ss-current').innerHTML = `
+          <div class="nxui-card cine-hologram" style="padding:24px">
+            <div class="nxui-label" style="color:#c6f135">${escapeHtml(current.name)}</div>
+            <p style="color:#cde;font-size:14px;margin-top:8px">${escapeHtml(current.theme)}</p>
+            <div style="margin-top:16px;display:flex;gap:8px">
+              <button class="nxui-btn" id="nxui-ss-view">View submissions</button>
+              <button class="nxui-btn-secondary" id="nxui-ss-submit">Submit entry</button>
+            </div>
+            <div id="nxui-ss-body"></div>
+          </div>
+        `;
+
+        target.querySelector('#nxui-ss-all').innerHTML = (r.seasons || []).map(s => `
+          <div class="nxui-card" style="padding:12px 16px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <div style="color:#fff;font-size:13px;font-weight:500">${escapeHtml(s.name)}</div>
+                <div style="color:#567;font-size:11px;margin-top:2px">Month ${s.month}</div>
+              </div>
+              ${s.id === current.id ? '<span class="nx-chip" style="background:rgba(198,241,53,.15);color:#c6f135">LIVE</span>' : ''}
+            </div>
+          </div>
+        `).join('');
+
+        target.querySelector('#nxui-ss-view').onclick = async () => {
+          const body = target.querySelector('#nxui-ss-body');
+          body.innerHTML = `<div class="nxui-empty"><span class="nx-thinking"><span></span><span></span><span></span><span></span><span></span></span></div>`;
+          try {
+            const lb = await api(`/api/community/seasons/${current.id}/leaderboard`);
+            body.innerHTML = `<div style="margin-top:16px" class="nxui-list">${(lb.leaderboard || []).map((s, i) => `
+              <div class="nxui-card" style="padding:10px 14px;display:flex;justify-content:space-between">
+                <div><strong style="color:#fff">#${i+1}</strong> ${escapeHtml(s.title)}</div>
+                <div style="color:#35f1c6">${s.votes} votes</div>
+              </div>
+            `).join('') || '<div class="nxui-empty">No submissions yet</div>'}</div>`;
+          } catch (e) { body.innerHTML = `<div class="nxui-empty">${escapeHtml(e.message)}</div>`; }
+        };
+
+        target.querySelector('#nxui-ss-submit').onclick = () => {
+          const body = target.querySelector('#nxui-ss-body');
+          body.innerHTML = `
+            <div style="margin-top:16px">
+              <input class="nxui-input" id="ss-title" placeholder="Entry title"/>
+              <textarea class="nxui-input nxui-textarea" id="ss-desc" placeholder="Description"></textarea>
+              <button class="nxui-btn" id="ss-go">Submit · Earn 50 pts</button>
+              <div id="ss-out" style="margin-top:8px"></div>
+            </div>
+          `;
+          body.querySelector('#ss-go').onclick = async () => {
+            try {
+              await api(`/api/community/seasons/${current.id}/submit`, {
+                method: 'POST',
+                body: JSON.stringify({
+                  title: body.querySelector('#ss-title').value,
+                  description: body.querySelector('#ss-desc').value,
+                  content: { submitted: true },
+                }),
+              });
+              body.querySelector('#ss-out').innerHTML = `<div class="nxui-result" style="border-color:rgba(53,241,198,.4);color:#35f1c6">✓ Submitted!</div>`;
+            } catch (e) { body.querySelector('#ss-out').innerHTML = `<div class="nxui-result" style="border-color:rgba(239,68,68,.3);color:#fca5a5">${escapeHtml(e.message)}</div>`; }
+          };
+        };
+      } catch (e) {
+        target.querySelector('#nxui-ss-current').innerHTML = `<div class="nxui-empty">${escapeHtml(e.message)}</div>`;
+      }
+    })();
+  };
+
+  // ─────────────────────────────────────────
+  // 📊 PMF DASHBOARD (admin)
+  // ─────────────────────────────────────────
+  NXUI.renderPMF = function (target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">PMF Analytics</h2>
+            <p class="nxui-sub">Retention · Adoption · Friction · Funnel</p>
+          </div>
+          <span class="nx-chip">Admin</span>
+        </header>
+        <div id="nxui-pmf-body"></div>
+      </div>
+    `;
+
+    (async () => {
+      const body = target.querySelector('#nxui-pmf-body');
+      try {
+        const [retention, features, friction, funnel] = await Promise.all([
+          api('/api/pmf/retention?days=30').catch(() => ({})),
+          api('/api/pmf/features?days=30').catch(() => ({ features: [] })),
+          api('/api/pmf/friction?days=7').catch(() => ({ friction: [] })),
+          api('/api/pmf/funnel').catch(() => ({ steps: [] })),
+        ]);
+
+        body.innerHTML = `
+          <div class="nxui-grid">
+            <div class="nxui-card"><div class="nxui-label">Signups (30d)</div><div style="color:#fff;font-size:24px;font-weight:300;margin-top:4px">${retention.signups || 0}</div></div>
+            <div class="nxui-card"><div class="nxui-label">Activation</div><div style="color:#c6f135;font-size:24px;font-weight:300;margin-top:4px">${((retention.activation_rate || 0) * 100).toFixed(1)}%</div></div>
+            <div class="nxui-card"><div class="nxui-label">DAU</div><div style="color:#35f1c6;font-size:24px;font-weight:300;margin-top:4px">${retention.dau || 0}</div></div>
+            <div class="nxui-card"><div class="nxui-label">Stickiness</div><div style="color:#5b8def;font-size:24px;font-weight:300;margin-top:4px">${((retention.stickiness || 0) * 100).toFixed(1)}%</div></div>
+          </div>
+
+          <div style="margin-top:24px">
+            <span class="nxui-label">Activation funnel</span>
+            <div class="cine-timeline" style="margin-top:12px">
+              ${(funnel.steps || []).map(s => `<div class="cine-timeline-item"><strong style="color:#fff">${escapeHtml(s.name)}</strong><div style="color:#89a;font-size:12px">${s.users} users</div></div>`).join('')}
+            </div>
+          </div>
+
+          <div style="margin-top:24px">
+            <span class="nxui-label">Top features (30d)</span>
+            <div class="nxui-list" style="margin-top:12px">
+              ${(features.features || []).slice(0, 10).map(f => `
+                <div class="nxui-card" style="padding:10px 14px;display:flex;justify-content:space-between">
+                  <div style="color:#cde">${escapeHtml(f.feature)}</div>
+                  <div style="color:#789;font-size:12px">${f.uses} uses · ${f.unique_users} users · ${(f.success_rate * 100).toFixed(0)}% ok</div>
+                </div>
+              `).join('') || '<div class="nxui-empty">No data yet</div>'}
+            </div>
+          </div>
+
+          <div style="margin-top:24px">
+            <span class="nxui-label">Friction points (7d)</span>
+            <div class="nxui-list" style="margin-top:12px">
+              ${(friction.friction || []).map(f => `
+                <div class="nxui-card" style="padding:10px 14px;display:flex;justify-content:space-between;border-color:rgba(239,68,68,.2)">
+                  <div style="color:#fca5a5">${escapeHtml(f.feature)} · ${escapeHtml(f.action || '')}</div>
+                  <div style="color:#ef4444;font-size:12px">${f.failures} failures</div>
+                </div>
+              `).join('') || '<div class="nxui-empty">✓ No friction detected</div>'}
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        body.innerHTML = `<div class="nxui-empty">${escapeHtml(e.message)}</div>`;
+      }
+    })();
+  };
+
+  // ─────────────────────────────────────────
+  // 🧠 AI TWIN
+  // ─────────────────────────────────────────
+  NXUI.renderTwin = function (target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">AI Operational Twin</h2>
+            <p class="nxui-sub">Your AI mirror — learning your patterns</p>
+          </div>
+          <span class="nx-chip">Learning</span>
+        </header>
+        <div id="nxui-twin-body"></div>
+      </div>
+    `;
+
+    (async () => {
+      try {
+        const id = await api('/api/twin/identity');
+        const body = target.querySelector('#nxui-twin-body');
+        if (!id.formed) {
+          body.innerHTML = `<div class="cine-hologram" style="padding:24px;text-align:center;color:#cde"><div style="font-size:32px;margin-bottom:12px">🧠</div><p style="font-size:14px">${escapeHtml(id.message || 'Your twin is still learning your patterns')}</p><p style="color:#789;font-size:12px;margin-top:8px">Use the app more — the twin observes silently.</p></div>`;
+          return;
+        }
+        body.innerHTML = `
+          <div class="nxui-grid">
+            <div class="nxui-card"><div class="nxui-label">Observations</div><div style="color:#fff;font-size:24px;font-weight:300">${id.total_observations}</div></div>
+            <div class="nxui-card"><div class="nxui-label">Confidence</div><div style="color:#c6f135;font-size:24px;font-weight:300">${(id.avg_confidence * 100).toFixed(0)}%</div></div>
+            <div class="nxui-card"><div class="nxui-label">Active time</div><div style="color:#35f1c6;font-size:16px;font-weight:500;text-transform:capitalize;padding-top:6px">${escapeHtml(id.active_time)}</div></div>
+          </div>
+          <div style="margin-top:24px">
+            <span class="nxui-label">Your typical actions</span>
+            <div class="nxui-list" style="margin-top:12px">
+              ${(id.top_actions || []).map(a => `
+                <div class="nxui-card" style="padding:10px 14px;display:flex;justify-content:space-between">
+                  <div style="color:#cde">${escapeHtml(a.action)}</div>
+                  <div style="color:#35f1c6;font-size:12px">${a.count} times</div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        target.querySelector('#nxui-twin-body').innerHTML = `<div class="nxui-empty">${escapeHtml(e.message)}</div>`;
+      }
+    })();
+  };
+
+  // ─────────────────────────────────────────
+  // 🕸️ MEMORY FABRIC
+  // ─────────────────────────────────────────
+  NXUI.renderFabric = function (target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">Memory Fabric</h2>
+            <p class="nxui-sub">Interconnected memory graph — recall by context</p>
+          </div>
+          <span class="nx-chip">Graph</span>
+        </header>
+        <div class="nxui-row">
+          <input class="nxui-input" id="nxui-fab-q" placeholder="Recall memories..." style="flex:1"/>
+          <button class="nxui-btn" id="nxui-fab-recall">Recall</button>
+        </div>
+        <div id="nxui-fab-stats" style="margin-top:16px"></div>
+        <div id="nxui-fab-results" style="margin-top:16px"></div>
+      </div>
+    `;
+
+    (async () => {
+      try {
+        const stats = await api('/api/fabric/stats');
+        target.querySelector('#nxui-fab-stats').innerHTML = `
+          <div class="nxui-grid">
+            <div class="nxui-card"><div class="nxui-label">Memory nodes</div><div style="color:#fff;font-size:24px;font-weight:300">${stats.nodes}</div></div>
+            <div class="nxui-card"><div class="nxui-label">Connections</div><div style="color:#35f1c6;font-size:24px;font-weight:300">${stats.edges}</div></div>
+            <div class="nxui-card"><div class="nxui-label">Density</div><div style="color:#c6f135;font-size:24px;font-weight:300">${stats.density.toFixed(2)}</div></div>
+          </div>
+        `;
+      } catch (_) {}
+    })();
+
+    target.querySelector('#nxui-fab-recall').onclick = async () => {
+      const q = target.querySelector('#nxui-fab-q').value;
+      const out = target.querySelector('#nxui-fab-results');
+      out.innerHTML = `<div class="nxui-empty"><span class="nx-thinking"><span></span><span></span><span></span><span></span><span></span></span></div>`;
+      try {
+        const r = await api(`/api/fabric/recall?query=${encodeURIComponent(q)}`);
+        if (!r.memories?.length) { out.innerHTML = `<div class="nxui-empty">No memories match</div>`; return; }
+        out.innerHTML = `<div class="nxui-list">${r.memories.map(m => `
+          <div class="nxui-card cine-hologram" style="padding:14px">
+            <div class="nxui-label">${escapeHtml(m.node_type)} · relevance: ${((m.relevance || 0) * 100).toFixed(0)}%</div>
+            <div style="color:#cde;font-size:13px;margin-top:6px">${escapeHtml(m.content).slice(0, 200)}</div>
+          </div>
+        `).join('')}</div>`;
+      } catch (e) { out.innerHTML = `<div class="nxui-empty">${escapeHtml(e.message)}</div>`; }
+    };
+  };
+
+  // ─────────────────────────────────────────
+  // ⏰ TEMPORAL UX
+  // ─────────────────────────────────────────
+  NXUI.renderTemporal = function (target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">Temporal UX</h2>
+            <p class="nxui-sub">Time-adaptive workspace based on your rhythm</p>
+          </div>
+          <span class="nx-chip">Adaptive</span>
+        </header>
+        <div id="nxui-temporal-body"></div>
+      </div>
+    `;
+
+    (async () => {
+      try {
+        const t = await api('/api/temporal/config');
+        target.querySelector('#nxui-temporal-body').innerHTML = `
+          <div class="nxui-card cine-hologram" style="padding:24px">
+            <div class="nxui-label">Right now</div>
+            <div style="color:#fff;font-size:22px;text-transform:capitalize;margin:8px 0">${escapeHtml(t.block?.replace(/_/g, ' '))}</div>
+            <div style="color:#789;font-size:13px">Energy: ${escapeHtml(t.energy)} · Tone: ${escapeHtml(t.tone)}</div>
+          </div>
+          <div style="margin-top:16px">
+            <span class="nxui-label">Recommendations</span>
+            <div class="nxui-list" style="margin-top:8px">
+              ${(t.config?.suggestions || []).map(s => `<div class="nxui-card" style="padding:12px 14px"><div style="color:#cde;font-size:13px">${escapeHtml(s)}</div></div>`).join('')}
+            </div>
+          </div>
+          <div style="margin-top:16px" class="nxui-card">
+            <div class="nxui-label">Suggested mode</div>
+            <div style="color:#fff;text-transform:capitalize;font-size:16px;margin-top:6px">${escapeHtml(t.config?.mode)}</div>
+            <button class="nxui-btn" id="nxui-temp-apply" style="margin-top:12px">Apply now</button>
+          </div>
+        `;
+        target.querySelector('#nxui-temp-apply').onclick = () => {
+          window.NX?.setMode?.(t.config?.mode || 'calm');
+        };
+      } catch (e) {
+        target.querySelector('#nxui-temporal-body').innerHTML = `<div class="nxui-empty">${escapeHtml(e.message)}</div>`;
+      }
+    })();
+  };
+
+  // ─────────────────────────────────────────
+  // Extend renderAll with the new panels
+  // ─────────────────────────────────────────
+  const originalRenderAll = NXUI.renderAll;
+  NXUI.renderAllExtended = function (container) {
+    if (!container) return;
+    container.innerHTML = `
+      <div class="nxui-tabs" id="nxui-main-tabs" style="overflow-x:auto">
+        <div class="nxui-tab active" data-panel="knowledge">🔍 Knowledge</div>
+        <div class="nxui-tab" data-panel="media">🎨 Media</div>
+        <div class="nxui-tab" data-panel="code">💻 Code</div>
+        <div class="nxui-tab" data-panel="business">📊 Business</div>
+        <div class="nxui-tab" data-panel="workspaces">👥 Teams</div>
+        <div class="nxui-tab" data-panel="voice">🎤 Voice</div>
+        <div class="nxui-tab" data-panel="reputation">🏆 Reputation</div>
+        <div class="nxui-tab" data-panel="marketplace">🛒 Market</div>
+        <div class="nxui-tab" data-panel="seasons">🌍 Seasons</div>
+        <div class="nxui-tab" data-panel="twin">🧠 Twin</div>
+        <div class="nxui-tab" data-panel="fabric">🕸️ Fabric</div>
+        <div class="nxui-tab" data-panel="temporal">⏰ Temporal</div>
+        <div class="nxui-tab" data-panel="pmf">📊 PMF</div>
+      </div>
+      <div id="nxui-panel-target"></div>
+    `;
+    const target = container.querySelector('#nxui-panel-target');
+    const renderers = {
+      knowledge: NXUI.renderKnowledge,
+      media: NXUI.renderMedia,
+      code: NXUI.renderCode,
+      business: NXUI.renderBusiness,
+      workspaces: NXUI.renderWorkspaces,
+      voice: NXUI.renderVoice,
+      reputation: NXUI.renderReputation,
+      marketplace: NXUI.renderMarketplace,
+      seasons: NXUI.renderSeasons,
+      twin: NXUI.renderTwin,
+      fabric: NXUI.renderFabric,
+      temporal: NXUI.renderTemporal,
+      pmf: NXUI.renderPMF,
+    };
+    container.querySelectorAll('#nxui-main-tabs .nxui-tab').forEach(t => {
+      t.onclick = () => {
+        container.querySelectorAll('#nxui-main-tabs .nxui-tab').forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        renderers[t.dataset.panel]?.(target);
+      };
+    });
+    renderers.knowledge(target);
+  };
+})();
+
+// ============================================================
+// 🎓 ONBOARDING TOUR — Feature 3
+// Post-goal guided tour showing key features + notifications bell
+// ============================================================
+(function(){
+  'use strict';
+
+  const TOUR_STEPS = {
+    startup: [
+      { title: 'Your operations hub', body: 'This is where every AI action, workflow, and team activity comes together.', target: 'body', position: 'center' },
+      { title: 'Ask AI anything', body: 'Type here to get started. Every question shapes your operational twin over time.', target: '#ai-input, .chat-input, textarea', position: 'top' },
+      { title: 'Track your growth', body: 'The Business panel records metrics and surfaces growth insights automatically.', target: 'body', position: 'center' },
+      { title: 'Ready to build?', body: 'Your workspace adapts as you use it. Explore, experiment, and let NexusAI learn your way.', target: 'body', position: 'center' },
+    ],
+    code: [
+      { title: 'Your coding companion', body: 'Paste any code — NexusAI analyzes, reviews, and debugs with repo-level context.', target: 'body', position: 'center' },
+      { title: 'Repository intelligence', body: 'Open the Code panel to run deep analysis on your projects.', target: 'body', position: 'center' },
+      { title: 'Ready to code?', body: 'Get started by asking a coding question or pasting code below.', target: 'body', position: 'center' },
+    ],
+    create: [
+      { title: 'Creative studio', body: 'Generate images, videos, and audio — all from natural language prompts.', target: 'body', position: 'center' },
+      { title: 'Media pipeline', body: 'Open the Media panel to access image, video, 3D, and audio generation.', target: 'body', position: 'center' },
+      { title: 'Ready to create?', body: 'Start describing what you want to make.', target: 'body', position: 'center' },
+    ],
+    study: [
+      { title: 'Research grounded in facts', body: 'Every AI answer includes citations you can verify. No hallucinations.', target: 'body', position: 'center' },
+      { title: 'Knowledge Hub', body: 'The Knowledge panel searches the web and synthesizes findings for you.', target: 'body', position: 'center' },
+      { title: 'Ready to learn?', body: 'Ask any research question below.', target: 'body', position: 'center' },
+    ],
+    analyze: [
+      { title: 'Strategic AI', body: 'NexusAI turns your business data into growth insights and recommendations.', target: 'body', position: 'center' },
+      { title: 'Business dashboard', body: 'The Business panel tracks metrics and delivers weekly analysis.', target: 'body', position: 'center' },
+      { title: 'Ready to analyze?', body: 'Ask a strategic question or record your first metric.', target: 'body', position: 'center' },
+    ],
+    team: [
+      { title: 'Collaborative workspaces', body: 'Create workspaces to share AI conversations, workflows, and results with your team.', target: 'body', position: 'center' },
+      { title: 'Real-time collaboration', body: 'Team members see each other\'s presence, and AI responses stream live to everyone.', target: 'body', position: 'center' },
+      { title: 'Ready to collaborate?', body: 'Create your first workspace to get started.', target: 'body', position: 'center' },
+    ],
+  };
+
+  function injectStyles() {
+    if (document.getElementById('nx-tour-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'nx-tour-styles';
+    s.textContent = `
+      .nx-tour-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(6px);z-index:9997;animation:nxTourFade .4s ease-out}
+      .nx-tour-card{position:fixed;max-width:420px;width:calc(100% - 32px);padding:24px;background:linear-gradient(135deg,rgba(20,30,50,.98),rgba(10,20,40,.98));border:1px solid rgba(120,200,255,.2);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.6),0 0 40px rgba(120,200,255,.1);z-index:9998;animation:nxTourRise .5s cubic-bezier(.16,1,.3,1)}
+      .nx-tour-step-num{color:#35f1c6;font-size:11px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px}
+      .nx-tour-title{color:#fff;font-size:20px;font-weight:500;letter-spacing:-.3px;margin-bottom:8px}
+      .nx-tour-body{color:#cde;font-size:14px;line-height:1.6;margin-bottom:20px}
+      .nx-tour-actions{display:flex;justify-content:space-between;align-items:center;gap:12px}
+      .nx-tour-dots{display:flex;gap:6px}
+      .nx-tour-dot{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.15);transition:all .3s}
+      .nx-tour-dot.active{background:linear-gradient(135deg,#c6f135,#35f1c6);width:20px;border-radius:100px}
+      .nx-tour-btn{padding:10px 18px;border:none;border-radius:10px;font-size:13px;font-weight:500;cursor:pointer;transition:transform .15s;letter-spacing:.3px}
+      .nx-tour-btn-primary{background:linear-gradient(135deg,#c6f135,#35f1c6);color:#000}
+      .nx-tour-btn-primary:hover{transform:translateY(-1px) scale(1.02)}
+      .nx-tour-btn-skip{background:none;color:#789;padding:10px 12px}
+      .nx-tour-btn-skip:hover{color:#cde}
+      .nx-tour-highlight{position:relative;z-index:9997;box-shadow:0 0 0 4px rgba(53,241,198,.4),0 0 40px rgba(53,241,198,.5);border-radius:12px;animation:nxTourPulse 2s ease-in-out infinite}
+      @keyframes nxTourFade{from{opacity:0}to{opacity:1}}
+      @keyframes nxTourRise{from{opacity:0;transform:translateY(20px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+      @keyframes nxTourPulse{0%,100%{box-shadow:0 0 0 4px rgba(53,241,198,.4),0 0 40px rgba(53,241,198,.5)}50%{box-shadow:0 0 0 8px rgba(53,241,198,.2),0 0 60px rgba(53,241,198,.7)}}
+    `;
+    document.head.appendChild(s);
+  }
+
+  function positionCard(card, target, position) {
+    if (position === 'center' || target === 'body' || !target) {
+      card.style.left = '50%';
+      card.style.top = '50%';
+      card.style.transform = 'translate(-50%, -50%)';
+      return;
+    }
+    const el = document.querySelector(target);
+    if (!el) {
+      card.style.left = '50%';
+      card.style.top = '50%';
+      card.style.transform = 'translate(-50%, -50%)';
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    const cardW = 420;
+    const cardH = card.offsetHeight || 200;
+
+    if (position === 'top') {
+      card.style.left = Math.max(16, Math.min(window.innerWidth - cardW - 16, rect.left + rect.width/2 - cardW/2)) + 'px';
+      card.style.top = Math.max(16, rect.top - cardH - 16) + 'px';
+    } else if (position === 'bottom') {
+      card.style.left = Math.max(16, Math.min(window.innerWidth - cardW - 16, rect.left + rect.width/2 - cardW/2)) + 'px';
+      card.style.top = (rect.bottom + 16) + 'px';
+    } else {
+      card.style.left = '50%';
+      card.style.top = '50%';
+      card.style.transform = 'translate(-50%, -50%)';
+    }
+
+    // Highlight the target
+    document.querySelectorAll('.nx-tour-highlight').forEach(el => el.classList.remove('nx-tour-highlight'));
+    el.classList.add('nx-tour-highlight');
+  }
+
+  function startTour(goal) {
+    const steps = TOUR_STEPS[goal] || TOUR_STEPS.startup;
+    if (!steps.length) return;
+
+    injectStyles();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'nx-tour-overlay';
+    document.body.appendChild(overlay);
+
+    const card = document.createElement('div');
+    card.className = 'nx-tour-card';
+    document.body.appendChild(card);
+
+    let currentStep = 0;
+
+    function render() {
+      const step = steps[currentStep];
+      const dots = steps.map((_, i) => `<div class="nx-tour-dot${i === currentStep ? ' active' : ''}"></div>`).join('');
+      card.innerHTML = `
+        <div class="nx-tour-step-num">Step ${currentStep + 1} of ${steps.length}</div>
+        <div class="nx-tour-title">${step.title}</div>
+        <div class="nx-tour-body">${step.body}</div>
+        <div class="nx-tour-actions">
+          <button class="nx-tour-btn nx-tour-btn-skip">Skip tour</button>
+          <div class="nx-tour-dots">${dots}</div>
+          <button class="nx-tour-btn nx-tour-btn-primary">${currentStep < steps.length - 1 ? 'Next →' : 'Get started ✓'}</button>
+        </div>
+      `;
+      positionCard(card, step.target, step.position);
+
+      card.querySelector('.nx-tour-btn-skip').onclick = end;
+      card.querySelector('.nx-tour-btn-primary').onclick = () => {
+        if (currentStep < steps.length - 1) {
+          currentStep++;
+          render();
+        } else {
+          end();
+        }
+      };
+    }
+
+    function end() {
+      document.querySelectorAll('.nx-tour-highlight').forEach(el => el.classList.remove('nx-tour-highlight'));
+      overlay.style.animation = 'nxTourFade .3s reverse';
+      card.style.animation = 'nxTourRise .3s reverse';
+      setTimeout(() => {
+        overlay.remove();
+        card.remove();
+      }, 300);
+      try { localStorage.setItem('nx_tour_completed', '1'); } catch(_) {}
+    }
+
+    render();
+  }
+
+  // Hook into onboarding completion event
+  window.addEventListener('nx:onboarded', (e) => {
+    const goal = e.detail?.goal;
+    if (!goal) return;
+    if (localStorage.getItem('nx_tour_completed') === '1') return;
+    // Small delay after portal transition
+    setTimeout(() => startTour(goal), 1200);
+  });
+
+  // Manual trigger for settings
+  window.NX = window.NX || {};
+  window.NX.startTour = (goal) => startTour(goal || localStorage.getItem('nx_user_goal') || 'startup');
+})();
+
+// ============================================================
+// 🔔 NOTIFICATION BELL — Feature 2 UI
+// ====
+// ============================================================
+// 🖱️ REAL-TIME COLLABORATION UI — Feature 5
+// Live cursors · Presence avatars · Shared AI · Typing indicators
+// ============================================================
+(function(){
+  'use strict';
+
+  const NXRT = window.NXRT = window.NXRT || {};
+
+  function injectStyles() {
+    if (document.getElementById('nx-rt-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'nx-rt-styles';
+    s.textContent = `
+      .nx-cursor{position:fixed;width:20px;height:20px;pointer-events:none;z-index:9000;transition:transform .08s linear;transform-origin:top left}
+      .nx-cursor svg{display:block}
+      .nx-cursor-label{position:absolute;top:20px;left:12px;padding:3px 8px;background:var(--cursor-color,#35f1c6);color:#000;font-size:10px;font-weight:600;border-radius:0 8px 8px 8px;white-space:nowrap;letter-spacing:.5px;box-shadow:0 4px 8px rgba(0,0,0,.3)}
+      .nx-presence-bar{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:498;display:flex;gap:-8px;padding:6px 10px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.08);border-radius:100px;backdrop-filter:blur(20px);align-items:center}
+      .nx-presence-bar.hidden{display:none}
+      .nx-presence-avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--av-1,#c6f135),var(--av-2,#35f1c6));display:flex;align-items:center;justify-content:center;color:#000;font-weight:700;font-size:12px;border:2px solid rgba(20,30,50,.98);margin-left:-8px;position:relative;cursor:default}
+      .nx-presence-avatar:first-child{margin-left:0}
+      .nx-presence-avatar[data-typing="1"]::after{content:"";position:absolute;bottom:-2px;right:-2px;width:8px;height:8px;background:#c6f135;border-radius:50%;border:2px solid rgba(20,30,50,.98);animation:nxRtPulse 1.4s ease-in-out infinite}
+      .nx-presence-count{color:#89a;font-size:11px;letter-spacing:1px;margin-left:8px;padding-left:8px;border-left:1px solid rgba(255,255,255,.08);text-transform:uppercase}
+      .nx-shared-ai{position:fixed;bottom:24px;right:24px;padding:14px 18px;background:linear-gradient(135deg,rgba(53,241,198,.15),rgba(198,241,53,.1));border:1px solid rgba(53,241,198,.4);border-radius:14px;color:#cde;font-size:13px;z-index:499;max-width:320px;box-shadow:0 8px 30px rgba(0,0,0,.4);animation:nxRtRise .4s cubic-bezier(.16,1,.3,1)}
+      .nx-shared-ai-title{color:#35f1c6;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px}
+      .nx-shared-ai-who{color:#fff;font-weight:600;margin-bottom:4px}
+      .nx-shared-ai-preview{color:#89a;font-size:12px;line-height:1.4;max-height:60px;overflow:hidden}
+      @keyframes nxRtPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.4);opacity:.5}}
+      @keyframes nxRtRise{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+    `;
+    document.head.appendChild(s);
+  }
+
+  function colorForUser(id) {
+    const colors = ['#c6f135','#35f1c6','#5b8def','#c87bef','#f59e0b','#ef4444','#8b5cf6','#ec4899'];
+    return colors[Math.abs(String(id).split('').reduce((a,c) => a + c.charCodeAt(0), 0)) % colors.length];
+  }
+
+  function initials(name) {
+    return String(name || 'U').trim().slice(0, 2).toUpperCase();
+  }
+
+  class RealtimeClient {
+    constructor(options = {}) {
+      this.ws = null;
+      this.workspaceId = null;
+      this.user = null;
+      this.cursors = new Map();
+      this.presence = [];
+      this.presenceBar = null;
+      this.reconnectDelay = 1000;
+      this.reconnectTimer = null;
+      this.throttleTimer = null;
+      this.lastCursor = null;
+      this.onMessage = options.onMessage || (() => {});
+      this.wsUrl = options.wsUrl || (location.origin.replace(/^http/, 'ws') + '/ws');
+    }
+
+    connect(user) {
+      this.user = user;
+      try {
+        this.ws = new WebSocket(this.wsUrl);
+        this.ws.onopen = () => this._onOpen();
+        this.ws.onmessage = (e) => this._onMessage(e);
+        this.ws.onclose = () => this._onClose();
+        this.ws.onerror = () => {};
+      } catch (e) {
+        console.warn('WebSocket unavailable', e);
+      }
+    }
+
+    _onOpen() {
+      this.reconnectDelay = 1000;
+      this._send({ type: 'auth', user_id: this.user.id, email: this.user.email, name: this.user.name });
+    }
+
+    _onMessage(e) {
+      let msg;
+      try { msg = JSON.parse(e.data); } catch (_) { return; }
+      switch (msg.type) {
+        case 'auth.ok':
+          if (this.workspaceId) this._joinWorkspace();
+          break;
+        case 'join.ok':
+          this.presence = msg.presence || [];
+          this._renderPresence();
+          break;
+        case 'presence.join':
+          this.presence.push(msg.user);
+          this._renderPresence();
+          break;
+        case 'presence.leave':
+          this.presence = this.presence.filter(u => u.id !== msg.user_id);
+          this._renderPresence();
+          this._removeCursor(msg.user_id);
+          break;
+        case 'cursor':
+          this._renderCursor(msg);
+          break;
+        case 'typing':
+          this._renderTyping(msg);
+          break;
+        case 'ai.thinking':
+          this._renderSharedAI(msg, 'thinking');
+          break;
+        case 'ai.result':
+          this._renderSharedAI(msg, 'result');
+          break;
+      }
+      this.onMessage(msg);
+      window.dispatchEvent(new CustomEvent('nx:rt-message', { detail: msg }));
+    }
+
+    _onClose() {
+      if (this.reconnectTimer) return;
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
+        if (this.user) this.connect(this.user);
+      }, this.reconnectDelay);
+    }
+
+    _send(payload) {
+      if (this.ws?.readyState === 1) {
+        try { this.ws.send(JSON.stringify(payload)); } catch (_) {}
+      }
+    }
+
+    joinWorkspace(workspaceId) {
+      this.workspaceId = workspaceId;
+      this._joinWorkspace();
+      this._trackCursor();
+    }
+
+    _joinWorkspace() {
+      if (this.workspaceId && this.ws?.readyState === 1) {
+        this._send({ type: 'join', workspace_id: this.workspaceId });
+      }
+    }
+
+    leave() {
+      if (this.workspaceId) {
+        this._send({ type: 'leave' });
+        this.workspaceId = null;
+      }
+      document.querySelectorAll('.nx-cursor').forEach(el => el.remove());
+      this.cursors.clear();
+      if (this.presenceBar) { this.presenceBar.remove(); this.presenceBar = null; }
+    }
+
+    _trackCursor() {
+      document.addEventListener('mousemove', (e) => {
+        if (!this.workspaceId) return;
+        const now = Date.now();
+        if (this.throttleTimer && now - this.throttleTimer < 60) return;
+        this.throttleTimer = now;
+        this.lastCursor = { x: e.clientX / window.innerWidth, y: e.clientY / window.innerHeight };
+        this._send({ type: 'cursor', ...this.lastCursor, user: this.user });
+      });
+    }
+
+    _renderPresence() {
+      injectStyles();
+      if (!this.presenceBar) {
+        this.presenceBar = document.createElement('div');
+        this.presenceBar.className = 'nx-presence-bar';
+        document.body.appendChild(this.presenceBar);
+      }
+      const others = this.presence.filter(u => u.id !== this.user?.id);
+      if (!others.length) {
+        this.presenceBar.classList.add('hidden');
+        return;
+      }
+      this.presenceBar.classList.remove('hidden');
+      const shown = others.slice(0, 5);
+      this.presenceBar.innerHTML = shown.map(u => `
+        <div class="nx-presence-avatar" style="--av-1:${colorForUser(u.id)};--av-2:${colorForUser(u.id + 1)}" title="${u.name || u.email}">${initials(u.name || u.email)}</div>
+      `).join('') + (others.length > 5 ? `<div class="nx-presence-count">+${others.length - 5} more</div>` : `<div class="nx-presence-count">${others.length} online</div>`);
+    }
+
+    _renderCursor(msg) {
+      if (!msg.user || msg.user.id === this.user?.id) return;
+      injectStyles();
+      let cursor = this.cursors.get(msg.user.id);
+      if (!cursor) {
+        cursor = document.createElement('div');
+        cursor.className = 'nx-cursor';
+        const color = colorForUser(msg.user.id);
+        cursor.style.setProperty('--cursor-color', color);
+        cursor.innerHTML = `
+          <svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+            <path d="M0 0 L0 14 L4 11 L7 18 L10 17 L7 10 L12 10 Z" fill="${color}" stroke="#000" stroke-width=".5"/>
+          </svg>
+          <span class="nx-cursor-label">${initials(msg.user.name || msg.user.email)}</span>
+        `;
+        document.body.appendChild(cursor);
+        this.cursors.set(msg.user.id, cursor);
+      }
+      const x = msg.x * window.innerWidth;
+      const y = msg.y * window.innerHeight;
+      cursor.style.transform = `translate(${x}px, ${y}px)`;
+    }
+
+    _removeCursor(user_id) {
+      const c = this.cursors.get(user_id);
+      if (c) { c.remove(); this.cursors.delete(user_id); }
+    }
+
+    _renderTyping(msg) {
+      if (!msg.user || msg.user.id === this.user?.id) return;
+      const avatar = this.presenceBar?.querySelector(`.nx-presence-avatar[title="${msg.user.name || msg.user.email}"]`);
+      if (avatar) {
+        avatar.setAttribute('data-typing', '1');
+        clearTimeout(avatar._typingTimer);
+        avatar._typingTimer = setTimeout(() => avatar.removeAttribute('data-typing'), 3000);
+      }
+    }
+
+    _renderSharedAI(msg, kind) {
+      injectStyles();
+      document.querySelectorAll('.nx-shared-ai').forEach(el => el.remove());
+      const box = document.createElement('div');
+      box.className = 'nx-shared-ai';
+      if (kind === 'thinking') {
+        box.innerHTML = `
+          <div class="nx-shared-ai-title">Shared AI · Thinking</div>
+          <div class="nx-shared-ai-who">${msg.by?.name || 'Someone'} asked...</div>
+          <div class="nx-shared-ai-preview">${(msg.prompt || '').slice(0, 120)}</div>
+        `;
+      } else {
+        const output = typeof msg.output === 'string' ? msg.output : JSON.stringify(msg.output);
+        box.innerHTML = `
+          <div class="nx-shared-ai-title">Shared AI · Result</div>
+          <div class="nx-shared-ai-who">${msg.by?.name || 'Someone'}'s response ready</div>
+          <div class="nx-shared-ai-preview">${output.slice(0, 200)}</div>
+        `;
+      }
+      document.body.appendChild(box);
+      setTimeout(() => box.remove(), kind === 'thinking' ? 30000 : 15000);
+    }
+
+    // Public API
+    sendChat(text) { this._send({ type: 'chat', text }); }
+    sendTyping() { this._send({ type: 'typing', user: this.user }); }
+    sendAIQuery(prompt) { this._send({ type: 'ai', prompt }); }
+  }
+
+  NXRT.Client = RealtimeClient;
+  NXRT.createClient = (options) => new RealtimeClient(options);
+})();
+
+// ============================================================
+// 🛡️ ADMIN DASHBOARD UI — Feature 4
+// Users · Audit · Threats · Cost · System health · Billing
+// ============================================================
+(function(){
+  'use strict';
+  const NXUI = window.NXUI = window.NXUI || {};
+
+  async function api(path, opts = {}) {
+    const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const r = await fetch(path, { ...opts, headers });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    return data;
+  }
+
+  function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
+
+  function fmt(n) {
+    if (n == null) return '-';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return String(n);
+  }
+
+  function timeAgo(ts) {
+    const diff = Date.now() - ts;
+    if (diff < 60000) return 'just now';
+    if (diff < 3600000) return Math.floor(diff / 60000) + 'm';
+    if (diff < 86400000) return Math.floor(diff / 3600000) + 'h';
+    return Math.floor(diff / 86400000) + 'd';
+  }
+
+  NXUI.renderAdmin = function (container) {
+    if (!container) return;
+    container.innerHTML = `
+      <div class="nxui-tabs" id="nx-adm-tabs" style="overflow-x:auto">
+        <div class="nxui-tab active" data-adm-tab="overview">📊 Overview</div>
+        <div class="nxui-tab" data-adm-tab="users">👥 Users</div>
+        <div class="nxui-tab" data-adm-tab="audit">📜 Audit</div>
+        <div class="nxui-tab" data-adm-tab="threats">🛡️ Threats</div>
+        <div class="nxui-tab" data-adm-tab="cost">💰 Cost</div>
+        <div class="nxui-tab" data-adm-tab="system">⚙️ System</div>
+        <div class="nxui-tab" data-adm-tab="billing">💳 Billing</div>
+      </div>
+      <div id="nx-adm-panel"></div>
+    `;
+    const target = container.querySelector('#nx-adm-panel');
+    const renderers = {
+      overview: renderOverview,
+      users: renderUsers,
+      audit: renderAudit,
+      threats: renderThreats,
+      cost: renderCost,
+      system: renderSystem,
+      billing: renderBilling,
+    };
+    container.querySelectorAll('#nx-adm-tabs .nxui-tab').forEach(t => {
+      t.onclick = () => {
+        container.querySelectorAll('#nx-adm-tabs .nxui-tab').forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        renderers[t.dataset.admTab]?.(target);
+      };
+    });
+    renderOverview(target);
+  };
+
+  async function renderOverview(target) {
+    target.innerHTML = `<div class="nxui-panel nx-enter"><div class="nxui-empty"><span class="nx-thinking"><span></span><span></span><span></span><span></span><span></span></span></div></div>`;
+    try {
+      const [health, retention, cost, funnel] = await Promise.all([
+        api('/api/dr/health').catch(() => ({ ok: false })),
+        api('/api/pmf/retention?days=30').catch(() => ({})),
+        api('/api/cost/semantic-cache').catch(() => ({})),
+        api('/api/pmf/funnel').catch(() => ({ steps: [] })),
+      ]);
+      target.innerHTML = `
+        <div class="nxui-panel nx-enter">
+          <header class="nxui-head">
+            <div>
+              <h2 class="nxui-title">System Overview</h2>
+              <p class="nxui-sub">Real-time platform metrics</p>
+            </div>
+            <span class="nx-chip" style="background:${health.ok ? 'rgba(53,241,198,.15)' : 'rgba(239,68,68,.15)'};color:${health.ok ? '#35f1c6' : '#ef4444'}">${health.ok ? 'HEALTHY' : 'DEGRADED'}</span>
+          </header>
+          <div class="nxui-grid">
+            <div class="nxui-card cine-hologram"><div class="nxui-label">Signups (30d)</div><div style="color:#fff;font-size:28px;font-weight:300;margin-top:4px">${fmt(retention.signups)}</div></div>
+            <div class="nxui-card cine-hologram"><div class="nxui-label">DAU</div><div style="color:#35f1c6;font-size:28px;font-weight:300;margin-top:4px">${fmt(retention.dau)}</div></div>
+            <div class="nxui-card cine-hologram"><div class="nxui-label">Activation</div><div style="color:#c6f135;font-size:28px;font-weight:300;margin-top:4px">${((retention.activation_rate || 0) * 100).toFixed(1)}%</div></div>
+            <div class="nxui-card cine-hologram"><div class="nxui-label">Stickiness</div><div style="color:#5b8def;font-size:28px;font-weight:300;margin-top:4px">${((retention.stickiness || 0) * 100).toFixed(1)}%</div></div>
+            <div class="nxui-card cine-hologram"><div class="nxui-label">Cache hit rate</div><div style="color:#c87bef;font-size:28px;font-weight:300;margin-top:4px">${((cost.hit_rate || 0) * 100).toFixed(1)}%</div></div>
+            <div class="nxui-card cine-hologram"><div class="nxui-label">Memory (MB)</div><div style="color:#fff;font-size:28px;font-weight:300;margin-top:4px">${health.checks?.memory?.heap_used_mb || '-'}</div></div>
+          </div>
+
+          <div style="margin-top:24px">
+            <span class="nxui-label">Activation funnel</span>
+            <div class="cine-timeline" style="margin-top:12px">
+              ${(funnel.steps || []).map(s => `<div class="cine-timeline-item"><strong style="color:#fff">${esc(s.name)}</strong><div style="color:#89a;font-size:12px">${fmt(s.users)} users</div></div>`).join('') || '<div class="nxui-empty">No data yet</div>'}
+            </div>
+          </div>
+        </div>
+      `;
+    } catch (e) {
+      target.innerHTML = `<div class="nxui-panel"><div class="nxui-empty">${esc(e.message)}</div></div>`;
+    }
+  }
+
+  async function renderUsers(target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">Users</h2>
+            <p class="nxui-sub">Manage roles, plans, and access</p>
+          </div>
+        </header>
+        <div class="nxui-row">
+          <input class="nxui-input" id="nx-adm-usr-search" placeholder="Search email..." style="flex:1"/>
+          <select class="nxui-select" id="nx-adm-usr-plan"><option value="">All plans</option><option>free</option><option>pro</option><option>elite</option><option>team</option></select>
+        </div>
+        <div id="nx-adm-usr-list" class="nxui-list" style="margin-top:16px"><div class="nxui-empty">Loading...</div></div>
+      </div>
+    `;
+    const list = target.querySelector('#nx-adm-usr-list');
+    async function load() {
+      const q = target.querySelector('#nx-adm-usr-search').value;
+      const plan = target.querySelector('#nx-adm-usr-plan').value;
+      try {
+        const r = await api(`/api/admin/users?${q ? `q=${encodeURIComponent(q)}&` : ''}${plan ? `plan=${plan}` : ''}`);
+        if (!r.users?.length) { list.innerHTML = `<div class="nxui-empty">No users match</div>`; return; }
+        list.innerHTML = r.users.map(u => `
+          <div class="nxui-card" style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="color:#fff;font-size:13px;font-weight:500">${esc(u.email)}</div>
+              <div style="color:#567;font-size:11px;margin-top:2px">ID ${u.id} · ${esc(u.name || 'no name')} · joined ${timeAgo(u.created_at)}</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span class="nx-chip" style="background:${u.plan === 'elite' ? 'rgba(245,158,11,.15)' : u.plan === 'pro' ? 'rgba(53,241,198,.15)' : 'rgba(255,255,255,.05)'};color:${u.plan === 'elite' ? '#f59e0b' : u.plan === 'pro' ? '#35f1c6' : '#89a'}">${esc(u.plan)}</span>
+            </div>
+          </div>
+        `).join('');
+      } catch (e) { list.innerHTML = `<div class="nxui-empty">${esc(e.message)}</div>`; }
+    }
+    let timer;
+    target.querySelector('#nx-adm-usr-search').oninput = () => { clearTimeout(timer); timer = setTimeout(load, 400); };
+    target.querySelector('#nx-adm-usr-plan').onchange = load;
+    load();
+  }
+
+  async function renderAudit(target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">Audit Log</h2>
+            <p class="nxui-sub">Tamper-evident chain of security-sensitive events</p>
+          </div>
+          <button class="nxui-btn-secondary" id="nx-adm-audit-verify">Verify chain</button>
+        </header>
+        <div id="nx-adm-audit-list" class="nxui-list"><div class="nxui-empty">Loading...</div></div>
+        <div id="nx-adm-audit-verify-out"></div>
+      </div>
+    `;
+    const list = target.querySelector('#nx-adm-audit-list');
+    try {
+      const r = await api('/api/security/audit?limit=50');
+      if (!r.events?.length) { list.innerHTML = `<div class="nxui-empty">No audit events</div>`; return; }
+      list.innerHTML = r.events.map(e => `
+        <div class="nxui-card" style="padding:12px 14px;border-left:3px solid ${e.severity === 'critical' ? '#ef4444' : e.severity === 'warn' ? '#f59e0b' : '#35f1c6'}">
+          <div style="display:flex;justify-content:space-between;gap:12px">
+            <div>
+              <div style="color:#fff;font-size:13px;font-weight:500">${esc(e.action)}</div>
+              <div style="color:#789;font-size:11px;margin-top:2px">User ${e.user_id || 'system'} · ${esc(e.resource || '')} · ${timeAgo(e.created_at)}</div>
+            </div>
+            <span class="nx-chip" style="background:rgba(${e.severity === 'critical' ? '239,68,68' : e.severity === 'warn' ? '245,158,11' : '53,241,198'},.15);color:${e.severity === 'critical' ? '#ef4444' : e.severity === 'warn' ? '#f59e0b' : '#35f1c6'}">${esc(e.severity)}</span>
+          </div>
+        </div>
+      `).join('');
+    } catch (e) { list.innerHTML = `<div class="nxui-empty">${esc(e.message)}</div>`; }
+
+    target.querySelector('#nx-adm-audit-verify').onclick = async () => {
+      const out = target.querySelector('#nx-adm-audit-verify-out');
+      out.innerHTML = `<div class="nxui-result"><span class="nx-thinking"><span></span><span></span><span></span><span></span><span></span></span> Verifying...</div>`;
+      try {
+        const r = await api('/api/security/audit/verify', { method: 'POST' });
+        out.innerHTML = `<div class="nxui-result" style="border-color:${r.valid ? 'rgba(53,241,198,.4)' : 'rgba(239,68,68,.4)'};color:${r.valid ? '#35f1c6' : '#fca5a5'}">${r.valid ? '✓ Chain intact — no tampering detected' : '✗ Chain broken at ' + r.broken_at}</div>`;
+      } catch (e) { out.innerHTML = `<div class="nxui-result" style="border-color:rgba(239,68,68,.3);color:#fca5a5">${esc(e.message)}</div>`; }
+    };
+  }
+
+  async function renderThreats(target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">Threat Monitor</h2>
+            <p class="nxui-sub">Bot detection · abuse patterns · rate limit hits</p>
+          </div>
+        </header>
+        <div id="nx-adm-threats"><div class="nxui-empty">Loading...</div></div>
+      </div>
+    `;
+    try {
+      const r = await api('/api/security/threats');
+      const body = target.querySelector('#nx-adm-threats');
+      body.innerHTML = `
+        <div class="nxui-grid">
+          <div class="nxui-card"><div class="nxui-label">Bots blocked (24h)</div><div style="color:#ef4444;font-size:24px;font-weight:300;margin-top:4px">${fmt(r.bots_blocked || 0)}</div></div>
+          <div class="nxui-card"><div class="nxui-label">Rate limit hits</div><div style="color:#f59e0b;font-size:24px;font-weight:300;margin-top:4px">${fmt(r.rate_limits || 0)}</div></div>
+          <div class="nxui-card"><div class="nxui-label">Failed logins</div><div style="color:#c87bef;font-size:24px;font-weight:300;margin-top:4px">${fmt(r.failed_logins || 0)}</div></div>
+          <div class="nxui-card"><div class="nxui-label">Active sessions</div><div style="color:#35f1c6;font-size:24px;font-weight:300;margin-top:4px">${fmt(r.active_sessions || 0)}</div></div>
+        </div>
+        ${r.recent_alerts?.length ? `
+        <div style="margin-top:20px">
+          <span class="nxui-label">Recent alerts</span>
+          <div class="nxui-list" style="margin-top:8px">
+            ${r.recent_alerts.map(a => `
+              <div class="nxui-card" style="padding:10px 14px;border-left:2px solid #ef4444">
+                <div style="color:#fca5a5;font-size:13px">${esc(a.type)}: ${esc(a.detail || '')}</div>
+                <div style="color:#789;font-size:11px;margin-top:2px">${timeAgo(a.created_at)}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>` : ''}
+      `;
+    } catch (e) { target.querySelector('#nx-adm-threats').innerHTML = `<div class="nxui-empty">${esc(e.message)}</div>`; }
+  }
+
+  async function renderCost(target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">Cost & Usage</h2>
+            <p class="nxui-sub">Token consumption · provider mix · savings</p>
+          </div>
+        </header>
+        <div id="nx-adm-cost"><div class="nxui-empty">Loading...</div></div>
+      </div>
+    `;
+    try {
+      const [sc, cost] = await Promise.all([
+        api('/api/cost/semantic-cache'),
+        api('/api/security/cost').catch(() => ({})),
+      ]);
+      target.querySelector('#nx-adm-cost').innerHTML = `
+        <div class="nxui-grid">
+          <div class="nxui-card"><div class="nxui-label">Cache hit rate</div><div style="color:#35f1c6;font-size:24px;font-weight:300;margin-top:4px">${((sc.hit_rate || 0) * 100).toFixed(1)}%</div><div style="color:#789;font-size:11px;margin-top:4px">${sc.hits || 0} hits / ${sc.total || 0} total</div></div>
+          <div class="nxui-card"><div class="nxui-label">Exact matches</div><div style="color:#c6f135;font-size:24px;font-weight:300;margin-top:4px">${sc.exact || 0}</div></div>
+          <div class="nxui-card"><div class="nxui-label">Similar matches</div><div style="color:#5b8def;font-size:24px;font-weight:300;margin-top:4px">${sc.similar || 0}</div></div>
+          <div class="nxui-card"><div class="nxui-label">Index size</div><div style="color:#fff;font-size:24px;font-weight:300;margin-top:4px">${fmt(sc.index_size || 0)}</div></div>
+        </div>
+        ${cost.total_cost_usd != null ? `
+        <div style="margin-top:20px">
+          <div class="nxui-card cine-hologram" style="padding:20px">
+            <div class="nxui-label">Estimated spend (30d)</div>
+            <div style="color:#fff;font-size:32px;font-weight:300;margin-top:8px">$${(cost.total_cost_usd || 0).toFixed(2)}</div>
+          </div>
+        </div>` : ''}
+      `;
+    } catch (e) { target.querySelector('#nx-adm-cost').innerHTML = `<div class="nxui-empty">${esc(e.message)}</div>`; }
+  }
+
+  async function renderSystem(target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">System Health</h2>
+            <p class="nxui-sub">DB · backups · uptime · resources</p>
+          </div>
+          <button class="nxui-btn-secondary" id="nx-adm-sys-snap">📸 Snapshot now</button>
+        </header>
+        <div id="nx-adm-sys-body"><div class="nxui-empty">Loading...</div></div>
+      </div>
+    `;
+    async function load() {
+      try {
+        const [health, backups] = await Promise.all([
+          api('/api/dr/health'),
+          api('/api/dr/backups').catch(() => ({ backups: [] })),
+        ]);
+        const body = target.querySelector('#nx-adm-sys-body');
+        const checks = health.checks || {};
+        body.innerHTML = `
+          <div class="nxui-grid">
+            ${Object.entries(checks).map(([k, v]) => `
+              <div class="nxui-card">
+                <div class="nxui-label">${esc(k)}</div>
+                <div style="color:${v.ok !== false ? '#35f1c6' : '#ef4444'};font-size:20px;font-weight:400;margin-top:4px">${v.ok !== false ? '✓ OK' : '✗ FAIL'}</div>
+                <div style="color:#789;font-size:11px;margin-top:4px">${Object.entries(v).filter(([k2]) => k2 !== 'ok').map(([k2, v2]) => `${k2}: ${v2}`).join(' · ')}</div>
+              </div>
+            `).join('')}
+          </div>
+          <div style="margin-top:20px">
+            <span class="nxui-label">Backups (${backups.backups?.length || 0})</span>
+            <div class="nxui-list" style="margin-top:8px">
+              ${(backups.backups || []).slice(0, 8).map(b => `
+                <div class="nxui-card" style="padding:10px 14px;display:flex;justify-content:space-between">
+                  <div style="color:#cde;font-family:ui-monospace,monospace;font-size:12px">${esc(b.name)}</div>
+                  <div style="color:#789;font-size:11px">${(b.size / 1024).toFixed(1)}KB · ${timeAgo(new Date(b.mtime).getTime())}</div>
+                </div>
+              `).join('') || '<div class="nxui-empty">No backups yet</div>'}
+            </div>
+          </div>
+        `;
+      } catch (e) { target.querySelector('#nx-adm-sys-body').innerHTML = `<div class="nxui-empty">${esc(e.message)}</div>`; }
+    }
+    target.querySelector('#nx-adm-sys-snap').onclick = async () => {
+      try { await api('/api/dr/snapshot', { method: 'POST' }); load(); } catch (_) {}
+    };
+    load();
+  }
+
+  async function renderBilling(target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">Billing</h2>
+            <p class="nxui-sub">Subscriptions · plans · payment events</p>
+          </div>
+        </header>
+        <div id="nx-adm-bill-plans"></div>
+        <div id="nx-adm-bill-body" style="margin-top:20px"><div class="nxui-empty">Loading...</div></div>
+      </div>
+    `;
+    try {
+      const plans = await api('/api/payments/plans');
+      target.querySelector('#nx-adm-bill-plans').innerHTML = `
+        <div class="nxui-grid">
+          ${(plans.plans || []).map(p => `
+            <div class="nxui-card cine-hologram">
+              <div class="nxui-label">${esc(p.name)}</div>
+              <div style="color:#fff;font-size:24px;font-weight:300;margin-top:4px">$${p.price}<span style="color:#789;font-size:12px">/mo</span></div>
+              <div style="color:#789;font-size:11px;margin-top:8px">${p.quota_per_day === -1 ? 'Unlimited' : p.quota_per_day + '/day'}</div>
+              <div style="color:${p.available ? '#35f1c6' : '#f59e0b'};font-size:10px;margin-top:6px;text-transform:uppercase;letter-spacing:1px">${p.available ? 'Available' : 'Not configured'}</div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    } catch (e) {
+      target.querySelector('#nx-adm-bill-plans').innerHTML = `<div class="nxui-empty">${esc(e.message)}</div>`;
+    }
+
+    try {
+      const events = await api('/api/admin/payment-events').catch(() => ({ events: [] }));
+      const body = target.querySelector('#nx-adm-bill-body');
+      body.innerHTML = `
+        <span class="nxui-label">Recent payment events</span>
+        <div class="nxui-list" style="margin-top:8px">
+          ${(events.events || []).slice(0, 20).map(e => `
+            <div class="nxui-card" style="padding:10px 14px;display:flex;justify-content:space-between">
+              <div>
+                <div style="color:#cde;font-size:13px">${esc(e.type)}</div>
+                <div style="color:#789;font-size:11px;margin-top:2px">User ${e.user_id || '-'} · ${timeAgo(e.created_at)}</div>
+              </div>
+              ${e.amount ? `<div style="color:#35f1c6">${(e.amount / 100).toFixed(2)} ${(e.currency || 'usd').toUpperCase()}</div>` : ''}
+            </div>
+          `).join('') || '<div class="nxui-empty">No payment events yet</div>'}
+        </div>
+      `;
+    } catch (_) {}
+  }
+})();
+
+// ============================================================
+// 🗺️ REALITY MAP + SHADOW + DREAMSPACE UI — Features 7-10
+// ============================================================
+(function(){
+  'use strict';
+  const NXUI = window.NXUI = window.NXUI || {};
+
+  async function api(path, opts = {}) {
+    const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const r = await fetch(path, { ...opts, headers });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    return data;
+  }
+
+  function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
+
+  function fmt(n) {
+    if (n == null) return '-';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return String(n);
+  }
+
+  function timeAgo(ts) {
+    const diff = Date.now() - ts;
+    if (diff < 60000) return 'just now';
+    if (diff < 3600000) return Math.floor(diff / 60000) + 'm';
+    if (diff < 86400000) return Math.floor(diff / 3600000) + 'h';
+    return Math.floor(diff / 86400000) + 'd';
+  }
+
+  // ─────────────────────────────────────────
+  // 🗺️ REALITY MAP — the unified snapshot
+  // ─────────────────────────────────────────
+  NXUI.renderRealityMap = function (target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">Operational Reality Map</h2>
+            <p class="nxui-sub">Your entire operational state at a glance</p>
+          </div>
+          <button class="nxui-btn-secondary" id="nx-rm-refresh">Refresh</button>
+        </header>
+        <div id="nx-rm-body"><div class="nxui-empty"><span class="nx-thinking"><span></span><span></span><span></span><span></span><span></span></span> Generating map...</div></div>
+      </div>
+    `;
+
+    async function load() {
+      const body = target.querySelector('#nx-rm-body');
+      body.innerHTML = `<div class="nxui-empty"><span class="nx-thinking"><span></span><span></span><span></span><span></span><span></span></span></div>`;
+      try {
+        const map = await api('/api/reality-map');
+        body.innerHTML = `
+          <div class="cine-hologram" style="padding:20px;margin-bottom:20px">
+            <div class="nxui-label">Summary</div>
+            <div style="color:#fff;font-size:15px;line-height:1.6;margin-top:8px">${esc(map.summary || 'No data yet')}</div>
+          </div>
+
+          <div class="nxui-grid">
+            <div class="nxui-card">
+              <div class="nxui-label">Identity</div>
+              <div style="color:#fff;font-size:15px;margin-top:6px">${esc(map.identity?.name || map.identity?.email || 'User')}</div>
+              <div style="color:#789;font-size:11px;margin-top:4px">${esc(map.identity?.plan || 'free')} · ${map.identity?.member_since_days || 0} days</div>
+              ${map.identity?.reputation ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06)"><span class="nx-chip">${esc(map.identity.reputation.rank)}</span> <span style="color:#c6f135;margin-left:6px">${map.identity.reputation.points} pts</span></div>` : ''}
+            </div>
+
+            <div class="nxui-card">
+              <div class="nxui-label">Momentum</div>
+              <div style="color:${map.momentum?.direction === 'accelerating' ? '#35f1c6' : map.momentum?.direction === 'slowing' ? '#f59e0b' : '#cde'};font-size:20px;font-weight:400;margin-top:6px;text-transform:capitalize">${esc(map.momentum?.direction || 'steady')}</div>
+              <div style="color:#789;font-size:11px;margin-top:4px">${map.momentum?.week_current || 0} this week · ${map.momentum?.week_previous || 0} last week</div>
+              ${map.momentum?.active_streak_days ? `<div style="color:#c6f135;font-size:12px;margin-top:6px">🔥 ${map.momentum.active_streak_days}-day streak</div>` : ''}
+            </div>
+
+            <div class="nxui-card">
+              <div class="nxui-label">Right now</div>
+              <div style="color:#fff;font-size:15px;text-transform:capitalize;margin-top:6px">${esc((map.temporal?.block || 'unknown').replace(/_/g, ' '))}</div>
+              <div style="color:#789;font-size:11px;margin-top:4px">Energy: ${esc(map.temporal?.energy || '-')}</div>
+              <div style="color:#35f1c6;font-size:11px;margin-top:6px;text-transform:capitalize">Recommended: ${esc(map.temporal?.recommended_mode || 'calm')}</div>
+            </div>
+
+            <div class="nxui-card">
+              <div class="nxui-label">Connections</div>
+              <div style="color:#fff;font-size:20px;font-weight:400;margin-top:6px">${map.connections?.workspaces?.length || 0} workspaces</div>
+              <div style="color:#789;font-size:11px;margin-top:4px">${map.connections?.collaborators || 0} collaborators</div>
+            </div>
+          </div>
+
+          ${map.systems ? `
+          <div style="margin-top:20px">
+            <span class="nxui-label">Subsystems</span>
+            <div class="nxui-grid" style="margin-top:8px">
+              ${map.systems.memory_fabric ? `<div class="nxui-card"><div class="nxui-label">Memory Fabric</div><div style="color:#fff;font-size:16px;margin-top:6px">${map.systems.memory_fabric.nodes} nodes</div><div style="color:#789;font-size:11px">${map.systems.memory_fabric.edges} connections</div></div>` : ''}
+              ${map.systems.dreamspace ? `<div class="nxui-card"><div class="nxui-label">Dreamspace</div><div style="color:#fff;font-size:16px;margin-top:6px">${map.systems.dreamspace.total_runs || 0} runs</div><div style="color:#789;font-size:11px">${map.systems.dreamspace.total_artifacts || 0} artifacts</div></div>` : ''}
+              ${map.systems.predictive ? `<div class="nxui-card"><div class="nxui-label">Predictive</div><div style="color:#fff;font-size:16px;margin-top:6px">${((map.systems.predictive.hit_rate || 0) * 100).toFixed(0)}% hit</div><div style="color:#789;font-size:11px">${map.systems.predictive.predictions_made || 0} made</div></div>` : ''}
+              ${map.systems.shadow ? `<div class="nxui-card"><div class="nxui-label">Shadow AI</div><div style="color:#fff;font-size:16px;margin-top:6px">${((map.systems.shadow.acceptance_rate || 0) * 100).toFixed(0)}% accepted</div><div style="color:#789;font-size:11px">${map.systems.shadow.total || 0} suggestions</div></div>` : ''}
+            </div>
+          </div>` : ''}
+
+          ${map.insights?.pending ? `
+          <div style="margin-top:20px">
+            <span class="nxui-label">${map.insights.pending} pending insights</span>
+            <div class="cine-timeline" style="margin-top:12px">
+              ${(map.insights.items || []).slice(0, 5).map(i => `
+                <div class="cine-timeline-item">
+                  <div style="display:flex;justify-content:space-between;gap:12px">
+                    <div>
+                      <div class="nxui-label" style="color:${i.source === 'dreamspace' ? '#c87bef' : '#35f1c6'}">${esc(i.source)} · ${esc(i.kind || '')}</div>
+                      <div style="color:#fff;font-size:13px;margin-top:4px">${esc(i.summary)}</div>
+                      ${i.details ? `<div style="color:#89a;font-size:12px;margin-top:4px">${esc(i.details)}</div>` : ''}
+                    </div>
+                    <div style="color:#567;font-size:11px">${timeAgo(i.created_at)}</div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>` : ''}
+
+          ${map.identity?.twin?.formed ? `
+          <div style="margin-top:20px">
+            <span class="nxui-label">AI Twin</span>
+            <div class="nxui-card" style="margin-top:8px">
+              <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+                <div>
+                  <div style="color:#fff">${map.identity.twin.total_observations} observations</div>
+                  <div style="color:#789;font-size:11px;margin-top:2px">Active time: ${esc(map.identity.twin.active_time)}</div>
+                </div>
+                <div style="color:#c6f135;font-size:20px;font-weight:300">${(map.identity.twin.avg_confidence * 100).toFixed(0)}%</div>
+              </div>
+            </div>
+          </div>` : ''}
+        `;
+      } catch (e) {
+        body.innerHTML = `<div class="nxui-empty">${esc(e.message)}</div>`;
+      }
+    }
+
+    target.querySelector('#nx-rm-refresh').onclick = load;
+    load();
+  };
+
+  // ─────────────────────────────────────────
+  // 👤 SHADOW SUGGESTIONS
+  // ─────────────────────────────────────────
+  NXUI.renderShadow = function (target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">Shadow AI</h2>
+            <p class="nxui-sub">AI observes silently — suggests without executing</p>
+          </div>
+          <button class="nxui-btn-secondary" id="nx-sh-prefs">Preferences</button>
+        </header>
+        <div id="nx-sh-stats" class="nxui-grid" style="margin-bottom:16px"></div>
+        <div class="nxui-tabs">
+          <div class="nxui-tab active" data-sh-tab="pending">Pending</div>
+          <div class="nxui-tab" data-sh-tab="accepted">Accepted</div>
+          <div class="nxui-tab" data-sh-tab="dismissed">Dismissed</div>
+        </div>
+        <div id="nx-sh-list" class="nxui-list" style="margin-top:16px"></div>
+      </div>
+    `;
+
+    async function loadStats() {
+      try {
+        const s = await api('/api/shadow/stats');
+        target.querySelector('#nx-sh-stats').innerHTML = `
+          <div class="nxui-card"><div class="nxui-label">Total</div><div style="color:#fff;font-size:20px;font-weight:400;margin-top:4px">${s.total || 0}</div></div>
+          <div class="nxui-card"><div class="nxui-label">Pending</div><div style="color:#f59e0b;font-size:20px;font-weight:400;margin-top:4px">${s.pending || 0}</div></div>
+          <div class="nxui-card"><div class="nxui-label">Accepted</div><div style="color:#35f1c6;font-size:20px;font-weight:400;margin-top:4px">${s.accepted || 0}</div></div>
+          <div class="nxui-card"><div class="nxui-label">Acceptance rate</div><div style="color:#c6f135;font-size:20px;font-weight:400;margin-top:4px">${((s.acceptance_rate || 0) * 100).toFixed(0)}%</div></div>
+        `;
+      } catch (_) {}
+    }
+
+    async function loadList(status) {
+      const list = target.querySelector('#nx-sh-list');
+      list.innerHTML = `<div class="nxui-empty"><span class="nx-thinking"><span></span><span></span><span></span><span></span><span></span></span></div>`;
+      try {
+        const r = await api(`/api/shadow/suggestions?status=${status}&limit=30`);
+        if (!r.suggestions?.length) { list.innerHTML = `<div class="nxui-empty">No ${status} suggestions</div>`; return; }
+        list.innerHTML = r.suggestions.map(s => `
+          <div class="nxui-card cine-hologram" style="padding:14px" data-sug-id="${s.id}">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+              <div style="flex:1">
+                <div class="nxui-label" style="color:#c87bef">${esc(s.suggestion_type)} · confidence ${((s.confidence || 0) * 100).toFixed(0)}%</div>
+                <div style="color:#fff;font-size:14px;margin-top:6px;font-weight:500">${esc(s.title)}</div>
+                ${s.body ? `<div style="color:#89a;font-size:12px;margin-top:4px">${esc(s.body)}</div>` : ''}
+                <div style="color:#567;font-size:11px;margin-top:6px">${timeAgo(s.created_at)}</div>
+              </div>
+              ${status === 'pending' ? `
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <button class="nxui-btn" data-respond="accepted" style="padding:6px 12px;font-size:11px">Accept</button>
+                  <button class="nxui-btn-secondary" data-respond="dismissed" style="padding:6px 12px;font-size:11px">Dismiss</button>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        `).join('');
+
+        list.querySelectorAll('[data-respond]').forEach(btn => {
+          btn.onclick = async () => {
+            const card = btn.closest('[data-sug-id]');
+            const id = card.dataset.sugId;
+            const response = btn.dataset.respond;
+            try {
+              await api(`/api/shadow/suggestions/${id}/respond`, {
+                method: 'POST', body: JSON.stringify({ response }),
+              });
+              card.style.opacity = '.3';
+              setTimeout(() => card.remove(), 400);
+              loadStats();
+            } catch (_) {}
+          };
+        });
+      } catch (e) { list.innerHTML = `<div class="nxui-empty">${esc(e.message)}</div>`; }
+    }
+
+    target.querySelectorAll('[data-sh-tab]').forEach(t => {
+      t.onclick = () => {
+        target.querySelectorAll('[data-sh-tab]').forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        loadList(t.dataset.shTab);
+      };
+    });
+
+    target.querySelector('#nx-sh-prefs').onclick = async () => {
+      try {
+        const prefs = await api('/api/shadow/prefs');
+        const enabled = confirm(`Shadow AI is currently ${prefs.enabled ? 'ON' : 'OFF'}.\nClick OK to toggle.`);
+        if (enabled) {
+          await api('/api/shadow/prefs', {
+            method: 'PUT',
+            body: JSON.stringify({ enabled: !prefs.enabled ? 1 : 0 }),
+          });
+        }
+      } catch (_) {}
+    };
+
+    loadStats();
+    loadList('pending');
+  };
+
+  // ─────────────────────────────────────────
+  // 💤 DREAMSPACE
+  // ─────────────────────────────────────────
+  NXUI.renderDreamspace = function (target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">Dreamspace</h2>
+            <p class="nxui-sub">Background AI that runs while you're away</p>
+          </div>
+          <span class="nx-chip">Passive</span>
+        </header>
+        <div id="nx-ds-stats" class="nxui-grid" style="margin-bottom:20px"></div>
+        <div>
+          <span class="nxui-label">Recent insights</span>
+          <div id="nx-ds-insights" class="nxui-list" style="margin-top:8px"></div>
+        </div>
+        <div style="margin-top:20px">
+          <span class="nxui-label">Dream runs</span>
+          <div id="nx-ds-runs" class="nxui-list" style="margin-top:8px"></div>
+        </div>
+      </div>
+    `;
+
+    (async () => {
+      try {
+        const [stats, insights, runs] = await Promise.all([
+          api('/api/dreamspace/stats'),
+          api('/api/dreamspace/insights?limit=10'),
+          api('/api/dreamspace/runs?limit=10'),
+        ]);
+
+        target.querySelector('#nx-ds-stats').innerHTML = `
+          <div class="nxui-card cine-hologram"><div class="nxui-label">Total runs</div><div style="color:#fff;font-size:24px;font-weight:300;margin-top:6px">${stats.total_runs || 0}</div></div>
+          <div class="nxui-card cine-hologram"><div class="nxui-label">Artifacts created</div><div style="color:#c87bef;font-size:24px;font-weight:300;margin-top:6px">${stats.total_artifacts || 0}</div></div>
+          <div class="nxui-card cine-hologram"><div class="nxui-label">Status</div><div style="color:${stats.enabled ? '#35f1c6' : '#789'};font-size:16px;margin-top:6px">${stats.enabled ? 'Active' : 'Paused'}</div></div>
+        `;
+
+        const iList = target.querySelector('#nx-ds-insights');
+        iList.innerHTML = insights.insights?.length ? insights.insights.map(i => `
+          <div class="nxui-card cine-hologram" style="padding:14px">
+            <div class="nxui-label" style="color:#c87bef">${esc(i.kind)} · importance ${((i.importance || 0) * 100).toFixed(0)}%</div>
+            <div style="color:#fff;font-size:14px;margin-top:6px">${esc(i.summary)}</div>
+            ${i.details ? `<div style="color:#89a;font-size:12px;margin-top:4px">${esc(i.details)}</div>` : ''}
+            <div style="color:#567;font-size:11px;margin-top:6px">${timeAgo(i.created_at)}</div>
+          </div>
+        `).join('') : '<div class="nxui-empty">No insights yet — leave the app idle for 15+ min</div>';
+
+        const rList = target.querySelector('#nx-ds-runs');
+        rList.innerHTML = runs.runs?.length ? runs.runs.map(r => `
+          <div class="nxui-card" style="padding:10px 14px;display:flex;justify-content:space-between">
+            <div>
+              <div style="color:#cde;font-size:13px">${esc(r.run_type)}</div>
+              <div style="color:#789;font-size:11px;margin-top:2px">${r.artifacts_created} artifacts · ${r.duration_ms}ms</div>
+            </div>
+            <div style="color:#567;font-size:11px">${timeAgo(r.created_at)}</div>
+          </div>
+        `).join('') : '<div class="nxui-empty">No runs yet</div>';
+      } catch (e) {
+        target.querySelector('#nx-ds-insights').innerHTML = `<div class="nxui-empty">${esc(e.message)}</div>`;
+      }
+    })();
+  };
+
+  // ─────────────────────────────────────────
+  // 🔮 PREDICTIVE (stats view)
+  // ─────────────────────────────────────────
+  NXUI.renderPredictive = function (target) {
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">Predictive Execution</h2>
+            <p class="nxui-sub">AI pre-computes what you'll likely ask next</p>
+          </div>
+        </header>
+        <div id="nx-pr-body"></div>
+      </div>
+    `;
+
+    (async () => {
+      try {
+        const s = await api('/api/predictive/stats');
+        target.querySelector('#nx-pr-body').innerHTML = `
+          <div class="nxui-grid">
+            <div class="nxui-card cine-hologram"><div class="nxui-label">Predictions made</div><div style="color:#fff;font-size:28px;font-weight:300;margin-top:6px">${fmt(s.predictions_made || 0)}</div></div>
+            <div class="nxui-card cine-hologram"><div class="nxui-label">Hits (used)</div><div style="color:#35f1c6;font-size:28px;font-weight:300;margin-top:6px">${fmt(s.predictions_hit || 0)}</div></div>
+            <div class="nxui-card cine-hologram"><div class="nxui-label">Hit rate</div><div style="color:#c6f135;font-size:28px;font-weight:300;margin-top:6px">${((s.hit_rate || 0) * 100).toFixed(1)}%</div></div>
+          </div>
+          <div style="margin-top:20px;padding:16px;background:rgba(120,200,255,.05);border-radius:12px;color:#89a;font-size:13px;line-height:1.6">
+            💡 The more you use the app, the smarter predictions get.
+            Predictions expire after 30 minutes if unused.
+          </div>
+        `;
+      } catch (e) {
+        target.querySelector('#nx-pr-body').innerHTML = `<div class="nxui-empty">${esc(e.message)}</div>`;
+      }
+    })();
+  };
+})();
+
+
+// ============================================================
+// 📁 PROJECT WORKSPACE UI — Phase B
+// Answers, at a glance: what Nexus is doing, why, what is done,
+// what needs approval, and what happens next.
+// ============================================================
+(function(){
+  'use strict';
+  const NXUI = window.NXUI = window.NXUI || {};
+
+  async function api(path, opts = {}) {
+    const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const r = await fetch(path, { ...opts, headers });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    return data;
+  }
+
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c =>
+      ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+
+  function ago(ts) {
+    const t = typeof ts === 'string' ? Date.parse(ts.replace(' ', 'T') + 'Z') : ts;
+    if (!t || Number.isNaN(t)) return '';
+    const d = Date.now() - t;
+    if (d < 60000) return 'just now';
+    if (d < 3600000) return Math.floor(d/60000) + 'm ago';
+    if (d < 86400000) return Math.floor(d/3600000) + 'h ago';
+    return Math.floor(d/86400000) + 'd ago';
+  }
+
+  const STEP_STYLE = {
+    done:    { dot:'#35f1c6', label:'Done' },
+    running: { dot:'#c6f135', label:'Running' },
+    failed:  { dot:'#ef4444', label:'Failed' },
+    pending: { dot:'#3d4a5c', label:'Queued' },
+    skipped: { dot:'#5d6b80', label:'Skipped' },
+  };
+
+  const AUTONOMY = [
+    { id:'suggest',    label:'Suggest',    desc:'Recommends only' },
+    { id:'prepare',    label:'Prepare',    desc:'Prepares, waits for approval' },
+    { id:'execute',    label:'Execute',    desc:'Runs safe actions automatically' },
+    { id:'autonomous', label:'Autonomous', desc:'Runs the full workflow' },
+  ];
+
+  function injectStyles() {
+    if (document.getElementById('nxp-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'nxp-styles';
+    s.textContent = `
+      .nxp-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:22px}
+      .nxp-name{color:#fff;font-size:21px;font-weight:500;letter-spacing:-.3px}
+      .nxp-goal{color:#6b7a90;font-size:13px;margin-top:5px;max-width:640px;line-height:1.5}
+      .nxp-status{padding:5px 11px;border-radius:100px;font-size:10.5px;letter-spacing:1.2px;
+        text-transform:uppercase;white-space:nowrap}
+      .nxp-bar{height:3px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;margin:16px 0 6px}
+      .nxp-bar span{display:block;height:100%;background:linear-gradient(90deg,#c6f135,#35f1c6);
+        border-radius:3px;transition:width .5s cubic-bezier(.16,1,.3,1)}
+      .nxp-bar-meta{display:flex;justify-content:space-between;color:#5d6b80;font-size:11px}
+      .nxp-now{padding:15px 17px;border-radius:13px;margin:20px 0;
+        background:linear-gradient(135deg,rgba(198,241,53,.06),rgba(53,241,198,.05));
+        border:1px solid rgba(53,241,198,.18)}
+      .nxp-now-lbl{color:#35f1c6;font-size:9.5px;letter-spacing:1.6px;text-transform:uppercase;margin-bottom:6px}
+      .nxp-now-t{color:#fff;font-size:14.5px}
+      .nxp-now-s{color:#6b7a90;font-size:11.5px;margin-top:3px}
+      .nxp-appr{padding:15px 17px;border-radius:13px;margin-bottom:10px;
+        background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.28)}
+      .nxp-appr.high{background:rgba(239,68,68,.06);border-color:rgba(239,68,68,.32)}
+      .nxp-appr-a{color:#f59e0b;font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase}
+      .nxp-appr.high .nxp-appr-a{color:#ef4444}
+      .nxp-appr-s{color:#fff;font-size:14px;margin:6px 0 12px;line-height:1.45}
+      .nxp-btn{padding:7px 15px;border:none;border-radius:9px;font-size:12.5px;
+        font-weight:500;cursor:pointer;font-family:inherit;transition:transform .14s}
+      .nxp-btn:hover{transform:translateY(-1px)}
+      .nxp-btn-ok{background:linear-gradient(135deg,#c6f135,#35f1c6);color:#000}
+      .nxp-btn-no{background:rgba(255,255,255,.06);color:#aebbcc;border:1px solid rgba(255,255,255,.1)}
+      .nxp-sec{color:#4a586b;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;
+        margin:26px 0 11px}
+      .nxp-step{display:flex;gap:13px;padding:11px 14px;border-radius:10px;margin-bottom:5px;
+        background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05)}
+      .nxp-step-dot{width:8px;height:8px;border-radius:50%;margin-top:5px;flex-shrink:0}
+      .nxp-step-n{color:#dbe4ef;font-size:13px}
+      .nxp-step-m{color:#5d6b80;font-size:11px;margin-top:2px}
+      .nxp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}
+      .nxp-tile{padding:13px 15px;background:rgba(255,255,255,.025);
+        border:1px solid rgba(255,255,255,.06);border-radius:11px}
+      .nxp-tile-n{color:#fff;font-size:19px;font-weight:300}
+      .nxp-tile-l{color:#5d6b80;font-size:10.5px;letter-spacing:1.1px;text-transform:uppercase;margin-top:3px}
+      .nxp-log{padding:8px 13px;border-left:2px solid rgba(255,255,255,.08);margin-bottom:3px}
+      .nxp-log.error{border-left-color:#ef4444}
+      .nxp-log.warn{border-left-color:#f59e0b}
+      .nxp-log-m{color:#aebbcc;font-size:12px}
+      .nxp-log-t{color:#4a586b;font-size:10px;margin-top:2px}
+      .nxp-auto{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+      .nxp-auto-b{padding:8px 13px;border-radius:9px;border:1px solid rgba(255,255,255,.08);
+        background:rgba(255,255,255,.02);color:#8494a8;font-size:12px;cursor:pointer;
+        font-family:inherit;text-align:left;transition:all .18s}
+      .nxp-auto-b:hover{background:rgba(255,255,255,.05);color:#dbe4ef}
+      .nxp-auto-b.on{border-color:rgba(53,241,198,.4);background:rgba(53,241,198,.08);color:#fff}
+      .nxp-auto-d{display:block;color:#5d6b80;font-size:10px;margin-top:2px}
+      .nxp-card{padding:15px 17px;background:rgba(255,255,255,.025);
+        border:1px solid rgba(255,255,255,.06);border-radius:12px;margin-bottom:8px;
+        cursor:pointer;transition:all .2s}
+      .nxp-card:hover{border-color:rgba(53,241,198,.28);transform:translateY(-1px)}
+      .nxp-empty{padding:40px 20px;text-align:center;color:#5d6b80;font-size:13px}
+    `;
+    document.head.appendChild(s);
+  }
+
+  function statusStyle(status) {
+    if (status === 'awaiting_approval') return 'background:rgba(245,158,11,.14);color:#f59e0b';
+    if (status === 'completed')         return 'background:rgba(53,241,198,.14);color:#35f1c6';
+    if (status === 'failed')            return 'background:rgba(239,68,68,.14);color:#ef4444';
+    if (status === 'building')          return 'background:rgba(198,241,53,.14);color:#c6f135';
+    return 'background:rgba(255,255,255,.06);color:#8494a8';
+  }
+
+  // ─── Project list ─────────────────────────
+  NXUI.renderProjects = function (target) {
+    injectStyles();
+    target.innerHTML = `
+      <div class="nxui-panel nx-enter">
+        <header class="nxui-head">
+          <div>
+            <h2 class="nxui-title">Projects</h2>
+            <p class="nxui-sub">Every serious task lives here</p>
+          </div>
+        </header>
+        <div id="nxp-list"><div class="nxp-empty">Loading…</div></div>
+      </div>`;
+
+    const list = target.querySelector('#nxp-list');
+    api('/api/projects').then(data => {
+      const projects = data.projects || [];
+      if (!projects.length) {
+        list.innerHTML = `<div class="nxp-empty">No projects yet.<br>
+          Describe what you want to build on Home and Nexus will create one.</div>`;
+        return;
+      }
+      list.innerHTML = projects.map(p => `
+        <div class="nxp-card" data-open="${p.id}">
+          <div style="display:flex;justify-content:space-between;gap:14px;align-items:flex-start">
+            <div style="flex:1;min-width:0">
+              <div style="color:#fff;font-size:14.5px;font-weight:500">${esc(p.name)}</div>
+              <div style="color:#5d6b80;font-size:11.5px;margin-top:3px;overflow:hidden;
+                text-overflow:ellipsis;white-space:nowrap">${esc(p.goal)}</div>
+            </div>
+            <span class="nxp-status" style="${statusStyle(p.status)}">${esc(p.status.replace(/_/g,' '))}</span>
+          </div>
+          <div class="nxp-bar"><span style="width:${p.percent}%"></span></div>
+          <div class="nxp-bar-meta"><span>${p.percent}% complete</span><span>${ago(p.updated_at)}</span></div>
+        </div>`).join('');
+
+      list.querySelectorAll('[data-open]').forEach(card => {
+        card.onclick = () => NXUI.renderProject(target, Number(card.dataset.open));
+      });
+    }).catch(e => {
+      list.innerHTML = `<div class="nxp-empty">${esc(e.message)}</div>`;
+    });
+  };
+
+  // ─── Single project workspace ─────────────
+  NXUI.renderProject = function (target, projectId) {
+    injectStyles();
+    target.innerHTML = `<div class="nxui-panel nx-enter"><div class="nxp-empty">Loading workspace…</div></div>`;
+
+    let refreshTimer = null;
+
+    function stopPolling() {
+      if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+    }
+
+    // Stop polling as soon as the workspace leaves the DOM, so a
+    // closed panel cannot keep hitting the API forever.
+    function stillMounted() {
+      return document.body.contains(target);
+    }
+
+    async function load() {
+      if (!stillMounted()) { stopPolling(); return; }
+      try {
+        const w = await api(`/api/projects/${projectId}`);
+        render(w);
+        // Only poll while work is actually moving.
+        if (w.project.status !== 'building' || w.blocked) stopPolling();
+      } catch (e) {
+        stopPolling();
+        target.innerHTML = `<div class="nxui-panel"><div class="nxp-empty">${esc(e.message)}</div></div>`;
+      }
+    }
+
+    function render(w) {
+      const p = w.project;
+      const pr = w.progress;
+
+      const approvals = w.pendingApprovals.length ? `
+        <div class="nxp-sec">Needs your approval</div>
+        ${w.pendingApprovals.map(a => `
+          <div class="nxp-appr ${a.risk === 'high' ? 'high' : ''}">
+            <div class="nxp-appr-a">${esc(a.action)} · ${esc(a.risk)} risk</div>
+            <div class="nxp-appr-s">${esc(a.summary)}</div>
+            <div style="display:flex;gap:7px">
+              <button class="nxp-btn nxp-btn-ok" data-appr="${a.id}" data-dec="approved">Approve</button>
+              <button class="nxp-btn nxp-btn-no" data-appr="${a.id}" data-dec="rejected">Reject</button>
+            </div>
+          </div>`).join('')}` : '';
+
+      const now = w.currentStep ? `
+        <div class="nxp-now">
+          <div class="nxp-now-lbl">Nexus is working</div>
+          <div class="nxp-now-t">${esc(w.currentStep.step)}</div>
+          <div class="nxp-now-s">${esc(w.currentStep.agent)} · started ${ago(w.currentStep.since)}</div>
+        </div>` : (w.nextStep ? `
+        <div class="nxp-now">
+          <div class="nxp-now-lbl">Up next</div>
+          <div class="nxp-now-t">${esc(w.nextStep.step)}</div>
+          <div class="nxp-now-s">${esc(w.nextStep.agent)}</div>
+        </div>` : '');
+
+      const resourceCount = Object.values(w.resources).reduce((n, arr) => n + arr.length, 0);
+      const resources = resourceCount ? `
+        <div class="nxp-sec">Resources</div>
+        <div class="nxp-grid">
+          ${Object.entries(w.resources).filter(([, arr]) => arr.length).map(([kind, arr]) => `
+            <div class="nxp-tile">
+              <div class="nxp-tile-n">${arr.length}</div>
+              <div class="nxp-tile-l">${esc(kind)}</div>
+            </div>`).join('')}
+        </div>` : '';
+
+      target.innerHTML = `
+        <div class="nxui-panel nx-enter">
+          <button class="nxui-btn-secondary" id="nxp-back"
+            style="padding:6px 13px;font-size:12px;margin-bottom:16px">← All projects</button>
+
+          <div class="nxp-head">
+            <div style="flex:1;min-width:0">
+              <div class="nxp-name">${esc(p.name)}</div>
+              <div class="nxp-goal">${esc(p.goal)}</div>
+            </div>
+            <span class="nxp-status" style="${statusStyle(p.status)}">${esc(p.status.replace(/_/g,' '))}</span>
+          </div>
+
+          <div class="nxp-bar"><span style="width:${pr.percent}%"></span></div>
+          <div class="nxp-bar-meta">
+            <span>${pr.done} of ${pr.total} steps</span>
+            <span>${pr.failed ? pr.failed + ' failed · ' : ''}${pr.percent}%</span>
+          </div>
+
+          ${approvals}
+          ${now}
+
+          <div class="nxp-sec">Plan</div>
+          ${w.plan.length ? w.plan.map(s => {
+            const st = STEP_STYLE[s.status] || STEP_STYLE.pending;
+            return `<div class="nxp-step">
+              <div class="nxp-step-dot" style="background:${st.dot}"></div>
+              <div style="flex:1;min-width:0">
+                <div class="nxp-step-n">${esc(s.step)}</div>
+                <div class="nxp-step-m">${esc(s.agent)} · ${st.label}${s.duration_ms ? ' · ' + s.duration_ms + 'ms' : ''}</div>
+              </div>
+            </div>`;
+          }).join('') : '<div class="nxp-empty">No steps recorded yet</div>'}
+
+          ${w.agents.length ? `
+            <div class="nxp-sec">Agents involved</div>
+            <div class="nxp-grid">
+              ${w.agents.map(a => `
+                <div class="nxp-tile">
+                  <div class="nxp-tile-n">${a.steps}</div>
+                  <div class="nxp-tile-l">${esc(a.name)}${a.failed ? ' · ' + a.failed + ' failed' : ''}</div>
+                </div>`).join('')}
+            </div>` : ''}
+
+          ${resources}
+
+          <div class="nxp-sec">Autonomy</div>
+          <div class="nxp-auto">
+            ${AUTONOMY.map(a => `
+              <button class="nxp-auto-b ${p.autonomy === a.id ? 'on' : ''}" data-auto="${a.id}">
+                ${esc(a.label)}<span class="nxp-auto-d">${esc(a.desc)}</span>
+              </button>`).join('')}
+          </div>
+          <div style="color:#4a586b;font-size:11px;margin-top:9px">
+            Production deploys, database changes, payments and deletions always
+            ask first unless autonomy is set to Autonomous.
+          </div>
+
+          <div class="nxp-sec">Activity</div>
+          ${w.activity.length ? w.activity.slice(0, 15).map(l => `
+            <div class="nxp-log ${esc(l.level)}">
+              <div class="nxp-log-m">${esc(l.message)}</div>
+              <div class="nxp-log-t">${l.agent ? esc(l.agent) + ' · ' : ''}${ago(l.at)}</div>
+            </div>`).join('') : '<div class="nxp-empty">No activity yet</div>'}
+        </div>`;
+
+      target.querySelector('#nxp-back').onclick = () => {
+        stopPolling();
+        NXUI.renderProjects(target);
+      };
+
+      target.querySelectorAll('[data-appr]').forEach(btn => {
+        btn.onclick = async () => {
+          btn.disabled = true;
+          try {
+            await api(`/api/projects/approvals/${btn.dataset.appr}/${btn.dataset.dec}`, { method:'POST' });
+            load();
+          } catch (e) {
+            btn.disabled = false;
+            btn.textContent = e.message.slice(0, 24);
+          }
+        };
+      });
+
+      target.querySelectorAll('[data-auto]').forEach(btn => {
+        btn.onclick = async () => {
+          try {
+            await api(`/api/projects/${projectId}/autonomy`, {
+              method:'PUT', body: JSON.stringify({ level: btn.dataset.auto }),
+            });
+            load();
+          } catch (_) {}
+        };
+      });
+    }
+
+    load();
+    refreshTimer = setInterval(load, 5000);
+  };
+})();
+
+// ============================================================
+// 🎼 LIVE ORCHESTRATION UI — Phase C
+// The user describes an outcome; Nexus picks and runs the agents.
+// They never choose from a list of fifteen.
+// ============================================================
+(function(){
+  'use strict';
+  const NXO = window.NXO = window.NXO || {};
+
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c =>
+      ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+
+  function injectStyles() {
+    if (document.getElementById('nxo-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'nxo-styles';
+    s.textContent = `
+      .nxo-wrap{max-width:660px;margin:0 auto}
+      .nxo-head{text-align:center;margin-bottom:28px}
+      .nxo-headline{color:#fff;font-size:23px;font-weight:400;letter-spacing:-.3px}
+      .nxo-goal{color:#6b7a90;font-size:13px;margin-top:7px;line-height:1.5}
+      .nxo-bar{height:3px;background:rgba(255,255,255,.06);border-radius:3px;
+        overflow:hidden;margin:22px 0 7px}
+      .nxo-bar span{display:block;height:100%;width:0;
+        background:linear-gradient(90deg,#c6f135,#35f1c6);border-radius:3px;
+        transition:width .55s cubic-bezier(.16,1,.3,1)}
+      .nxo-meta{display:flex;justify-content:space-between;color:#5d6b80;font-size:11px}
+      .nxo-step{display:flex;gap:13px;padding:12px 15px;border-radius:11px;margin-bottom:5px;
+        background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);
+        transition:all .3s cubic-bezier(.16,1,.3,1)}
+      .nxo-step.running{background:linear-gradient(135deg,rgba(198,241,53,.07),rgba(53,241,198,.05));
+        border-color:rgba(53,241,198,.24)}
+      .nxo-step.done{opacity:.62}
+      .nxo-step.failed{border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.04)}
+      .nxo-step.blocked{border-color:rgba(245,158,11,.34);background:rgba(245,158,11,.05)}
+      .nxo-step.blocked .nxo-dot{background:#f59e0b}
+      .nxo-gate{margin-top:20px;padding:18px;border-radius:13px;
+        background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.3)}
+      .nxo-gate.high{background:rgba(239,68,68,.06);border-color:rgba(239,68,68,.34)}
+      .nxo-gate-l{color:#f59e0b;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase}
+      .nxo-gate.high .nxo-gate-l{color:#ef4444}
+      .nxo-gate-t{color:#fff;font-size:15px;margin:8px 0 5px}
+      .nxo-gate-d{color:#8494a8;font-size:12px;margin-bottom:14px;line-height:1.5}
+      .nxo-dot{width:8px;height:8px;border-radius:50%;margin-top:5px;flex-shrink:0;
+        background:#3d4a5c;transition:background .3s}
+      .nxo-step.running .nxo-dot{background:#c6f135;animation:nxoPulse 1.3s ease-in-out infinite}
+      .nxo-step.done .nxo-dot{background:#35f1c6}
+      .nxo-step.failed .nxo-dot{background:#ef4444}
+      @keyframes nxoPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.5);opacity:.55}}
+      .nxo-name{color:#dbe4ef;font-size:13.5px}
+      .nxo-sub{color:#5d6b80;font-size:11px;margin-top:2px}
+      .nxo-out{margin-top:9px;padding:11px 13px;background:rgba(0,0,0,.24);
+        border-radius:9px;color:#8fa3ba;font-size:11.5px;line-height:1.55;
+        max-height:150px;overflow:auto;white-space:pre-wrap;
+        font-family:ui-monospace,SFMono-Regular,monospace}
+      .nxo-toggle{background:none;border:none;color:#4a586b;font-size:10.5px;
+        cursor:pointer;padding:4px 0;font-family:inherit;letter-spacing:.4px}
+      .nxo-toggle:hover{color:#8494a8}
+      .nxo-done{margin-top:26px;padding:19px;border-radius:13px;text-align:center;
+        background:linear-gradient(135deg,rgba(198,241,53,.07),rgba(53,241,198,.06));
+        border:1px solid rgba(53,241,198,.24)}
+      .nxo-done-t{color:#fff;font-size:16px;margin-bottom:12px}
+      .nxo-btn{padding:9px 18px;border:none;border-radius:10px;font-size:13px;
+        font-weight:600;cursor:pointer;font-family:inherit;
+        background:linear-gradient(135deg,#c6f135,#35f1c6);color:#000;transition:transform .14s}
+      .nxo-btn:hover{transform:translateY(-1px)}
+      .nxo-btn-ghost{background:rgba(255,255,255,.05);color:#aebbcc;
+        border:1px solid rgba(255,255,255,.1);font-weight:500}
+      .nxo-err{padding:15px 17px;border-radius:12px;margin-top:16px;
+        background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.28);color:#fca5a5;font-size:13px}
+    `;
+    document.head.appendChild(s);
+  }
+
+  // Render a step's output as something a person reads, not raw JSON.
+  function summarize(output) {
+    if (output == null) return '';
+    if (typeof output === 'string') return output.slice(0, 900);
+    if (typeof output !== 'object') return String(output);
+
+    const lines = [];
+    for (const [key, value] of Object.entries(output)) {
+      if (lines.length >= 8) break;
+      const label = key.replace(/_/g, ' ');
+      if (Array.isArray(value)) {
+        lines.push(`${label}: ${value.slice(0, 4).map(v =>
+          typeof v === 'string' ? v : JSON.stringify(v)).join(', ')}`);
+      } else if (value && typeof value === 'object') {
+        lines.push(`${label}: ${JSON.stringify(value).slice(0, 160)}`);
+      } else {
+        lines.push(`${label}: ${String(value).slice(0, 220)}`);
+      }
+    }
+    return lines.join('\n').slice(0, 900);
+  }
+
+  /**
+   * Runs a prompt end to end and streams progress into `target`.
+   * Returns a handle so the caller can stop it.
+   */
+  NXO.run = function (target, prompt, options = {}) {
+    return startStream(target, {
+      url: '/api/orchestrate/run',
+      body: { prompt },
+      headline: 'Working out the plan…',
+      goal: prompt,
+    }, options);
+  };
+
+  /** Continues a run that stopped at an approval gate. */
+  NXO.resume = function (target, projectId, options = {}) {
+    return startStream(target, {
+      url: `/api/orchestrate/resume/${projectId}`,
+      body: {},
+      headline: 'Continuing…',
+      goal: 'Resuming after approval',
+      projectId,
+    }, options);
+  };
+
+  // Shared by run and resume so both paths behave identically.
+  function startStream(target, cfg, options = {}) {
+    injectStyles();
+    const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+    const prompt = cfg.goal;
+
+    target.innerHTML = `
+      <div class="nxo-wrap">
+        <div class="nxo-head">
+          <div class="nxo-headline" id="nxo-headline">${esc(cfg.headline)}</div>
+          <div class="nxo-goal">${esc(cfg.goal)}</div>
+        </div>
+        <div class="nxo-bar"><span id="nxo-fill"></span></div>
+        <div class="nxo-meta">
+          <span id="nxo-count">Preparing</span>
+          <span id="nxo-pct">0%</span>
+        </div>
+        <div id="nxo-steps" style="margin-top:18px"></div>
+        <div id="nxo-final"></div>
+      </div>`;
+
+    const els = {
+      headline: target.querySelector('#nxo-headline'),
+      fill:     target.querySelector('#nxo-fill'),
+      count:    target.querySelector('#nxo-count'),
+      pct:      target.querySelector('#nxo-pct'),
+      steps:    target.querySelector('#nxo-steps'),
+      final:    target.querySelector('#nxo-final'),
+    };
+
+    const controller = new AbortController();
+    let projectId = cfg.projectId ?? null;
+    let total = 0;
+
+    function setProgress(pct, doneCount) {
+      els.fill.style.width = pct + '%';
+      els.pct.textContent = pct + '%';
+      if (total) els.count.textContent = `${doneCount} of ${total} steps`;
+    }
+
+    function stepNode(id) {
+      return els.steps.querySelector(`[data-step="${id}"]`);
+    }
+
+    function handle(evt) {
+      switch (evt.type) {
+        case 'plan': {
+          projectId = evt.project_id;
+          total = evt.steps.length;
+          els.headline.textContent = evt.headline;
+          els.count.textContent = `0 of ${total} steps`;
+          els.steps.innerHTML = evt.steps.map(s => `
+            <div class="nxo-step" data-step="${s.id}">
+              <div class="nxo-dot"></div>
+              <div style="flex:1;min-width:0">
+                <div class="nxo-name">${esc(s.step)}</div>
+                <div class="nxo-sub" data-sub>Queued</div>
+              </div>
+            </div>`).join('');
+          options.onPlan?.(evt);
+          break;
+        }
+        case 'step_started': {
+          const node = stepNode(evt.step_id);
+          if (node) {
+            node.className = 'nxo-step running';
+            node.querySelector('[data-sub]').textContent = 'Working…';
+            node.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          }
+          setProgress(evt.progress, Math.round((evt.progress / 100) * total));
+          break;
+        }
+        case 'step_done': {
+          const node = stepNode(evt.step_id);
+          if (node) {
+            node.className = 'nxo-step done';
+            node.querySelector('[data-sub]').textContent =
+              `Done${evt.duration_ms ? ' · ' + (evt.duration_ms / 1000).toFixed(1) + 's' : ''}`;
+
+            const summary = summarize(evt.output);
+            if (summary) {
+              const body = node.querySelector('div[style]');
+              const toggle = document.createElement('button');
+              toggle.className = 'nxo-toggle';
+              toggle.textContent = 'Show result';
+              const pre = document.createElement('div');
+              pre.className = 'nxo-out';
+              pre.style.display = 'none';
+              pre.textContent = summary;
+              toggle.onclick = () => {
+                const open = pre.style.display === 'none';
+                pre.style.display = open ? 'block' : 'none';
+                toggle.textContent = open ? 'Hide result' : 'Show result';
+              };
+              body.appendChild(toggle);
+              body.appendChild(pre);
+            }
+          }
+          setProgress(evt.progress, Math.round((evt.progress / 100) * total));
+          break;
+        }
+        case 'step_failed': {
+          const node = stepNode(evt.step_id);
+          if (node) {
+            node.className = 'nxo-step failed';
+            node.querySelector('[data-sub]').textContent = esc(evt.error || 'Failed');
+          }
+          break;
+        }
+        case 'resumed': {
+          els.headline.textContent = evt.headline;
+          projectId = evt.project_id;
+          total = evt.total;
+          break;
+        }
+        case 'approval_required': {
+          projectId = evt.project_id;
+          const node = stepNode(evt.step_id);
+          if (node) {
+            node.className = 'nxo-step blocked';
+            node.querySelector('[data-sub]').textContent = 'Waiting for your approval';
+          }
+          els.headline.textContent = 'Paused — needs your approval';
+          els.count.textContent = `${evt.completed} of ${evt.total} steps`;
+
+          // The gate is the decision point, so it is shown here rather
+          // than leaving the user to find it in the project page.
+          const high = /deploy\.production|database\.|payment\./.test(evt.action || '');
+          els.final.innerHTML = `
+            <div class="nxo-gate ${high ? 'high' : ''}">
+              <div class="nxo-gate-l">${esc(evt.action)} · approval required</div>
+              <div class="nxo-gate-t">${esc(evt.summary)}</div>
+              <div class="nxo-gate-d">Nexus has stopped before this step because the
+                project's autonomy level does not allow it to run unattended.</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="nxo-btn" id="nxo-approve">Approve and continue</button>
+                <button class="nxo-btn nxo-btn-ghost" id="nxo-reject">Reject</button>
+              </div>
+              <div id="nxo-gate-msg" style="margin-top:10px;color:#8494a8;font-size:11.5px"></div>
+            </div>`;
+
+          const msg = els.final.querySelector('#nxo-gate-msg');
+          const decide = async (decision) => {
+            if (!evt.approval_id) { msg.textContent = 'Approval could not be recorded.'; return; }
+            els.final.querySelectorAll('button').forEach(b => { b.disabled = true; });
+            try {
+              await fetch(`/api/projects/approvals/${evt.approval_id}/${decision}`, {
+                method: 'POST',
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              });
+              if (decision === 'rejected') {
+                msg.textContent = 'Rejected. The run stays paused.';
+                return;
+              }
+              els.final.innerHTML = '';
+              NXO.resume(target, projectId, options);
+            } catch (err) {
+              msg.textContent = err.message;
+              els.final.querySelectorAll('button').forEach(b => { b.disabled = false; });
+            }
+          };
+          els.final.querySelector('#nxo-approve').onclick = () => decide('approved');
+          els.final.querySelector('#nxo-reject').onclick = () => decide('rejected');
+          options.onApprovalRequired?.(evt);
+          break;
+        }
+        case 'complete': {
+          els.headline.textContent =
+            evt.status === 'completed' ? 'Done' : 'Finished with issues';
+          setProgress(100, evt.completed);
+          els.final.innerHTML = `
+            <div class="nxo-done">
+              <div class="nxo-done-t">${evt.completed} of ${evt.total} steps completed</div>
+              <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                <button class="nxo-btn" id="nxo-open">Open project</button>
+                <button class="nxo-btn nxo-btn-ghost" id="nxo-again">Start something else</button>
+              </div>
+            </div>`;
+          els.final.querySelector('#nxo-open').onclick = () => {
+            if (window.NXUI?.renderProject && projectId) {
+              window.NXUI.renderProject(target, projectId);
+            }
+          };
+          els.final.querySelector('#nxo-again').onclick = () => window.NXS?.open('home');
+          options.onComplete?.(evt);
+          break;
+        }
+        case 'error': {
+          els.headline.textContent = 'Could not finish';
+          els.final.innerHTML = `<div class="nxo-err">${esc(evt.error)}</div>`;
+          options.onError?.(evt);
+          break;
+        }
+      }
+    }
+
+    (async () => {
+      try {
+        const res = await fetch(cfg.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(cfg.body || {}),
+          signal: controller.signal,
+        });
+
+        if (!res.ok || !res.body) {
+          const detail = await res.json().catch(() => ({}));
+          throw new Error(detail.error || `HTTP ${res.status}`);
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          // SSE frames are separated by a blank line.
+          const frames = buffer.split('\n\n');
+          buffer = frames.pop() || '';
+          for (const frame of frames) {
+            const line = frame.split('\n').find(l => l.startsWith('data: '));
+            if (!line) continue;
+            try { handle(JSON.parse(line.slice(6))); }
+            catch (_) { /* skip malformed frame */ }
+          }
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        handle({ type: 'error', error: err.message });
+      }
+    })();
+
+    return {
+      stop() { controller.abort(); },
+      get projectId() { return projectId; },
+    };
+  }
+
+  /** Preview the plan without spending anything. */
+  NXO.preview = async function (prompt) {
+    const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+    const res = await fetch('/api/orchestrate/plan', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ prompt }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  };
+})();

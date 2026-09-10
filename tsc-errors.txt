@@ -1,0 +1,14 @@
+﻿backend/services/TypeScript/ai-twin.ts(5,60): error TS2307: Cannot find module '../types/core' or its corresponding type declarations.
+backend/services/TypeScript/ai-twin.ts(184,15): error TS7006: Parameter 'row' implicitly has an 'any' type.
+backend/services/TypeScript/contracts.ts(6,33): error TS2307: Cannot find module '../types/core' or its corresponding type declarations.
+backend/services/TypeScript/deprecation.ts(16,49): error TS2307: Cannot find module '../types/core' or its corresponding type declarations.
+backend/services/TypeScript/event-bus.ts(16,29): error TS2307: Cannot find module '../types/core' or its corresponding type declarations.
+backend/services/TypeScript/local-llm.ts(9,8): error TS2307: Cannot find module '../types/core' or its corresponding type declarations.
+backend/services/TypeScript/orchestration.ts(13,60): error TS2307: Cannot find module '../types/core' or its corresponding type declarations.
+backend/services/TypeScript/orchestration.ts(369,58): error TS7006: Parameter 'r' implicitly has an 'any' type.
+backend/services/TypeScript/predictive-execution.ts(6,77): error TS2307: Cannot find module '../types/core' or its corresponding type declarations.
+backend/services/TypeScript/projects.ts(18,49): error TS2307: Cannot find module '../types/core' or its corresponding type declarations.
+backend/services/TypeScript/semantic-cache.ts(6,66): error TS2307: Cannot find module '../types/core' or its corresponding type declarations.
+backend/services/TypeScript/temporal-ux.ts(6,66): error TS2307: Cannot find module '../types/core' or its corresponding type declarations.
+backend/services/TypeScript/temporal-ux.ts(159,31): error TS7006: Parameter 'r' implicitly has an 'any' type.
+backend/services/TypeScript/temporal-ux.ts(197,41): error TS7006: Parameter 'p' implicitly has an 'any' type.

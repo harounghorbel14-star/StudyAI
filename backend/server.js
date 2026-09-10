@@ -3,7 +3,7 @@
 //    كل شيء في ملف واحد — لا conflicts — لا تكرار
 // ============================================================
 
-require("dotenv").config();
+require("dotenv").config({ path: require("path").join(__dirname, ".env") });
 
 const express      = require("express");
 const cors         = require("cors");
@@ -499,10 +499,59 @@ const audioUpload = multer({ dest: uploadDir, limits: { fileSize: 25*1024*1024 }
 // ─────────────────────────────────────────────
 const app = express();
 app.use(helmet());
-app.use(cors({ origin: process.env.ALLOWED_ORIGIN || "*", methods: ["GET","POST","DELETE"] }));
+app.use(cors({
+  origin: process.env.ALLOWED_ORIGIN || "*",
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-csrf-token"],
+  exposedHeaders: ["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-Quota-Limit", "X-Quota-Remaining", "Retry-After"],
+}));
 
-// Stripe webhook needs raw body — MUST be before express.json()
-app.post("/api/stripe/webhook", express.raw({ type:"application/json" }), handleStripeWebhook);
+// Additional hardening headers (CSP, HSTS, Permissions-Policy)
+try {
+  const { securityHeaders } = require('./dist/security/hardening');
+  app.use(securityHeaders());
+} catch (e) {
+  console.warn('⚠️ Security headers not applied:', e.message);
+}
+
+// ─────────────────────────────────────────────
+// 💳 STRIPE WEBHOOK — single entry point
+// ─────────────────────────────────────────────
+// Raw body is required for signature verification, so this must be
+// registered before express.json().
+//
+// There were previously three webhook endpoints (/api/stripe/webhook,
+// /api/payments/webhook, /api/billing/webhook). Only the payments
+// service deduplicates by Stripe event id, so a replayed event hitting
+// either of the others would be processed twice — double-provisioning a
+// subscription. All three now resolve to the one idempotent handler.
+const stripeWebhookHandler = express.raw({ type: "application/json" });
+
+async function routeStripeWebhook(req, res) {
+  // Preferred path: the payments service, which records every
+  // stripe_event_id and ignores repeats.
+  if (services?.payments) {
+    try {
+      const result = await services.payments.handleWebhook({
+        rawBody: req.body,
+        signature: req.headers["stripe-signature"],
+      });
+      return res.json(result);
+    } catch (e) {
+      console.error("Stripe webhook error:", e.message);
+      return res.status(400).json({ error: e.message });
+    }
+  }
+  // Fallback for boot-time requests before services are ready.
+  return handleStripeWebhook(req, res);
+}
+
+app.post("/api/payments/webhook", stripeWebhookHandler, routeStripeWebhook);
+// Legacy aliases — kept so an existing Stripe dashboard configuration
+// keeps working. Remove once the dashboard points at /api/payments/webhook.
+app.post("/api/stripe/webhook", stripeWebhookHandler, routeStripeWebhook);
+app.post("/api/billing/webhook", stripeWebhookHandler, routeStripeWebhook);
+
 app.use(express.json({ limit:"2mb" }));
 
 // ─────────────────────────────────────────────
@@ -3088,11 +3137,21 @@ app.use((err,_req,res,_next) => {
 let services = null;
 try {
   const { initServices } = require('./services');
-  services = initServices(db, openai, { startWorkers: true });
+  services = initServices(db, openai, {
+    startWorkers: true,
+    dbPath: 'studyai.db',
+    backupDir: './backups',
+    maxBackups: 14,
+  });
 
   // Apply request logging middleware
   if (services.logger?.middleware) {
     app.use(services.logger.middleware());
+  }
+
+  // Apply protection middleware (bot/abuse detection)
+  if (services.protection?.middleware) {
+    app.use('/api/', services.protection.middleware());
   }
 
   services.logger.info('Services ready', {
@@ -3102,6 +3161,16 @@ try {
   });
 } catch (e) {
   console.warn('⚠️ Services init:', e.message);
+}
+
+// ─────────────────────────────────────────────
+// 🪦 DEPRECATION HEADERS
+// ─────────────────────────────────────────────
+// Tags duplicated endpoints and counts their use. Deprecated routes
+// keep working; the counter decides when removal is actually safe.
+if (services?.deprecation) {
+  app.use(services.deprecation.middleware());
+  console.log(`🪦 Deprecation tracking active on ${services.deprecation.list().length} paths`);
 }
 
 // ─────────────────────────────────────────────
@@ -3132,6 +3201,22 @@ try{
     console.log('✅ System Observatory loaded (tracer + events + adaptive)');
   }
 }catch(e){console.warn('⚠️ System routes:', e.message);}
+
+try{
+  const securityRoute = require('./routes/security');
+  if (services) {
+    app.use('/api/security', securityRoute(db, services, requireAuth, wrap));
+    console.log('✅ Security Hardening loaded (audit + RBAC + threats + backups + cost)');
+  }
+}catch(e){console.warn('⚠️ Security routes:', e.message);}
+
+try{
+  const adminRoute = require('./routes/admin');
+  if (services) {
+    app.use('/api/admin', adminRoute(db, services, requireAuth, wrap));
+    console.log('✅ Admin Dashboard loaded (backup + cost + audit + security + health)');
+  }
+}catch(e){console.warn('⚠️ Admin routes:', e.message);}
 
 try{
   const deployRoute = require('./routes/deploy-engine');
@@ -3182,9 +3267,1386 @@ try{
 }catch(e){console.warn('⚠️ UX routes:', e.message);}
 
 // ─────────────────────────────────────────────
-// 🚀 START
+// 🆕 NEW SERVICES — INLINE ROUTES
+// (repo-intel · media · business · workspaces · voice · secrets)
 // ─────────────────────────────────────────────
-app.listen(PORT, () => {
+
+// Small helper to require any permission OR admin
+function requireServices(req, res, next) {
+  if (!services) return res.status(503).json({ error: 'Services not initialized' });
+  next();
+}
+
+// ───── REPO INTELLIGENCE (Cursor-level) ────────────────
+app.post('/api/repo/analyze', requireAuth, requireServices, aiLimiter, wrap(async (req, res) => {
+  const { code, file_path, language } = req.body || {};
+  if (!code) return res.status(400).json({ error: 'code required' });
+  const result = await services.repoIntel.analyzeFile({
+    code, filePath: file_path, language, user_id: req.user.id,
+  });
+  res.json(result);
+}));
+
+app.post('/api/repo/review', requireAuth, requireServices, aiLimiter, wrap(async (req, res) => {
+  const { code, language, focus } = req.body || {};
+  if (!code) return res.status(400).json({ error: 'code required' });
+  const result = await services.repoIntel.reviewCode({
+    code, language, focus, user_id: req.user.id,
+  });
+  res.json(result);
+}));
+
+app.post('/api/repo/debug', requireAuth, requireServices, aiLimiter, wrap(async (req, res) => {
+  const { code, error, stack } = req.body || {};
+  if (!code || !error) return res.status(400).json({ error: 'code and error required' });
+  const result = await services.repoIntel.debugTrace({
+    code, error, stack, user_id: req.user.id,
+  });
+  res.json(result);
+}));
+
+app.post('/api/repo/dependency-graph', requireAuth, requireServices, aiLimiter, wrap(async (req, res) => {
+  const { files } = req.body || {};
+  if (!Array.isArray(files) || files.length === 0) {
+    return res.status(400).json({ error: 'files array required' });
+  }
+  const result = await services.repoIntel.buildDependencyGraph({ files, user_id: req.user.id });
+  res.json(result);
+}));
+
+// ───── MEDIA PIPELINE ──────────────────────────────────
+app.get('/api/media/models', requireAuth, requireServices, wrap(async (_req, res) => {
+  res.json(services.media.listModels());
+}));
+
+app.post('/api/media/generate', requireAuth, requireQuota, aiLimiter, requireServices, wrap(async (req, res) => {
+  const { type, prompt, model, options } = req.body || {};
+  if (!type || !prompt) return res.status(400).json({ error: 'type and prompt required' });
+  const result = await services.media.generate({
+    type, prompt, model, options: options || {}, user_id: req.user.id,
+  });
+  res.json(result);
+}));
+
+app.post('/api/media/asset-pipeline', requireAuth, requireQuota, aiLimiter, requireServices, wrap(async (req, res) => {
+  const { brand, theme } = req.body || {};
+  if (!brand) return res.status(400).json({ error: 'brand required' });
+  const result = await services.media.assetPipeline({
+    brand, theme: theme || 'modern', user_id: req.user.id,
+  });
+  res.json(result);
+}));
+
+// ───── BUSINESS OPERATIONS ────────────────────────────
+app.post('/api/business/metric', requireAuth, requireServices, wrap(async (req, res) => {
+  const { project_id, metric_type, metric_name, value, metadata } = req.body || {};
+  if (!metric_type || !metric_name || typeof value !== 'number') {
+    return res.status(400).json({ error: 'metric_type, metric_name, value required' });
+  }
+  services.business.recordMetric({
+    user_id: req.user.id, project_id, metric_type, metric_name, value, metadata,
+  });
+  res.json({ ok: true });
+}));
+
+app.get('/api/business/metrics', requireAuth, requireServices, wrap(async (req, res) => {
+  const { project_id, metric_type, since, limit } = req.query;
+  const metrics = services.business.getMetrics({
+    user_id: req.user.id,
+    project_id: project_id ? Number(project_id) : undefined,
+    metric_type,
+    since: since ? Number(since) : undefined,
+    limit: limit ? Number(limit) : 100,
+  });
+  res.json({ metrics });
+}));
+
+app.post('/api/business/analyze', requireAuth, requireQuota, aiLimiter, requireServices, wrap(async (req, res) => {
+  const { project_id, metric_type, period_days } = req.body || {};
+  const result = await services.business.analyzeMetrics({
+    user_id: req.user.id, project_id, metric_type, period_days: period_days || 7,
+  });
+  res.json(result);
+}));
+
+app.post('/api/business/growth', requireAuth, requireQuota, aiLimiter, requireServices, wrap(async (req, res) => {
+  const { project_id } = req.body || {};
+  const result = await services.business.growthIntelligence({ user_id: req.user.id, project_id });
+  res.json(result);
+}));
+
+app.post('/api/business/lifecycle', requireAuth, requireQuota, aiLimiter, requireServices, wrap(async (req, res) => {
+  const { project_id } = req.body || {};
+  const result = await services.business.lifecycleStatus({ user_id: req.user.id, project_id });
+  res.json(result);
+}));
+
+app.post('/api/business/marketing', requireAuth, requireQuota, aiLimiter, requireServices, wrap(async (req, res) => {
+  const { product, audience, budget } = req.body || {};
+  if (!product || !audience) return res.status(400).json({ error: 'product and audience required' });
+  const result = await services.business.marketingStrategy({
+    user_id: req.user.id, product, audience, budget: budget || 'low',
+  });
+  res.json(result);
+}));
+
+app.get('/api/business/insights', requireAuth, requireServices, wrap(async (req, res) => {
+  const { project_id, severity, limit } = req.query;
+  const insights = services.business.getInsights({
+    user_id: req.user.id,
+    project_id: project_id ? Number(project_id) : undefined,
+    severity,
+    limit: limit ? Number(limit) : 50,
+  });
+  res.json({ insights });
+}));
+
+// ───── WORKSPACES (Collaboration) ─────────────────────
+app.post('/api/workspaces', requireAuth, requireServices, wrap(async (req, res) => {
+  const { name, description, visibility } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const ws = services.workspaces.create({
+    owner_id: req.user.id, name, description, visibility: visibility || 'private',
+  });
+  res.json(ws);
+}));
+
+app.get('/api/workspaces', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json({ workspaces: services.workspaces.listForUser(req.user.id) });
+}));
+
+app.get('/api/workspaces/:id', requireAuth, requireServices, wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const ws = services.workspaces.get(id);
+  if (!ws) return res.status(404).json({ error: 'workspace not found' });
+  if (!services.workspaces.hasPermission(id, req.user.id, 'read')) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  res.json(ws);
+}));
+
+app.post('/api/workspaces/:id/invite', requireAuth, requireServices, wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!services.workspaces.hasPermission(id, req.user.id, 'invite')) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const { email, role } = req.body || {};
+  if (!email) return res.status(400).json({ error: 'email required' });
+  const invite = services.workspaces.createInvite({
+    workspace_id: id, email, role: role || 'member', invited_by: req.user.id,
+  });
+  res.json(invite);
+}));
+
+app.post('/api/workspaces/accept/:token', requireAuth, requireServices, wrap(async (req, res) => {
+  const ws = services.workspaces.acceptInvite(req.params.token, req.user.id);
+  if (!ws) return res.status(400).json({ error: 'invalid or expired invite' });
+  res.json(ws);
+}));
+
+app.put('/api/workspaces/:id/members/:userId', requireAuth, requireServices, wrap(async (req, res) => {
+  const wsId = Number(req.params.id);
+  const targetId = Number(req.params.userId);
+  if (!services.workspaces.hasPermission(wsId, req.user.id, 'manage')) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const { role } = req.body || {};
+  if (!role) return res.status(400).json({ error: 'role required' });
+  const ok = services.workspaces.updateMemberRole(wsId, targetId, role, req.user.id);
+  res.json({ ok });
+}));
+
+app.delete('/api/workspaces/:id/members/:userId', requireAuth, requireServices, wrap(async (req, res) => {
+  const wsId = Number(req.params.id);
+  const targetId = Number(req.params.userId);
+  if (!services.workspaces.hasPermission(wsId, req.user.id, 'manage')) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  try {
+    const ok = services.workspaces.removeMember(wsId, targetId, req.user.id);
+    res.json({ ok });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+}));
+
+app.get('/api/workspaces/:id/activity', requireAuth, requireServices, wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!services.workspaces.hasPermission(id, req.user.id, 'read')) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  res.json({ activity: services.workspaces.getActivity({ workspace_id: id, limit: 50 }) });
+}));
+
+app.post('/api/workspaces/:id/resources', requireAuth, requireServices, wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!services.workspaces.hasPermission(id, req.user.id, 'write')) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const { resource_type, resource_id } = req.body || {};
+  if (!resource_type || !resource_id) {
+    return res.status(400).json({ error: 'resource_type and resource_id required' });
+  }
+  const ok = services.workspaces.addResource({
+    workspace_id: id, resource_type, resource_id, added_by: req.user.id,
+  });
+  res.json({ ok });
+}));
+
+app.get('/api/workspaces/:id/resources', requireAuth, requireServices, wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!services.workspaces.hasPermission(id, req.user.id, 'read')) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const { resource_type } = req.query;
+  res.json({
+    resources: services.workspaces.listResources({ workspace_id: id, resource_type }),
+  });
+}));
+
+// ───── VOICE ─────────────────────────────────────────
+app.get('/api/voice/voices', requireAuth, requireServices, wrap(async (_req, res) => {
+  res.json({ voices: services.voice.listVoices() });
+}));
+
+app.post('/api/voice/transcribe', requireAuth, requireQuota, aiLimiter, requireServices, wrap(async (req, res) => {
+  const { audio, audio_url, language, format } = req.body || {};
+  if (!audio && !audio_url) return res.status(400).json({ error: 'audio or audio_url required' });
+  const result = await services.voice.transcribe({
+    audioData: audio, audioUrl: audio_url, language, format: format || 'mp3',
+    user_id: req.user.id,
+  });
+  res.json(result);
+}));
+
+app.post('/api/voice/tts', requireAuth, requireQuota, aiLimiter, requireServices, wrap(async (req, res) => {
+  const { text, voice, model, format } = req.body || {};
+  if (!text) return res.status(400).json({ error: 'text required' });
+  const result = await services.voice.tts({
+    text, voice: voice || 'alloy', model: model || 'tts-1',
+    format: format || 'mp3', user_id: req.user.id,
+  });
+  res.json(result);
+}));
+
+app.post('/api/voice/chat', requireAuth, requireQuota, aiLimiter, requireServices, wrap(async (req, res) => {
+  const { audio, audio_url, system, history, voice } = req.body || {};
+  if (!audio && !audio_url) return res.status(400).json({ error: 'audio or audio_url required' });
+  const result = await services.voice.voiceChat({
+    audioData: audio, audioUrl: audio_url, system, history: history || [],
+    voice: voice || 'alloy', user_id: req.user.id,
+  });
+  res.json(result);
+}));
+
+app.post('/api/voice/command', requireAuth, requireQuota, aiLimiter, requireServices, wrap(async (req, res) => {
+  const { text, available_actions } = req.body || {};
+  if (!text) return res.status(400).json({ error: 'text required' });
+  const result = await services.voice.parseCommand({
+    text, available_actions: available_actions || [], user_id: req.user.id,
+  });
+  res.json(result);
+}));
+
+// ───── SECRETS (admin only) ──────────────────────────
+function requireAdmin(req, res, next) {
+  if (!services?.rbac) return res.status(503).json({ error: 'rbac not ready' });
+  const role = services.rbac.getRole({
+    email: req.user?.email,
+    plan: req.user?.plan,
+    isVip: false,
+  });
+  if (role !== services.ROLES?.ADMIN && role !== 'admin') {
+    return res.status(403).json({ error: 'admin only' });
+  }
+  next();
+}
+
+app.post('/api/secrets', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  const { key_name, value, ttl_days } = req.body || {};
+  if (!key_name || !value) return res.status(400).json({ error: 'key_name and value required' });
+  const result = services.secrets.store({
+    user_id: req.user.id, key_name, value, ttl_days: ttl_days || 90,
+  });
+  res.json(result);
+}));
+
+app.get('/api/secrets', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  res.json({ secrets: services.secrets.list({ user_id: req.user.id }) });
+}));
+
+app.post('/api/secrets/rotate', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  const { key_name, ttl_days } = req.body || {};
+  if (!key_name) return res.status(400).json({ error: 'key_name required' });
+  const result = services.secrets.rotate({
+    user_id: req.user.id, key_name, ttl_days: ttl_days || 90,
+  });
+  res.json(result);
+}));
+
+app.get('/api/secrets/expiring', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  const days = Number(req.query.days_ahead || 7);
+  res.json({ expiring: services.secrets.findExpiring({ days_ahead: days }) });
+}));
+
+app.delete('/api/secrets/:key_name/:version', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  const ok = services.secrets.revoke({
+    user_id: req.user.id, key_name: req.params.key_name, version: Number(req.params.version),
+  });
+  res.json({ ok });
+}));
+
+// ───── COMMUNITY (Reputation + Marketplace + Seasons) ────
+app.get('/api/community/reputation/:user_id?', requireAuth, requireServices, wrap(async (req, res) => {
+  const uid = req.params.user_id ? Number(req.params.user_id) : req.user.id;
+  res.json(services.community.getReputation(uid));
+}));
+
+app.get('/api/community/leaderboard', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json({ leaderboard: services.community.leaderboard({ limit: Number(req.query.limit) || 50 }) });
+}));
+
+app.post('/api/community/marketplace/publish', requireAuth, requireServices, wrap(async (req, res) => {
+  const { kind, title, description, content, tags, price_credits, visibility } = req.body || {};
+  if (!kind || !title || !content) return res.status(400).json({ error: 'kind, title, content required' });
+  try {
+    const result = services.community.publishItem({
+      owner_id: req.user.id, kind, title, description, content, tags, price_credits, visibility,
+    });
+    res.json(result);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+}));
+
+app.get('/api/community/marketplace', requireAuth, requireServices, wrap(async (req, res) => {
+  const { kind, tag, sort, limit } = req.query;
+  res.json({
+    items: services.community.listMarketplace({
+      kind, tag, sort, limit: limit ? Number(limit) : 30,
+    }),
+  });
+}));
+
+app.post('/api/community/marketplace/:id/install', requireAuth, requireServices, wrap(async (req, res) => {
+  try {
+    const r = services.community.installItem({ user_id: req.user.id, item_id: Number(req.params.id) });
+    res.json(r);
+  } catch (e) {
+    const code = e.message === 'forbidden' ? 403 : 404;
+    res.status(code).json({ error: e.message });
+  }
+}));
+
+app.post('/api/community/marketplace/:id/star', requireAuth, requireServices, wrap(async (req, res) => {
+  try {
+    res.json(services.community.starItem({ user_id: req.user.id, item_id: Number(req.params.id) }));
+  } catch (e) {
+    const code = e.message === 'forbidden' ? 403 : 404;
+    res.status(code).json({ error: e.message });
+  }
+}));
+
+app.get('/api/community/seasons', requireAuth, requireServices, wrap(async (_req, res) => {
+  res.json({ seasons: services.community.listSeasons(), current: services.community.currentSeason() });
+}));
+
+app.post('/api/community/seasons/:id/submit', requireAuth, requireServices, wrap(async (req, res) => {
+  const { title, description, content } = req.body || {};
+  if (!title || !content) return res.status(400).json({ error: 'title and content required' });
+  try {
+    res.json(services.community.submitToSeason({
+      user_id: req.user.id, season_id: req.params.id, title, description, content,
+    }));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+}));
+
+app.get('/api/community/seasons/:id/leaderboard', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json({
+    leaderboard: services.community.seasonLeaderboard({
+      season_id: req.params.id, limit: Number(req.query.limit) || 20,
+    }),
+  });
+}));
+
+app.post('/api/community/seasons/vote/:submission_id', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json(services.community.voteSeason({
+    user_id: req.user.id, submission_id: Number(req.params.submission_id),
+  }));
+}));
+
+// ───── PMF ANALYTICS (Document 15) ───────────────────────
+app.post('/api/pmf/track', requireAuth, requireServices, wrap(async (req, res) => {
+  const { event_type, feature, action, success, duration_ms, metadata, session_id } = req.body || {};
+  if (!event_type) return res.status(400).json({ error: 'event_type required' });
+  services.pmf.track({
+    user_id: req.user.id, session_id, event_type, feature, action,
+    success: success !== false, duration_ms, metadata,
+  });
+  res.json({ ok: true });
+}));
+
+app.post('/api/pmf/session/start', requireAuth, requireServices, wrap(async (req, res) => {
+  const { session_id, goal } = req.body || {};
+  services.pmf.startSession({ user_id: req.user.id, session_id, goal });
+  res.json({ ok: true });
+}));
+
+app.post('/api/pmf/session/end', requireAuth, requireServices, wrap(async (req, res) => {
+  const { session_id, completed } = req.body || {};
+  services.pmf.endSession({ session_id, completed: completed !== false });
+  res.json({ ok: true });
+}));
+
+app.get('/api/pmf/retention', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  res.json(services.pmf.getRetention({ period_days: Number(req.query.days) || 30 }));
+}));
+
+app.get('/api/pmf/features', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  res.json({ features: services.pmf.getFeatureAdoption({ period_days: Number(req.query.days) || 30 }) });
+}));
+
+app.get('/api/pmf/friction', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  res.json({ friction: services.pmf.getFrictionPoints({ period_days: Number(req.query.days) || 7 }) });
+}));
+
+app.get('/api/pmf/sessions', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  res.json(services.pmf.getSessionQuality({ period_days: Number(req.query.days) || 7 }));
+}));
+
+app.get('/api/pmf/funnel', requireAuth, requireServices, requireAdmin, wrap(async (_req, res) => {
+  res.json(services.pmf.getActivationFunnel());
+}));
+
+// ───── DISASTER RECOVERY (Document 20) ──────────────────
+app.get('/api/dr/health', requireAuth, requireServices, requireAdmin, wrap(async (_req, res) => {
+  res.json(await services.disasterRecovery.healthCheck());
+}));
+
+app.get('/api/dr/backups', requireAuth, requireServices, requireAdmin, wrap(async (_req, res) => {
+  res.json({ backups: services.disasterRecovery.listBackups() });
+}));
+
+app.post('/api/dr/backups/verify/:name', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  const backups = services.disasterRecovery.listBackups();
+  const target = backups.find(b => b.name === req.params.name);
+  if (!target) return res.status(404).json({ error: 'backup not found' });
+  res.json(await services.disasterRecovery.verifyBackup(target.path));
+}));
+
+app.post('/api/dr/restore-test/:name?', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  res.json(await services.disasterRecovery.restoreTest(req.params.name));
+}));
+
+app.post('/api/dr/snapshot', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  res.json(await services.disasterRecovery.snapshot(req.body?.reason || 'manual_api'));
+}));
+
+// ───── COST OPTIMIZATION / SEMANTIC CACHE (Document 20) ──
+app.get('/api/cost/semantic-cache', requireAuth, requireServices, requireAdmin, wrap(async (_req, res) => {
+  res.json(services.semanticCache.getStats());
+}));
+
+app.post('/api/cost/semantic-cache/reset', requireAuth, requireServices, requireAdmin, wrap(async (_req, res) => {
+  services.semanticCache.reset();
+  res.json({ ok: true });
+}));
+
+// ───── ADVANCED AI CONCEPTS (Docs 6, 12, 16, 18, 24, 26) ────
+app.post('/api/twin/observe', requireAuth, requireServices, wrap(async (req, res) => {
+  const { action, context, outcome } = req.body || {};
+  if (!action) return res.status(400).json({ error: 'action required' });
+  services.aiTwin.observe({ user_id: req.user.id, action, context, outcome });
+  res.json({ ok: true });
+}));
+
+app.get('/api/twin/identity', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json(services.aiTwin.getIdentity(req.user.id));
+}));
+
+app.get('/api/twin/patterns', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json({ patterns: services.aiTwin.getPatterns(req.user.id, { limit: Number(req.query.limit) || 20 }) });
+}));
+
+app.post('/api/twin/predict', requireAuth, requireServices, wrap(async (req, res) => {
+  const result = await services.aiTwin.predict({
+    user_id: req.user.id,
+    current_context: req.body?.context || {},
+  });
+  res.json(result);
+}));
+
+app.post('/api/fabric/remember', requireAuth, requireServices, wrap(async (req, res) => {
+  const { node_type, content, metadata, importance } = req.body || {};
+  if (!node_type || !content) return res.status(400).json({ error: 'node_type and content required' });
+  const result = services.memoryFabric.remember({ user_id: req.user.id, node_type, content, metadata, importance });
+  res.json(result);
+}));
+
+app.get('/api/fabric/recall', requireAuth, requireServices, wrap(async (req, res) => {
+  const memories = await services.memoryFabric.recall({
+    user_id: req.user.id,
+    query: req.query.query,
+    limit: Number(req.query.limit) || 10,
+  });
+  res.json({ memories });
+}));
+
+app.post('/api/fabric/connect', requireAuth, requireServices, wrap(async (req, res) => {
+  const { from_node, to_node, relation, strength } = req.body || {};
+  res.json(services.memoryFabric.connect({ user_id: req.user.id, from_node, to_node, relation, strength }));
+}));
+
+app.get('/api/fabric/stats', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json(services.memoryFabric.stats(req.user.id));
+}));
+
+app.get('/api/temporal/config', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json(services.temporalUX.getAdaptiveConfig(req.user.id));
+}));
+
+app.get('/api/temporal/workflow', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json(services.temporalUX.suggestWorkflow(req.user.id));
+}));
+
+// ───── VECTOR EMBEDDINGS (Feature 1) ─────────────────────
+app.post('/api/embeddings/index', requireAuth, requireServices, requireQuota, wrap(async (req, res) => {
+  const { source_type, source_id, content, metadata } = req.body || {};
+  if (!source_type || !content) return res.status(400).json({ error: 'source_type and content required' });
+  try {
+    const r = await services.embeddings.index({
+      user_id: req.user.id, source_type, source_id, content, metadata,
+    });
+    res.json(r);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+}));
+
+app.post('/api/embeddings/search', requireAuth, requireServices, wrap(async (req, res) => {
+  const { query, source_types, limit, threshold } = req.body || {};
+  if (!query) return res.status(400).json({ error: 'query required' });
+  try {
+    const results = await services.embeddings.search({
+      user_id: req.user.id, query, source_types,
+      limit: limit || 10, threshold: threshold || 0.6,
+    });
+    res.json({ results });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+}));
+
+app.get('/api/embeddings/stats', requireAuth, requireServices, requireAdmin, wrap(async (_req, res) => {
+  res.json(services.embeddings.stats());
+}));
+
+// ───── NOTIFICATIONS (Feature 2) ─────────────────────────
+app.get('/api/notifications', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json({
+    notifications: services.notifications.list({
+      user_id: req.user.id,
+      unread_only: req.query.unread === '1',
+      limit: Number(req.query.limit) || 50,
+    }),
+    count: services.notifications.count(req.user.id),
+  });
+}));
+
+app.get('/api/notifications/count', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json(services.notifications.count(req.user.id));
+}));
+
+app.post('/api/notifications/:id/read', requireAuth, requireServices, wrap(async (req, res) => {
+  const notif_id = req.params.id === 'all' ? 'all' : Number(req.params.id);
+  res.json(services.notifications.markRead({ user_id: req.user.id, notif_id }));
+}));
+
+app.delete('/api/notifications/:id', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json(services.notifications.delete({ user_id: req.user.id, notif_id: Number(req.params.id) }));
+}));
+
+app.get('/api/notifications/prefs', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json(services.notifications.getPrefs(req.user.id));
+}));
+
+app.put('/api/notifications/prefs', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json(services.notifications.updatePrefs({ user_id: req.user.id, ...req.body }));
+}));
+
+app.post('/api/notifications/subscribe-push', requireAuth, requireServices, wrap(async (req, res) => {
+  const { endpoint, keys } = req.body || {};
+  if (!endpoint || !keys) return res.status(400).json({ error: 'endpoint and keys required' });
+  res.json(services.notifications.subscribePush({ user_id: req.user.id, endpoint, keys }));
+}));
+
+// ───── REAL PAYMENT FLOW (Feature 6) ──────────────────
+app.get('/api/payments/plans', wrap(async (_req, res) => {
+  res.json({ plans: services.payments.listPlans() });
+}));
+
+app.get('/api/payments/subscription', requireAuth, requireServices, wrap(async (req, res) => {
+  const sub = services.payments.getSubscription(req.user.id);
+  // `current_plan` mirrors `plan` for clients written against the older
+  // /api/billing shape. Both are populated so either can be read.
+  res.json({ ...sub, current_plan: sub.plan });
+}));
+
+app.get('/api/payments/invoices', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json({ invoices: services.payments.getInvoices(req.user.id, Number(req.query.limit) || 20) });
+}));
+
+app.post('/api/payments/checkout', requireAuth, requireServices, wrap(async (req, res) => {
+  const { plan, return_url } = req.body || {};
+  if (!plan) return res.status(400).json({ error: 'plan required' });
+  try {
+    const r = await services.payments.createCheckout({
+      user_id: req.user.id, user_email: req.user.email, plan, return_url,
+    });
+    // `checkout_url` mirrors `url` for clients written against the older
+    // /api/billing shape.
+    res.json({ ...r, checkout_url: r.url });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+}));
+
+app.post('/api/payments/cancel', requireAuth, requireServices, wrap(async (req, res) => {
+  try {
+    res.json(await services.payments.cancelSubscription(req.user.id));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+}));
+
+// Webhook is registered near the top of this file, before express.json(),
+// because signature verification needs the raw body.
+
+// ───── ADMIN ROUTES (Feature 4) ────────────────────────
+app.get('/api/admin/users', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  const q = req.query.q || '';
+  const plan = req.query.plan || '';
+  try {
+    let sql = `SELECT id, email, name, plan, created_at FROM users WHERE 1=1`;
+    const params = [];
+    if (q) { sql += ` AND email LIKE ?`; params.push(`%${q}%`); }
+    if (plan) { sql += ` AND plan = ?`; params.push(plan); }
+    sql += ` ORDER BY created_at DESC LIMIT 100`;
+    const users = db.prepare(sql).all(...params);
+    res.json({ users });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}));
+
+app.get('/api/admin/payment-events', requireAuth, requireServices, requireAdmin, wrap(async (_req, res) => {
+  try {
+    const events = db.prepare(
+      `SELECT stripe_event_id, type, user_id, amount, currency, status, created_at
+       FROM payment_events ORDER BY created_at DESC LIMIT 50`
+    ).all();
+    res.json({ events });
+  } catch (e) { res.json({ events: [] }); }
+}));
+
+// ───── PHASE 3: PREDICTIVE + SHADOW + DREAMSPACE + REALITY MAP ────
+app.get('/api/predictive/stats', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json(services.predictive.getStats(req.user.id));
+}));
+
+app.post('/api/predictive/try/:action', requireAuth, requireServices, wrap(async (req, res) => {
+  const result = await services.predictive.tryHit({ user_id: req.user.id, action: req.params.action });
+  res.json(result || { hit: false });
+}));
+
+app.get('/api/shadow/suggestions', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json({
+    suggestions: services.shadow.list({
+      user_id: req.user.id,
+      status: req.query.status || null,
+      limit: Number(req.query.limit) || 20,
+    }),
+  });
+}));
+
+app.post('/api/shadow/suggestions/:id/respond', requireAuth, requireServices, wrap(async (req, res) => {
+  try {
+    res.json(services.shadow.respond({
+      user_id: req.user.id, suggestion_id: Number(req.params.id),
+      response: req.body?.response,
+    }));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+}));
+
+app.get('/api/shadow/prefs', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json(services.shadow.getPrefs(req.user.id));
+}));
+
+app.put('/api/shadow/prefs', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json(services.shadow.updatePrefs({ user_id: req.user.id, ...req.body }));
+}));
+
+app.get('/api/shadow/stats', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json(services.shadow.getStats(req.user.id));
+}));
+
+app.post('/api/shadow/trigger', requireAuth, requireServices, wrap(async (req, res) => {
+  const result = await services.shadow.maybeSuggest({
+    user_id: req.user.id,
+    trigger_action: req.body?.trigger_action || 'manual',
+    current_context: req.body?.context || {},
+  });
+  res.json(result || { suggested: false });
+}));
+
+app.get('/api/dreamspace/insights', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json({
+    insights: services.dreamspace.getInsights({
+      user_id: req.user.id,
+      unseen_only: req.query.unseen === '1',
+      limit: Number(req.query.limit) || 10,
+    }),
+  });
+}));
+
+app.post('/api/dreamspace/insights/:id/seen', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json(services.dreamspace.markInsightSeen(req.user.id, Number(req.params.id)));
+}));
+
+app.get('/api/dreamspace/runs', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json({ runs: services.dreamspace.getRuns(req.user.id, Number(req.query.limit) || 20) });
+}));
+
+app.get('/api/dreamspace/stats', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json(services.dreamspace.stats(req.user.id));
+}));
+
+app.get('/api/reality-map', requireAuth, requireServices, wrap(async (req, res) => {
+  try {
+    const snap = await services.realityMap.snapshot(req.user.id);
+    res.json(snap);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}));
+
+// ───── LOCAL LLM (self-hosted, no API dependency) ────────
+app.get('/api/local-llm/status', requireAuth, requireServices, wrap(async (_req, res) => {
+  res.json(services.localLLM.getStatus());
+}));
+
+app.get('/api/local-llm/setup', requireAuth, requireServices, requireAdmin, wrap(async (_req, res) => {
+  res.json(services.localLLM.getSetupInstructions());
+}));
+
+app.post('/api/local-llm/health-check', requireAuth, requireServices, requireAdmin, wrap(async (_req, res) => {
+  const available = await services.localLLM.checkHealth(true);
+  res.json({ available, status: services.localLLM.getStatus() });
+}));
+
+app.post('/api/local-llm/enable', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  const { baseUrl, backend, defaultModel, localTasks } = req.body || {};
+  const available = await services.localLLM.enable({ baseUrl, backend, defaultModel, localTasks });
+  res.json({
+    enabled: true,
+    available,
+    status: services.localLLM.getStatus(),
+    note: available
+      ? 'Local LLM active — routing eligible tasks locally'
+      : 'Enabled but unreachable. Check that the server is running.',
+  });
+}));
+
+app.post('/api/local-llm/disable', requireAuth, requireServices, requireAdmin, wrap(async (_req, res) => {
+  services.localLLM.disable();
+  res.json({ enabled: false, note: 'All requests now route to cloud APIs' });
+}));
+
+app.put('/api/local-llm/tasks', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  const { tasks } = req.body || {};
+  if (!Array.isArray(tasks)) return res.status(400).json({ error: 'tasks array required' });
+  services.localLLM.setLocalTasks(tasks);
+  res.json({ local_tasks: services.localLLM.localTasks });
+}));
+
+app.post('/api/local-llm/test', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  const { prompt, task } = req.body || {};
+  if (!prompt) return res.status(400).json({ error: 'prompt required' });
+  try {
+    const result = await services.localLLM.complete({
+      prompt, task: task || 'general', max_tokens: 512,
+    });
+    res.json(result);
+  } catch (e) { res.status(503).json({ error: e.message }); }
+}));
+
+// ───── SECURITY & OBSERVABILITY ──────────────────────────
+app.get('/api/security/csrf-token', requireAuth, requireServices, wrap(async (req, res) => {
+  const token = services.csrf.issue(String(req.user.id));
+  res.json({ csrf_token: token, expires_in_ms: services.csrf.ttlMs });
+}));
+
+app.get('/api/security/rate-limit-status', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json(services.rateLimiter.getStatus(req.user.id, req.user.plan || 'free'));
+}));
+
+app.get('/api/observability/status', requireAuth, requireServices, requireAdmin, wrap(async (_req, res) => {
+  res.json(services.observability.getStatus());
+}));
+
+// ───── PROJECT WORKSPACE (Phase B) ───────────────────────
+// Aggregates agent_projects / agent_steps / agent_logs — project
+// creation stays with /api/agents/orchestrate.
+app.get('/api/projects', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json({ projects: services.projects.list(req.user.id, Number(req.query.limit) || 30) });
+}));
+
+app.get('/api/projects/:id', requireAuth, requireServices, wrap(async (req, res) => {
+  const view = services.projects.getWorkspace(Number(req.params.id), req.user.id);
+  if (!view) return res.status(404).json({ error: 'project not found' });
+  res.json(view);
+}));
+
+app.get('/api/projects/:id/approvals', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json({
+    approvals: services.projects.listApprovals(
+      Number(req.params.id), req.user.id, req.query.status || 'pending'),
+  });
+}));
+
+app.post('/api/projects/:id/approvals', requireAuth, requireServices, wrap(async (req, res) => {
+  const { action, summary, payload, risk } = req.body || {};
+  if (!action || !summary) return res.status(400).json({ error: 'action and summary required' });
+  const result = services.projects.requestApproval({
+    project_id: Number(req.params.id), user_id: req.user.id,
+    action, summary, payload, risk,
+  });
+  if (!result) return res.status(404).json({ error: 'project not found' });
+  res.json(result);
+}));
+
+app.post('/api/projects/approvals/:approvalId/:decision', requireAuth, requireServices, wrap(async (req, res) => {
+  const decision = req.params.decision;
+  if (decision !== 'approved' && decision !== 'rejected') {
+    return res.status(400).json({ error: 'decision must be approved or rejected' });
+  }
+  const result = services.projects.resolveApproval({
+    approval_id: Number(req.params.approvalId), user_id: req.user.id, decision,
+  });
+  if (!result.ok) {
+    const code = result.reason === 'forbidden' ? 403 : result.reason === 'not found' ? 404 : 409;
+    return res.status(code).json({ error: result.reason });
+  }
+  res.json(result);
+}));
+
+app.get('/api/projects/:id/resources', requireAuth, requireServices, wrap(async (req, res) => {
+  res.json({ resources: services.projects.listResources(Number(req.params.id), req.user.id) });
+}));
+
+app.post('/api/projects/:id/resources', requireAuth, requireServices, wrap(async (req, res) => {
+  const { kind, label, ref, metadata } = req.body || {};
+  if (!kind || !label || !ref) return res.status(400).json({ error: 'kind, label and ref required' });
+  const result = services.projects.linkResource({
+    project_id: Number(req.params.id), user_id: req.user.id, kind, label, ref, metadata,
+  });
+  if (!result) return res.status(404).json({ error: 'project not found' });
+  res.json(result);
+}));
+
+app.delete('/api/projects/resources/:resourceId', requireAuth, requireServices, wrap(async (req, res) => {
+  const result = services.projects.unlinkResource(Number(req.params.resourceId), req.user.id);
+  if (!result.ok) return res.status(404).json({ error: 'resource not found' });
+  res.json(result);
+}));
+
+app.put('/api/projects/:id/autonomy', requireAuth, requireServices, wrap(async (req, res) => {
+  const { level } = req.body || {};
+  const result = services.projects.setAutonomy(Number(req.params.id), req.user.id, level);
+  if (!result.ok) return res.status(400).json({ error: 'invalid project or autonomy level' });
+  res.json({ ok: true, level });
+}));
+
+// ───── INTENT-ROUTED ORCHESTRATION (Phase C) ─────────────
+// Picks a pipeline that matches the request instead of running one
+// fixed sequence, and declares the whole plan before executing so the
+// workspace can show what is next. /api/agents/orchestrate is
+// unchanged for existing clients.
+app.post('/api/orchestrate/plan', requireAuth, requireServices, wrap(async (req, res) => {
+  const { prompt } = req.body || {};
+  if (!prompt) return res.status(400).json({ error: 'prompt required' });
+  const detected = await services.orchestration.detectIntent(prompt);
+  const pipeline = services.orchestration.getPipeline(detected.intent);
+  res.json({
+    intent: detected.intent,
+    confidence: detected.confidence,
+    method: detected.method,
+    headline: pipeline.headline,
+    steps: pipeline.steps.map((s) => ({ agent: s.agent, step: s.step })),
+  });
+}));
+
+app.post('/api/orchestrate/run', requireAuth, requireServices, requireQuota, aiLimiter, wrap(async (req, res) => {
+  const { prompt, project_name } = req.body || {};
+  if (!prompt) return res.status(400).json({ error: 'prompt required' });
+
+  const detected = await services.orchestration.detectIntent(prompt);
+  const pipeline = services.orchestration.getPipeline(detected.intent);
+
+  const shareId = require('crypto').randomBytes(8).toString('hex');
+  const name = project_name || String(prompt).slice(0, 60);
+  const projectId = db.prepare(
+    `INSERT INTO agent_projects (user_id, share_id, name, idea, status)
+     VALUES (?, ?, ?, ?, 'building')`
+  ).run(req.user.id, shareId, name, prompt).lastInsertRowid;
+
+  const planned = services.orchestration.declarePlan(projectId, pipeline);
+
+  await streamPipeline({
+    req, res,
+    projectId, shareId,
+    goal: prompt,
+    pipeline,
+    stepIds: planned.steps.map((s) => s.id),
+    startIndex: 0,
+    completed: {},
+    intro: {
+      type: 'plan',
+      project_id: projectId,
+      share_id: shareId,
+      intent: detected.intent,
+      headline: pipeline.headline,
+      steps: planned.steps,
+    },
+  });
+}));
+
+// Continues a run that stopped at an approval gate. State is rebuilt
+// from agent_steps, so this works after a server restart.
+app.post('/api/orchestrate/resume/:projectId', requireAuth, requireServices, requireQuota, aiLimiter, wrap(async (req, res) => {
+  const projectId = Number(req.params.projectId);
+
+  const project = db.prepare(
+    `SELECT id, share_id, idea, status FROM agent_projects WHERE id = ? AND user_id = ?`
+  ).get(projectId, req.user.id);
+  if (!project) return res.status(404).json({ error: 'project not found' });
+
+  const detected = await services.orchestration.detectIntent(project.idea);
+  const pipeline = services.orchestration.getPipeline(detected.intent);
+  const state = services.orchestration.resumeState(projectId, pipeline);
+
+  if (state.startIndex >= pipeline.steps.length) {
+    return res.status(409).json({ error: 'nothing left to run' });
+  }
+
+  db.prepare(`UPDATE agent_projects SET status = 'building', updated_at = datetime('now') WHERE id = ?`)
+    .run(projectId);
+
+  await streamPipeline({
+    req, res,
+    projectId,
+    shareId: project.share_id,
+    goal: project.idea,
+    pipeline,
+    stepIds: state.stepIds,
+    startIndex: state.startIndex,
+    completed: state.completed,
+    intro: {
+      type: 'resumed',
+      project_id: projectId,
+      headline: pipeline.headline,
+      from_step: state.startIndex,
+      total: pipeline.steps.length,
+    },
+  });
+}));
+
+/**
+ * Streams a pipeline over SSE, enforcing the project's autonomy level.
+ * Shared by run and resume so the gate cannot be bypassed by using
+ * one path instead of the other.
+ */
+async function streamPipeline({
+  req, res, projectId, shareId, goal, pipeline, stepIds, startIndex, completed, intro,
+}) {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  const send = (event) => {
+    try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch (_) {}
+  };
+
+  // Stop work if the client goes away rather than burning tokens on
+  // output nobody will read.
+  let aborted = false;
+  req.on('close', () => { aborted = true; });
+
+  send(intro);
+
+  let doneCount = startIndex;
+  const total = pipeline.steps.length;
+
+  try {
+    for (let i = startIndex; i < total; i++) {
+      if (aborted) break;
+
+      const step = pipeline.steps[i];
+      const stepId = stepIds[i] ?? -1;
+
+      // ── Approval gate ──
+      // A step that performs a real action is checked against the
+      // project's autonomy level before it runs, never after.
+      if (step.action && !services.projects.canAutoExecute(projectId, step.action)) {
+        const approval = services.projects.requestApproval({
+          project_id: projectId,
+          user_id: req.user.id,
+          action: step.action,
+          summary: step.approvalSummary || step.step,
+          payload: { step_id: stepId, step_index: i },
+        });
+
+        services.orchestration.markStep(stepId, 'blocked');
+        db.prepare(`UPDATE agent_projects SET status = 'paused', updated_at = datetime('now') WHERE id = ?`)
+          .run(projectId);
+
+        send({
+          type: 'approval_required',
+          project_id: projectId,
+          approval_id: approval ? approval.id : null,
+          step_id: stepId,
+          step: step.step,
+          action: step.action,
+          summary: step.approvalSummary || step.step,
+          completed: doneCount,
+          total,
+        });
+        res.end();
+        return;
+      }
+
+      services.orchestration.markStep(stepId, 'running');
+      send({
+        type: 'step_started',
+        step_id: stepId,
+        agent: step.agent,
+        step: step.step,
+        index: i,
+        total,
+        progress: Math.round((doneCount / total) * 100),
+      });
+
+      const started = Date.now();
+      try {
+        const context = services.orchestration.buildContext(goal, step, completed);
+        const result = await services.runAgent(step.agent, context);
+        const duration = Date.now() - started;
+
+        completed[step.agent] = result?.output ?? result;
+        doneCount++;
+        services.orchestration.markStep(stepId, 'done', {
+          output: completed[step.agent], duration_ms: duration,
+        });
+
+        send({
+          type: 'step_done',
+          step_id: stepId,
+          agent: step.agent,
+          step: step.step,
+          output: completed[step.agent],
+          duration_ms: duration,
+          progress: Math.round((doneCount / total) * 100),
+        });
+      } catch (err) {
+        services.orchestration.markStep(stepId, 'failed', {
+          duration_ms: Date.now() - started,
+        });
+        send({
+          type: 'step_failed',
+          step_id: stepId,
+          agent: step.agent,
+          step: step.step,
+          error: err.message,
+        });
+        // One failing agent should not discard the work already done.
+      }
+    }
+
+    const finalStatus = aborted
+      ? 'paused'
+      : (doneCount === total ? 'completed' : 'failed');
+    db.prepare(`UPDATE agent_projects SET status = ?, updated_at = datetime('now') WHERE id = ?`)
+      .run(finalStatus, projectId);
+
+    if (!aborted) {
+      send({
+        type: 'complete',
+        project_id: projectId,
+        share_id: shareId,
+        status: finalStatus,
+        completed: doneCount,
+        total,
+      });
+    }
+    res.end();
+  } catch (err) {
+    try {
+      db.prepare(`UPDATE agent_projects SET status = 'failed' WHERE id = ?`).run(projectId);
+    } catch (_) {}
+    send({ type: 'error', error: err.message, project_id: projectId });
+    res.end();
+  }
+}
+
+// ───── DEPRECATION REPORTING (Phase E) ───────────────────
+// Shows which duplicated endpoints are still in use, so removal is
+// decided by evidence rather than by the calendar.
+app.get('/api/deprecations', requireAuth, requireServices, wrap(async (_req, res) => {
+  res.json({ deprecations: services.deprecation.list() });
+}));
+
+app.get('/api/deprecations/usage', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+  const report = services.deprecation.report(Number(req.query.days) || 30);
+  res.json({
+    window_days: Number(req.query.days) || 30,
+    total: report.length,
+    still_in_use: report.filter((r) => r.calls > 0).length,
+    safe_to_remove: report.filter((r) => r.safe_to_remove).length,
+    endpoints: report.sort((a, b) => b.calls - a.calls),
+  });
+}));
+
+// ─────────────────────────────────────────────
+// 🚀 START — HTTP + WebSocket
+// ─────────────────────────────────────────────
+const http = require('http');
+const httpServer = http.createServer(app);
+
+// ─── INLINED: RealtimeService (was: realtime/websocket.js) ───
+class RealtimeService {
+  constructor(options = {}) {
+    this.logger = options.logger;
+    this.events = options.events;
+    this.workspaces = options.workspaces;
+    this.smartCall = options.smartCall;
+    this.rooms = new Map();
+    this.lastActivity = new Map();
+    this.wss = null;
+  }
+
+  attach(httpServer) {
+    let WebSocketServer;
+    try {
+      WebSocketServer = require('ws').WebSocketServer;
+    } catch (e) {
+      this.logger?.warn('ws package not installed; realtime disabled');
+      return false;
+    }
+
+    this.wss = new WebSocketServer({ noServer: true, path: '/ws' });
+
+    httpServer.on('upgrade', (req, socket, head) => {
+      if (req.url?.startsWith('/ws')) {
+        this.wss.handleUpgrade(req, socket, head, (ws) => {
+          this.wss.emit('connection', ws, req);
+        });
+      }
+    });
+
+    this.wss.on('connection', (ws, req) => this._onConnection(ws, req));
+    this.logger?.info('Realtime service attached at /ws');
+    return true;
+  }
+
+  _onConnection(ws, req) {
+    const crypto = require('crypto');
+    ws.id = crypto.randomBytes(8).toString('hex');
+    ws.workspaceId = null;
+    ws.user = null;
+    ws.isAlive = true;
+
+    ws.on('pong', () => { ws.isAlive = true; });
+    ws.on('message', (raw) => {
+      let msg;
+      try { msg = JSON.parse(raw.toString()); } catch (_) { return this._send(ws, { type: 'error', error: 'bad json' }); }
+      this._handleMessage(ws, msg);
+    });
+    ws.on('close', () => this._onClose(ws));
+    ws.on('error', (e) => this.logger?.warn('ws error', { id: ws.id, err: e.message }));
+
+    this._send(ws, { type: 'hello', id: ws.id, server_time: Date.now() });
+  }
+
+  _onClose(ws) { if (ws.workspaceId) this._leaveRoom(ws); }
+
+  _handleMessage(ws, msg) {
+    switch (msg.type) {
+      case 'auth':   return this._handleAuth(ws, msg);
+      case 'join':   return this._handleJoin(ws, msg);
+      case 'leave':  return this._handleLeave(ws, msg);
+      case 'cursor': return this._broadcastToRoom(ws, msg, true);
+      case 'edit':   return this._broadcastToRoom(ws, msg, true);
+      case 'chat':   return this._handleChat(ws, msg);
+      case 'ai':     return this._handleAI(ws, msg);
+      case 'typing': return this._broadcastToRoom(ws, msg, true);
+      case 'ping':   return this._send(ws, { type: 'pong', t: Date.now() });
+      default:       return this._send(ws, { type: 'error', error: 'unknown type: ' + msg.type });
+    }
+  }
+
+  _handleAuth(ws, msg) {
+    if (!msg.user_id) return this._send(ws, { type: 'error', error: 'auth requires user_id' });
+    ws.user = { id: Number(msg.user_id), email: msg.email || '', name: msg.name || 'User' };
+    this._send(ws, { type: 'auth.ok', user_id: ws.user.id });
+  }
+
+  _handleJoin(ws, msg) {
+    if (!ws.user) return this._send(ws, { type: 'error', error: 'not authenticated' });
+    const wsId = Number(msg.workspace_id);
+    if (!wsId) return this._send(ws, { type: 'error', error: 'workspace_id required' });
+
+    if (this.workspaces) {
+      const canRead = this.workspaces.hasPermission(wsId, ws.user.id, 'read');
+      if (!canRead) return this._send(ws, { type: 'error', error: 'forbidden' });
+    }
+
+    if (ws.workspaceId) this._leaveRoom(ws);
+    if (!this.rooms.has(wsId)) this.rooms.set(wsId, new Set());
+    this.rooms.get(wsId).add(ws);
+    ws.workspaceId = wsId;
+    ws.joinedAt = Date.now();
+
+    const presence = this._presenceOf(wsId);
+    this._send(ws, { type: 'join.ok', workspace_id: wsId, presence });
+
+    this._broadcastToRoom(ws, {
+      type: 'presence.join',
+      user: { id: ws.user.id, email: ws.user.email, name: ws.user.name },
+      at: Date.now(),
+    }, true);
+
+    this.events?.emit('realtime.join', { workspace_id: wsId, user_id: ws.user.id });
+  }
+
+  _handleLeave(ws) { if (ws.workspaceId) this._leaveRoom(ws); }
+
+  _leaveRoom(ws) {
+    const room = this.rooms.get(ws.workspaceId);
+    if (room) {
+      room.delete(ws);
+      if (!room.size) this.rooms.delete(ws.workspaceId);
+      this._broadcastToRoomId(ws.workspaceId, {
+        type: 'presence.leave',
+        user_id: ws.user?.id,
+        at: Date.now(),
+      }, ws);
+    }
+    ws.workspaceId = null;
+  }
+
+  _handleChat(ws, msg) {
+    if (!ws.workspaceId || !ws.user) return;
+    const crypto = require('crypto');
+    const payload = {
+      type: 'chat.msg',
+      workspace_id: ws.workspaceId,
+      user: { id: ws.user.id, email: ws.user.email, name: ws.user.name },
+      text: String(msg.text || '').slice(0, 5000),
+      at: Date.now(),
+      msg_id: crypto.randomBytes(6).toString('hex'),
+    };
+    this._broadcastToRoomId(ws.workspaceId, payload);
+    this.events?.emit('realtime.chat', payload);
+  }
+
+  async _handleAI(ws, msg) {
+    if (!ws.workspaceId || !ws.user) return;
+    if (!this.smartCall) return this._send(ws, { type: 'ai.error', error: 'smartCall not available' });
+    const prompt = String(msg.prompt || '').slice(0, 8000);
+    if (!prompt) return;
+
+    const crypto = require('crypto');
+    const reqId = msg.req_id || crypto.randomBytes(6).toString('hex');
+
+    this._broadcastToRoomId(ws.workspaceId, {
+      type: 'ai.thinking', req_id: reqId,
+      by: { id: ws.user.id, name: ws.user.name },
+      prompt: prompt.slice(0, 200), at: Date.now(),
+    });
+
+    try {
+      const result = await this.smartCall({
+        prompt, system: msg.system, task: msg.task,
+        user_id: ws.user.id, tier: msg.tier || 'free',
+      });
+      this._broadcastToRoomId(ws.workspaceId, {
+        type: 'ai.result', req_id: reqId,
+        by: { id: ws.user.id, name: ws.user.name },
+        output: result.output, model: result.model,
+        provider: result.provider, duration_ms: result.duration_ms,
+        at: Date.now(),
+      });
+    } catch (err) {
+      this._broadcastToRoomId(ws.workspaceId, {
+        type: 'ai.error', req_id: reqId, error: err.message,
+      });
+    }
+  }
+
+  _broadcastToRoom(senderWs, payload, excludeSender = false) {
+    if (!senderWs.workspaceId) return;
+    this._broadcastToRoomId(senderWs.workspaceId, payload, excludeSender ? senderWs : null);
+  }
+
+  _broadcastToRoomId(workspaceId, payload, excludeWs = null) {
+    const room = this.rooms.get(workspaceId);
+    if (!room) return;
+    const data = JSON.stringify(payload);
+    for (const ws of room) {
+      if (ws === excludeWs) continue;
+      if (ws.readyState === 1) { try { ws.send(data); } catch (_) {} }
+    }
+  }
+
+  _send(ws, payload) {
+    if (ws.readyState !== 1) return;
+    try { ws.send(JSON.stringify(payload)); } catch (_) {}
+  }
+
+  _presenceOf(workspaceId) {
+    const room = this.rooms.get(workspaceId);
+    if (!room) return [];
+    return [...room].filter(ws => ws.user).map(ws => ({
+      id: ws.user.id, email: ws.user.email, name: ws.user.name, joined_at: ws.joinedAt,
+    }));
+  }
+
+  startHeartbeat(intervalMs = 30000) {
+    if (!this.wss) return;
+    this._hbTimer = setInterval(() => {
+      this.wss.clients.forEach(ws => {
+        if (!ws.isAlive) return ws.terminate();
+        ws.isAlive = false;
+        try { ws.ping(); } catch (_) {}
+      });
+    }, intervalMs);
+  }
+
+  stop() {
+    if (this._hbTimer) clearInterval(this._hbTimer);
+    if (this.wss) this.wss.close();
+  }
+}
+
+// Attach WebSocket realtime service
+try {
+  if (services) {
+    const realtime = new RealtimeService({
+      logger: services.logger,
+      events: services.events,
+      workspaces: services.workspaces,
+      smartCall: services.smartCall,
+    });
+    if (realtime.attach(httpServer)) {
+      realtime.startHeartbeat();
+      services.realtime = realtime;
+      if (services.notifications) services.notifications.realtime = realtime;
+      console.log('✅ Realtime WebSocket service attached at /ws');
+    }
+  }
+} catch (e) {
+  console.warn('⚠️ Realtime not attached:', e.message);
+}
+
+httpServer.listen(PORT, () => {
   console.log(`💀 NexusAI running on port ${PORT}`);
   console.log(`   Tools loaded: ${TOOLS.length}`);
   console.log(`   Mode: ${process.env.NODE_ENV || "development"}`);

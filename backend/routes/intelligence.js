@@ -191,5 +191,35 @@ router.get('/breakers', requireAuth, wrap(async (req, res) => {
   res.json({ breakers: services.breakers.stats() });
 }));
 
+// ─── Adaptive execution ──────────────────────
+router.get('/adaptive/stats', requireAuth, wrap(async (req, res) => {
+  res.json(services.adaptive.globalStats());
+}));
+
+router.get('/adaptive/anomalies', requireAuth, wrap(async (req, res) => {
+  res.json({ anomalies: services.adaptive.detectAnomalies() });
+}));
+
+router.get('/adaptive/by-task/:taskType', requireAuth, wrap(async (req, res) => {
+  res.json({ stats: services.adaptive.getStatsForType(req.params.taskType) });
+}));
+
+// ─── Distributed tracing ─────────────────────
+router.get('/traces', requireAuth, wrap(async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+  res.json({ traces: services.tracer.listRecent(limit) });
+}));
+
+router.get('/traces/:traceId', requireAuth, wrap(async (req, res) => {
+  const spans = services.tracer.getTrace(req.params.traceId);
+  if (!spans.length) return res.status(404).json({ error: 'Trace not found' });
+  res.json({ trace_id: req.params.traceId, spans });
+}));
+
+// ─── Provider analytics (which models perform best) ───
+router.get('/providers/analytics', requireAuth, wrap(async (req, res) => {
+  res.json({ providers: services.tracer.providerStats() });
+}));
+
 return router;
 };

@@ -21,6 +21,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
 <link rel="icon" type="image/svg+xml" href="logo.svg"/>
 <link rel="stylesheet" href="style.css"/>
+<link rel="stylesheet" href="design-system.css"/>
+<link rel="stylesheet" href="cinematic.css"/>
 <!-- KaTeX for math rendering -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css"/>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
@@ -43,7 +45,7 @@ window.addEventListener('beforeinstallprompt',e=>{
     if(deferredPrompt && !localStorage.getItem('nx_pwa_dismissed')){
       const banner=document.createElement('div');
       banner.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#c6f135,#35f1c6);color:#000;padding:12px 16px;border-radius:99px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 8px 30px #0008;z-index:9999;display:flex;align-items:center;gap:8px';
-      banner.innerHTML='📱 Install NexusAI <span style="opacity:.6;margin-left:8px;cursor:pointer" onclick="event.stopPropagation();this.parentElement.remove();localStorage.setItem(\'nx_pwa_dismissed\',\'1\')">✕</span>';
+      banner.innerHTML='📱 Install NexusAI <span style="opacity:.6;margin-left:8px;cursor:pointer" onclick="event.stopPropagation();this.parentElement.remove();localStorage.setItem(\\'nx_pwa_dismissed\\',\\'1\\')">✕</span>';
       banner.onclick=async()=>{
         deferredPrompt.prompt();
         const {outcome}=await deferredPrompt.userChoice;
@@ -390,5 +392,6 @@ window.addEventListener('beforeinstallprompt',e=>{
 </div>
 
 <script src="app.js"></script>
+<script src="nexus-shell.js"></script>
 </body>
 </html>

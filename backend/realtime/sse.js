@@ -1,94 +1,131 @@
 // ============================================================
-// 📡 realtime/sse.js — Unified SSE Streaming Helper
-// Standardized event format for all realtime features
+// 📡 realtime/sse.js — Production SSE Streaming
+// Unified events, validation, backpressure, replay buffer
 // ============================================================
+const { EVENTS, validateEvent } = require('./events');
 
 /**
- * Setup SSE headers and return a stream object.
- * Standardized event format: { type, ts, data }
+ * Create a production SSE stream with:
+ *  - Unified event types
+ *  - Heartbeat
+ *  - Backpressure handling (drop on slow client)
+ *  - Optional replay buffer (last N events)
+ *  - Auto-close on disconnect
+ *  - Built-in helpers for every domain
  */
 function createStream(res, options = {}) {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
 
   let closed = false;
   let heartbeat;
+  const traceId = options.traceId || `tr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
-  const send = (type, data = {}) => {
+  // Replay buffer (for late-joining clients via long-poll fallback)
+  const replayBuffer = [];
+  const maxBuffer = options.replayBufferSize || 50;
+
+  // Backpressure: drop if response buffer too full
+  function tryWrite(data) {
     if (closed) return false;
     try {
-      const payload = JSON.stringify({ type, ts: Date.now(), ...data });
-      res.write(`data: ${payload}\n\n`);
+      // Check if the underlying socket is writable
+      if (res.writableEnded || res.destroyed) {
+        closed = true;
+        return false;
+      }
+      const ok = res.write(data);
+      if (!ok && options.dropOnBackpressure) {
+        // Don't await drain — drop next message instead
+        return false;
+      }
       return true;
     } catch (e) {
       closed = true;
       return false;
     }
-  };
+  }
 
-  const sendEvent = (eventName, data = {}) => {
+  function send(eventType, payload = {}) {
     if (closed) return false;
-    try {
-      const payload = JSON.stringify({ ts: Date.now(), ...data });
-      res.write(`event: ${eventName}\ndata: ${payload}\n\n`);
-      return true;
-    } catch (e) {
-      closed = true;
-      return false;
-    }
-  };
 
-  const close = () => {
+    // Validate against schema
+    const validation = validateEvent(eventType, payload);
+    if (!validation.valid && options.strict) {
+      console.warn(`[SSE] Invalid event ${eventType}:`, validation.errors);
+    }
+
+    const envelope = {
+      type: eventType,
+      ts: Date.now(),
+      trace_id: traceId,
+      ...payload,
+    };
+
+    if (replayBuffer.length >= maxBuffer) replayBuffer.shift();
+    replayBuffer.push(envelope);
+
+    return tryWrite(`data: ${JSON.stringify(envelope)}\n\n`);
+  }
+
+  function close(reason) {
     if (closed) return;
     closed = true;
     if (heartbeat) clearInterval(heartbeat);
+    if (reason && !res.writableEnded) {
+      try { tryWrite(`data: ${JSON.stringify({ type: EVENTS.STREAM_DONE, ts: Date.now(), trace_id: traceId, reason })}\n\n`); } catch (_) {}
+    }
     try { res.end(); } catch (_) {}
-  };
+  }
 
-  // Heartbeat to keep connection alive (every 25s)
+  // Heartbeat (25s — under most proxy timeouts)
   if (options.heartbeat !== false) {
     heartbeat = setInterval(() => {
       if (closed) return;
-      try { res.write(`: heartbeat\n\n`); } catch (_) { close(); }
+      try { tryWrite(`: hb\n\n`); } catch (_) { close('heartbeat-failed'); }
     }, 25000);
   }
 
-  // Auto-close when client disconnects
-  res.on('close', close);
-  res.on('finish', close);
+  // Auto-close on disconnect
+  res.on('close', () => close('client-disconnect'));
+  res.on('finish', () => close('finish'));
+  res.on('error', () => close('error'));
+
+  // Initial event
+  send(EVENTS.STREAM_INIT, { trace_id: traceId });
 
   return {
+    traceId,
     send,
-    sendEvent,
     close,
     isClosed: () => closed,
-    // Standard event helpers
-    progress: (pct, message) => send('progress', { progress: pct, message }),
-    log: (level, message, meta) => send('log', { level, message, meta }),
-    error: (message, code) => send('error', { message, code }),
-    done: (data) => { send('done', data); close(); },
-    step: (id, label, status, data) => send('step', { id, label, status, ...(data || {}) }),
+    getReplay: () => [...replayBuffer],
+
+    // ─── Convenience helpers (typed) ──────────────
+    phase: (phase, label) => send(EVENTS.PHASE_START, { phase, label }),
+    phaseDone: (phase) => send(EVENTS.PHASE_DONE, { phase }),
+    progress: (phase, progress) => send(EVENTS.PHASE_PROGRESS, { phase, progress }),
+
+    nodeStart: (node, attempt) => send(EVENTS.NODE_START, { node, attempt }),
+    nodeThinking: (node, thought) => send(EVENTS.NODE_THINKING, { node, thought }),
+    nodeToken: (node, content) => send(EVENTS.NODE_TOKEN, { node, content }),
+    nodeDone: (node, data) => send(EVENTS.NODE_DONE, { node, ...(data || {}) }),
+    nodeError: (node, error) => send(EVENTS.NODE_ERROR, { node, error: String(error) }),
+    nodeRetry: (node, attempt) => send(EVENTS.NODE_RETRY, { node, attempt }),
+    nodeCached: (node) => send(EVENTS.NODE_CACHED, { node }),
+
+    deployLog: (line, level = 'info') => send(EVENTS.DEPLOY_LOG, { line, level }),
+    deployStep: (step, status, data) => send(EVENTS.DEPLOY_STEP, { step, status, ...(data || {}) }),
+
+    trace: (span, durationMs, data) => send(EVENTS.TRACE, { trace_id: traceId, span, duration_ms: durationMs, ...(data || {}) }),
+    log: (level, message, meta) => send(EVENTS.LOG, { level, message, meta }),
+
+    error: (message, code) => send(EVENTS.STREAM_ERROR, { message: String(message), code }),
+    done: (data) => { send(EVENTS.STREAM_DONE, data || {}); close(); },
   };
 }
 
-/**
- * Standard SSE event types (for consistency across features):
- *
- * - 'init'           : connection established
- * - 'progress'       : { progress: 0-100, message }
- * - 'step'           : { id, label, status: 'running'|'done'|'error', data }
- * - 'agent_start'    : { agent, role }
- * - 'agent_thinking' : { agent, thought }
- * - 'agent_done'     : { agent, output, duration_ms }
- * - 'agent_error'    : { agent, error, retry: true|false }
- * - 'token'          : { content }       — for streaming text
- * - 'log'            : { level, message }
- * - 'deploy_log'     : { line, level }   — for deploy console
- * - 'error'          : { message, code }
- * - 'done'           : { result, summary }
- */
-
-module.exports = { createStream };
+module.exports = { createStream, EVENTS };
