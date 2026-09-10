@@ -33,6 +33,7 @@
     "forceConsistentCasingInFileNames": true,
 
     "baseUrl": "./backend",
+    "ignoreDeprecations": "6.0",
     "paths": {
       "@/*": ["./*"],
       "@services/*": ["./services/*"],
