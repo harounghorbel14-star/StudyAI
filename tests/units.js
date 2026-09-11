@@ -1399,6 +1399,104 @@ function testDeprecation() {
 }
 
 // ════════════════════════════════════════════
+// 19. SERVING — static, fallback, route order
+// ════════════════════════════════════════════
+function testServing() {
+  section('Serving: static, SPA fallback, route order');
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const lines = src.split('\n');
+  const lineOf = (needle) => lines.findIndex((l) => l.includes(needle)) + 1;
+
+  // Static serving existed nowhere, so GET / and every asset 404'd and
+  // the frontend could not be served by Express at all.
+  assert(src.includes('express.static(__dirname'), 'static file serving is configured');
+  assert(src.includes("dotfiles: \"deny\""), 'dotfiles are denied');
+
+  // The project root holds .env, the database and every server module,
+  // so only known frontend assets may be served from it.
+  assert(src.includes('PUBLIC_FILES'), 'static serving uses an allow-list');
+  ['/index.html', '/app.js', '/nexus-shell.js', '/style.css',
+   '/design-system.css', '/cinematic.css'].forEach((f) => {
+    assert(src.includes('"' + f + '"'), f + ' is on the allow-list');
+  });
+  ['/server.js', '/package.json', '/.env'].forEach((f) => {
+    assert(!src.includes('"' + f + '"'), f + ' is NOT on the allow-list');
+  });
+
+  // A missing API endpoint must return JSON, never the document — the
+  // frontend would otherwise parse index.html as a response body.
+  assert(src.includes("Endpoint not found"), 'unknown /api paths return a JSON 404');
+
+  // A file-like path must 404 rather than receive index.html, so a
+  // missing asset fails visibly instead of arriving as HTML.
+  assert(src.includes("lastSegment.includes(\".\")"),
+    'file-like paths 404 instead of receiving the SPA document');
+
+  // Express matches in registration order.
+  const staticAt = lineOf('express.static(__dirname');
+  const lastApi = lines.reduce((acc, l, i) =>
+    /^app\.(get|post|put|delete|patch)\(["']\/api\//.test(l) ? i + 1 : acc, 0);
+  const lastMount = lines.reduce((acc, l, i) =>
+    l.includes("app.use('/api/") ? i + 1 : acc, 0);
+  const fallbackAt = lineOf('Written as app.use rather than');
+  const errorAt = lineOf('app.use((err,_req,res,_next)');
+  const listenAt = lineOf('httpServer.listen(PORT');
+
+  assert(fallbackAt > lastApi, 'the SPA fallback is registered after every /api route');
+  assert(fallbackAt > lastMount, 'the SPA fallback is registered after every route module');
+  assert(errorAt > fallbackAt, 'the error handler is registered last');
+  assert(listenAt > errorAt, 'everything is registered before listen');
+  assert(staticAt > 0, 'static middleware is present');
+
+  // Express matches the first registration, so a duplicated path makes
+  // the later one unreachable.
+  const routes = [...src.matchAll(/app\.(get|post|put|delete|patch)\(["']([^"']+)["']/g)]
+    .map((m) => m[1] + ' ' + m[2]);
+  const seen = new Set();
+  const dupes = [];
+  for (const r of routes) {
+    if (seen.has(r)) dupes.push(r);
+    seen.add(r);
+  }
+  assertEqual(dupes, [], 'no route path is registered twice');
+}
+
+// ════════════════════════════════════════════
+// 20. AUTH TOKEN — single source
+// ════════════════════════════════════════════
+function testAuthToken() {
+  section('Auth token: one accessor');
+  const fs = require('fs');
+  const path = require('path');
+  const root = path.join(__dirname, '..');
+  const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const shell = fs.readFileSync(path.join(root, 'nexus-shell.js'), 'utf8');
+
+  // Login writes nx_t. Modules that read 'token' or 'jwt' get nothing,
+  // send no Authorization header, and every call returns 401.
+  assert(app.includes("localStorage.setItem('nx_t'"), 'login stores the JWT as nx_t');
+  assert(app.includes('function getAuthToken()'), 'a shared accessor exists');
+  assert(app.includes('window.getAuthToken = getAuthToken'),
+    'the accessor is exposed for other modules');
+  assert(app.includes("localStorage.getItem('nx_t')"), 'the accessor reads nx_t');
+
+  for (const [name, src] of [['app.js', app], ['nexus-shell.js', shell]]) {
+    assertEqual((src.match(/getItem\('token'\)/g) || []).length, 0,
+      name + " no longer reads the non-existent 'token' key");
+    assertEqual((src.match(/getItem\('jwt'\)/g) || []).length, 0,
+      name + " no longer reads the non-existent 'jwt' key");
+  }
+
+  // Authentication must not have been weakened to work around the 401.
+  const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
+  const runRoute = server.slice(server.indexOf("'/api/orchestrate/run'"));
+  assert(runRoute.slice(0, 200).includes('requireAuth'),
+    '/api/orchestrate/run still requires authentication');
+}
+
+// ════════════════════════════════════════════
 // RUNNER
 // ════════════════════════════════════════════
 async function run() {
@@ -1424,6 +1522,8 @@ async function run() {
     testOrchestration();
     testProductArchitecture();
     testDeprecation();
+    testServing();
+    testAuthToken();
   } catch (e) {
     console.error('\n\x1b[31mFATAL: test suite crashed\x1b[0m');
     console.error(e.stack);
