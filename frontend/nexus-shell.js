@@ -606,9 +606,9 @@
     const slot = stageBody.querySelector('#nxs-projects');
     if (!slot) return;
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+      const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
       if (!token) return;
-      const res = await fetch('/api/projects?limit=4', {
+      const res = await fetch('/api/project-workspace?limit=4', {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
@@ -654,7 +654,7 @@
     const slot = stageBody.querySelector('#nxs-idle');
     if (!slot) return;
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+      const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
       if (!token) return;
       const res = await fetch('/api/dreamspace/insights?unseen=1&limit=2', {
         headers: { Authorization: `Bearer ${token}` },
@@ -693,7 +693,7 @@
   // leaves them hidden, which is the safer default.
   async function checkCommunity() {
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+      const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
       if (!token) { communityUnlocked = false; return; }
       const res = await fetch('/api/community/marketplace?limit=5', {
         headers: { Authorization: `Bearer ${token}` },

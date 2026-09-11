@@ -296,6 +296,20 @@ const S = {
   rememberedEmail: localStorage.getItem('nx_email')||'',
 };
 
+// ─── Shared auth token accessor ─────────────
+// Login stores the JWT as `nx_t` and mirrors it on S.token. Modules
+// added later read `token`/`jwt`, which are never written, so their
+// requests went out with no Authorization header and returned 401.
+// Every module now resolves through this one function.
+function getAuthToken() {
+  try {
+    return (typeof S !== 'undefined' && S.token) || localStorage.getItem('nx_t') || '';
+  } catch (_) {
+    return '';
+  }
+}
+window.getAuthToken = getAuthToken;
+
 // ── PERSONAS ──────────────────────────────────
 const PERSONAS = {
   default:   {label:'🤖 Default',   prompt:'You are NexusAI, a helpful AI assistant created by Haroun Ghorbel. If asked who created you, say Haroun Ghorbel.'},
@@ -6548,7 +6562,7 @@ function selectToolFromGrid(id){
 
   // ─── API helper (uses existing auth token) ─────
   async function api(path, opts = {}) {
-    const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+    const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     if (token) headers.Authorization = `Bearer ${token}`;
     window.dispatchEvent(new CustomEvent('nx:ai-start'));
@@ -7104,7 +7118,7 @@ function selectToolFromGrid(id){
   const NXUI = window.NXUI = window.NXUI || {};
 
   async function api(path, opts = {}) {
-    const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+    const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     if (token) headers.Authorization = `Bearer ${token}`;
     window.dispatchEvent(new CustomEvent('nx:ai-start'));
@@ -8104,7 +8118,7 @@ function selectToolFromGrid(id){
   const NXUI = window.NXUI = window.NXUI || {};
 
   async function api(path, opts = {}) {
-    const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+    const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     if (token) headers.Authorization = `Bearer ${token}`;
     const r = await fetch(path, { ...opts, headers });
@@ -8471,7 +8485,7 @@ function selectToolFromGrid(id){
   const NXUI = window.NXUI = window.NXUI || {};
 
   async function api(path, opts = {}) {
-    const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+    const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     if (token) headers.Authorization = `Bearer ${token}`;
     const r = await fetch(path, { ...opts, headers });
@@ -8823,7 +8837,7 @@ function selectToolFromGrid(id){
   const NXUI = window.NXUI = window.NXUI || {};
 
   async function api(path, opts = {}) {
-    const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+    const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     if (token) headers.Authorization = `Bearer ${token}`;
     const r = await fetch(path, { ...opts, headers });
@@ -8949,7 +8963,7 @@ function selectToolFromGrid(id){
       </div>`;
 
     const list = target.querySelector('#nxp-list');
-    api('/api/projects').then(data => {
+    api('/api/project-workspace').then(data => {
       const projects = data.projects || [];
       if (!projects.length) {
         list.innerHTML = `<div class="nxp-empty">No projects yet.<br>
@@ -8998,7 +9012,7 @@ function selectToolFromGrid(id){
     async function load() {
       if (!stillMounted()) { stopPolling(); return; }
       try {
-        const w = await api(`/api/projects/${projectId}`);
+        const w = await api(`/api/project-workspace/${projectId}`);
         render(w);
         // Only poll while work is actually moving.
         if (w.project.status !== 'building' || w.blocked) stopPolling();
@@ -9122,7 +9136,7 @@ function selectToolFromGrid(id){
         btn.onclick = async () => {
           btn.disabled = true;
           try {
-            await api(`/api/projects/approvals/${btn.dataset.appr}/${btn.dataset.dec}`, { method:'POST' });
+            await api(`/api/project-workspace/approvals/${btn.dataset.appr}/${btn.dataset.dec}`, { method:'POST' });
             load();
           } catch (e) {
             btn.disabled = false;
@@ -9134,7 +9148,7 @@ function selectToolFromGrid(id){
       target.querySelectorAll('[data-auto]').forEach(btn => {
         btn.onclick = async () => {
           try {
-            await api(`/api/projects/${projectId}/autonomy`, {
+            await api(`/api/project-workspace/${projectId}/autonomy`, {
               method:'PUT', body: JSON.stringify({ level: btn.dataset.auto }),
             });
             load();
@@ -9273,7 +9287,7 @@ function selectToolFromGrid(id){
   // Shared by run and resume so both paths behave identically.
   function startStream(target, cfg, options = {}) {
     injectStyles();
-    const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+    const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
     const prompt = cfg.goal;
 
     target.innerHTML = `
@@ -9416,7 +9430,7 @@ function selectToolFromGrid(id){
             if (!evt.approval_id) { msg.textContent = 'Approval could not be recorded.'; return; }
             els.final.querySelectorAll('button').forEach(b => { b.disabled = true; });
             try {
-              await fetch(`/api/projects/approvals/${evt.approval_id}/${decision}`, {
+              await fetch(`/api/project-workspace/approvals/${evt.approval_id}/${decision}`, {
                 method: 'POST',
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
               });
@@ -9516,7 +9530,7 @@ function selectToolFromGrid(id){
 
   /** Preview the plan without spending anything. */
   NXO.preview = async function (prompt) {
-    const token = localStorage.getItem('token') || localStorage.getItem('jwt') || '';
+    const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
     const res = await fetch('/api/orchestrate/plan', {
       method: 'POST',
       headers: {

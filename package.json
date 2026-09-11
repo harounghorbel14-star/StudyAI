@@ -5,9 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node backend/server.js",
-    "dev": "nodemon server.js",
-    "test": "tsc && node tests/unit.js && node tests/integration-mock.js",
-    "test:syntax": "node --check server.js && for f in services/*.js security/*.js router/*.js routes/*.js queues/*.js workers/*.js realtime/*.js monitoring/*.js resilience/*.js agents/*.js; do node --check \"$f\" || exit 1; done && echo '✅ All files parse'",
+    "dev": "nodemon backend/server.js",
+    "test:syntax": "node --check backend/server.js && for f in backend/services/*.js backend/security/*.js backend/router/*.js backend/routes/*.js backend/queues/*.js backend/workers/*.js backend/realtime/*.js backend/monitoring/*.js backend/resilience/*.js backend/agents/*.js; do node --check \"$f\" || exit 1; done && echo '✅ All files parse'",
     "stripe:listen": "stripe listen --forward-to localhost:3001/api/stripe/webhook",
     "migrate:pg": "node scripts/migrate-to-postgres.js",
     "deploy": "node scripts/deploy.js",

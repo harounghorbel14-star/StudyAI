@@ -16,7 +16,7 @@
 const path = require('path');
 const fs = require('fs');
 
-const ROOT = path.resolve(__dirname, '..');
+const ROOT = path.resolve(__dirname, '../..');
 const DIST = path.join(ROOT, 'dist');
 
 const cache = new Map();
@@ -31,12 +31,19 @@ function load(relativePath) {
   if (cache.has(relativePath)) return cache.get(relativePath);
 
   const compiled = path.join(DIST, `${relativePath}.js`);
-  const original = path.join(ROOT, `${relativePath}.js`);
-
+const typescriptCompiled = path.join(
+  DIST,
+  relativePath.split('/').slice(0, -1).join('/'),
+  'TypeScript',
+  relativePath.split('/').pop() + '.js'
+);
+const original = path.join(ROOT, `${relativePath}.js`);
   let resolved;
   if (fs.existsSync(compiled)) {
-    resolved = require(compiled);
-  } else if (fs.existsSync(original)) {
+  resolved = require(compiled);
+} else if (fs.existsSync(typescriptCompiled)) {
+  resolved = require(typescriptCompiled);
+} else if (fs.existsSync(original)) {
     resolved = require(original);
   } else {
     throw new Error(

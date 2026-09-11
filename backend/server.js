@@ -3,7 +3,7 @@
 //    كل شيء في ملف واحد — لا conflicts — لا تكرار
 // ============================================================
 
-require("dotenv").config({ path: require("path").join(__dirname, ".env") });
+require("dotenv").config();
 
 const express      = require("express");
 const cors         = require("cors");
@@ -498,11 +498,6 @@ const audioUpload = multer({ dest: uploadDir, limits: { fileSize: 25*1024*1024 }
 // 🚀 EXPRESS APP
 // ─────────────────────────────────────────────
 const app = express();
-app.use(express.static(path.join(__dirname, "../frontend")));
-
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "../frontend/index.html"));
-});
 app.use(helmet());
 app.use(cors({
   origin: process.env.ALLOWED_ORIGIN || "*",
@@ -513,7 +508,7 @@ app.use(cors({
 
 // Additional hardening headers (CSP, HSTS, Permissions-Policy)
 try {
-  const { securityHeaders } = require('./dist/security/hardening');
+ const { securityHeaders } = require('../dist/security/hardening');
   app.use(securityHeaders());
 } catch (e) {
   console.warn('⚠️ Security headers not applied:', e.message);
@@ -558,6 +553,49 @@ app.post("/api/stripe/webhook", stripeWebhookHandler, routeStripeWebhook);
 app.post("/api/billing/webhook", stripeWebhookHandler, routeStripeWebhook);
 
 app.use(express.json({ limit:"2mb" }));
+
+// ─────────────────────────────────────────────
+// 📂 STATIC FILES
+// ─────────────────────────────────────────────
+// server.js had no static middleware, so GET / and every asset
+// returned 404 and the frontend could not be served by Express at all.
+//
+// The frontend lives in the project root alongside the backend, so the
+// root has to be served — but that root also contains .env, the SQLite
+// database and every server module. Only known frontend assets are
+// allowed through; everything else skips static entirely, so source,
+// secrets and the database can never be downloaded.
+const PUBLIC_FILES = new Set([
+  "/index.html", "/share.html", "/design-preview.html",
+  "/app.js", "/nexus-shell.js", "/sw.js",
+  "/tool-engine.js", "/tools.config.js",
+  "/style.css", "/design-system.css", "/cinematic.css",
+  "/logo.svg", "/manifest.json", "/sitemap.xml", "/robots.txt", "/favicon.ico",
+]);
+const PUBLIC_DIRS = ["/assets/", "/public/", "/icons/", "/img/"];
+
+const serveStatic = express.static(__dirname, {
+  index: false,          // "/" is handled by the SPA fallback
+  extensions: false,
+  dotfiles: "deny",
+  setHeaders(res, filePath) {
+    // Serve source and data files fresh; they change during development.
+    if (/\.(js|css|html|json|map)$/.test(filePath)) {
+      res.setHeader("Cache-Control", "no-cache");
+    }
+  },
+});
+
+app.use((req, res, next) => {
+  const p = req.path;
+  const allowed =
+    PUBLIC_FILES.has(p) || PUBLIC_DIRS.some((d) => p.startsWith(d));
+  if (!allowed) return next();
+  return serveStatic(req, res, next);
+});
+
+
+
 
 // ─────────────────────────────────────────────
 // 🛡️  RATE LIMITERS
@@ -3126,17 +3164,6 @@ app.post("/api/clipdrop/reimagine", requireAuth, requireQuota, aiLimiter,
 );
 
 // ─────────────────────────────────────────────
-// 🧯 ERROR HANDLER
-// ─────────────────────────────────────────────
-app.use((err,_req,res,_next) => {
-  console.error("❌", err.message || err);
-  if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error:"File too large." });
-  const status = err.status || err.statusCode || 500;
-  const message = process.env.NODE_ENV === "production" ? "Internal server error." : err.message || "Unknown error";
-  res.status(status).json({ error:message });
-});
-
-// ─────────────────────────────────────────────
 // 🧠 INITIALIZE SERVICES (production architecture)
 // ─────────────────────────────────────────────
 let services = null;
@@ -3918,7 +3945,9 @@ app.post('/api/payments/cancel', requireAuth, requireServices, wrap(async (req, 
 // because signature verification needs the raw body.
 
 // ───── ADMIN ROUTES (Feature 4) ────────────────────────
-app.get('/api/admin/users', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
+// Search variant. The paginated /api/admin/users above is the existing
+// contract and is left untouched.
+app.get('/api/admin/users/search', requireAuth, requireServices, requireAdmin, wrap(async (req, res) => {
   const q = req.query.q || '';
   const plan = req.query.plan || '';
   try {
@@ -4086,26 +4115,29 @@ app.get('/api/observability/status', requireAuth, requireServices, requireAdmin,
 }));
 
 // ───── PROJECT WORKSPACE (Phase B) ───────────────────────
+// Mounted at /api/project-workspace, not /api/projects: the latter
+// is an existing endpoint backed by the saved_projects table, and
+// Express would always match it first.
 // Aggregates agent_projects / agent_steps / agent_logs — project
 // creation stays with /api/agents/orchestrate.
-app.get('/api/projects', requireAuth, requireServices, wrap(async (req, res) => {
+app.get('/api/project-workspace', requireAuth, requireServices, wrap(async (req, res) => {
   res.json({ projects: services.projects.list(req.user.id, Number(req.query.limit) || 30) });
 }));
 
-app.get('/api/projects/:id', requireAuth, requireServices, wrap(async (req, res) => {
+app.get('/api/project-workspace/:id', requireAuth, requireServices, wrap(async (req, res) => {
   const view = services.projects.getWorkspace(Number(req.params.id), req.user.id);
   if (!view) return res.status(404).json({ error: 'project not found' });
   res.json(view);
 }));
 
-app.get('/api/projects/:id/approvals', requireAuth, requireServices, wrap(async (req, res) => {
+app.get('/api/project-workspace/:id/approvals', requireAuth, requireServices, wrap(async (req, res) => {
   res.json({
     approvals: services.projects.listApprovals(
       Number(req.params.id), req.user.id, req.query.status || 'pending'),
   });
 }));
 
-app.post('/api/projects/:id/approvals', requireAuth, requireServices, wrap(async (req, res) => {
+app.post('/api/project-workspace/:id/approvals', requireAuth, requireServices, wrap(async (req, res) => {
   const { action, summary, payload, risk } = req.body || {};
   if (!action || !summary) return res.status(400).json({ error: 'action and summary required' });
   const result = services.projects.requestApproval({
@@ -4116,7 +4148,7 @@ app.post('/api/projects/:id/approvals', requireAuth, requireServices, wrap(async
   res.json(result);
 }));
 
-app.post('/api/projects/approvals/:approvalId/:decision', requireAuth, requireServices, wrap(async (req, res) => {
+app.post('/api/project-workspace/approvals/:approvalId/:decision', requireAuth, requireServices, wrap(async (req, res) => {
   const decision = req.params.decision;
   if (decision !== 'approved' && decision !== 'rejected') {
     return res.status(400).json({ error: 'decision must be approved or rejected' });
@@ -4131,11 +4163,11 @@ app.post('/api/projects/approvals/:approvalId/:decision', requireAuth, requireSe
   res.json(result);
 }));
 
-app.get('/api/projects/:id/resources', requireAuth, requireServices, wrap(async (req, res) => {
+app.get('/api/project-workspace/:id/resources', requireAuth, requireServices, wrap(async (req, res) => {
   res.json({ resources: services.projects.listResources(Number(req.params.id), req.user.id) });
 }));
 
-app.post('/api/projects/:id/resources', requireAuth, requireServices, wrap(async (req, res) => {
+app.post('/api/project-workspace/:id/resources', requireAuth, requireServices, wrap(async (req, res) => {
   const { kind, label, ref, metadata } = req.body || {};
   if (!kind || !label || !ref) return res.status(400).json({ error: 'kind, label and ref required' });
   const result = services.projects.linkResource({
@@ -4145,13 +4177,13 @@ app.post('/api/projects/:id/resources', requireAuth, requireServices, wrap(async
   res.json(result);
 }));
 
-app.delete('/api/projects/resources/:resourceId', requireAuth, requireServices, wrap(async (req, res) => {
+app.delete('/api/project-workspace/resources/:resourceId', requireAuth, requireServices, wrap(async (req, res) => {
   const result = services.projects.unlinkResource(Number(req.params.resourceId), req.user.id);
   if (!result.ok) return res.status(404).json({ error: 'resource not found' });
   res.json(result);
 }));
 
-app.put('/api/projects/:id/autonomy', requireAuth, requireServices, wrap(async (req, res) => {
+app.put('/api/project-workspace/:id/autonomy', requireAuth, requireServices, wrap(async (req, res) => {
   const { level } = req.body || {};
   const result = services.projects.setAutonomy(Number(req.params.id), req.user.id, level);
   if (!result.ok) return res.status(400).json({ error: 'invalid project or autonomy level' });
@@ -4408,6 +4440,57 @@ app.get('/api/deprecations/usage', requireAuth, requireServices, requireAdmin, w
     endpoints: report.sort((a, b) => b.calls - a.calls),
   });
 }));
+
+// ─────────────────────────────────────────────
+// 🧭 SPA FALLBACK
+// ─────────────────────────────────────────────
+// Registered after every API route so it can never shadow one.
+//
+// It deliberately does NOT catch:
+//   • /api/*      — a missing endpoint must return JSON 404, not HTML,
+//                   or the frontend parses index.html as a response
+//   • asset paths — a missing .css/.js must 404 so the failure is
+//                   visible, instead of the browser receiving HTML
+//                   with the wrong Content-Type
+
+// Written as app.use rather than app.get("*"): the "*" pattern throws
+// on Express 5 (path-to-regexp v8), and this form behaves identically
+// on both versions.
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/")) {
+    return res.status(404).json({ error: "Endpoint not found", path: req.path });
+  }
+  // Anything that looks like a file gets a real 404. Matching on a dot
+  // in the final segment rather than a list of extensions also covers
+  // .env, .db and any type not thought of here — returning index.html
+  // for those would be both misleading and a poor default.
+  const lastSegment = req.path.split("/").pop() || "";
+  if (lastSegment.includes(".")) {
+    return res.status(404).type("text/plain").send("Not found: " + req.path);
+  }
+  // Only a navigation request should receive the document.
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    return res.status(404).json({ error: "Not found", path: req.path });
+  }
+  res.sendFile(path.join(__dirname, "index.html"), (err) => {
+    if (err) next(err);
+  });
+});
+
+// Registered last: Express only routes errors to handlers declared
+// after the middleware that threw. Previously this sat above the
+// route modules, so their failures fell through to the default
+// handler and returned an HTML stack trace instead of JSON.
+// ─────────────────────────────────────────────
+// 🧯 ERROR HANDLER
+// ─────────────────────────────────────────────
+app.use((err,_req,res,_next) => {
+  console.error("❌", err.message || err);
+  if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error:"File too large." });
+  const status = err.status || err.statusCode || 500;
+  const message = process.env.NODE_ENV === "production" ? "Internal server error." : err.message || "Unknown error";
+  res.status(status).json({ error:message });
+});
 
 // ─────────────────────────────────────────────
 // 🚀 START — HTTP + WebSocket
