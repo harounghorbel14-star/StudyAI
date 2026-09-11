@@ -282,7 +282,7 @@ body.cine-deep-work .chat-content {
 }
 
 /* ─── Mobile responsive ──────────────────────────── */
-@media (max-width: 720px) {
+@media (max-width: 600px) {
   .cine-mode-bar { display: none; }
   .cine-timeline { padding-left: 24px; }
   .cine-timeline::before { left: 6px; }
@@ -298,4 +298,83 @@ body.cine-deep-work .chat-content {
   .cine-portal::before {
     animation: none !important;
   }
+}
+
+/* ════════════════════════════════════════════════
+   ROBUSTNESS
+   The effects above assume backdrop-filter and GPU compositing. Where
+   either is missing the result is not a lesser effect but an unusable
+   one — translucent panels over moving content with no blur to
+   separate them.
+   ════════════════════════════════════════════════ */
+
+/* ── No backdrop-filter ──────────────────────────
+   Roughly the Firefox default before 103 and older Android WebViews.
+   Without blur, a translucent panel shows whatever scrolls beneath it
+   and the text stops being readable. Those surfaces become opaque. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .cine-mode-bar,
+  .nx-resume,
+  .nx-bell,
+  .nx-notif-panel,
+  .nxs-rail,
+  .nxs-drawer,
+  .nxui-panel {
+    background: #0d0d14f2;
+  }
+
+  .cine-hologram,
+  .nx-glass,
+  .nx-glass-bright {
+    background: #14141ff5;
+  }
+}
+
+/* ── Compositing hints ───────────────────────────
+   Only the handful of elements that animate continuously are promoted.
+   Applying will-change broadly costs memory and can make things slower
+   rather than faster, so these are the looping effects alone. */
+.cine-hologram::before,
+.cine-ai-pulse::before,
+.cine-portal::before,
+.nxo-step.running::after,
+.nx-ambient-particles {
+  will-change: transform, opacity;
+}
+
+/* Release the promotion once the animation is finished. */
+@media (prefers-reduced-motion: reduce) {
+  .cine-hologram::before,
+  .cine-ai-pulse::before,
+  .cine-portal::before,
+  .nxo-step.running::after,
+  .nx-ambient-particles {
+    will-change: auto;
+  }
+}
+
+/* ── Keyboard visibility over cinematic surfaces ──
+   A focus ring loses contrast against a holographic or metallic fill,
+   so it gains a dark halo to stay legible on any backdrop. */
+.cine-hologram :focus-visible,
+.cine-metallic :focus-visible,
+.cine-timeline-item :focus-visible {
+  outline: 2px solid var(--a2, #35f1c6);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px #0a0a0fcc;
+}
+
+/* ── Deep work ───────────────────────────────────
+   Dimmed chrome must still be reachable by keyboard, not only by
+   hovering — otherwise deep work mode traps a keyboard user. */
+body.cine-deep-work #sidebar:focus-within,
+body.cine-deep-work #topbar:focus-within {
+  opacity: 1;
+}
+
+/* ── Portal ──────────────────────────────────────
+   The transition overlay covers the viewport at z-index 9998. If a
+   class is ever left behind it would silently block every click. */
+.cine-portal:not(.active) {
+  display: none;
 }

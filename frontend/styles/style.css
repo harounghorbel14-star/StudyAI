@@ -36,6 +36,28 @@ html,body{height:100%;overflow:hidden}
   --radius:     14px;
   --radius-sm:  8px;
   --font:       'Inter',-apple-system,sans-serif;
+
+  /* Accent with alpha.
+     These exist because `var(--a1-30)` was used in 22 places, which is
+     invalid CSS — the browser dropped each declaration, so those glows,
+     borders and highlights never rendered at all. The suffix is the
+     hex alpha byte, matching the original intent. */
+  --a1-00:      #c6f13500;
+  --a1-10:      #c6f13510;
+  --a1-15:      #c6f13515;
+  --a1-20:      #c6f13520;
+  --a1-30:      #c6f13530;
+  --a1-40:      #c6f13540;
+  --a1-60:      #c6f13560;
+  --a1-80:      #c6f13580;
+  --a2-10:      #35f1c610;
+  --a2-15:      #35f1c615;
+  --a2-40:      #35f1c640;
+
+  /* Referenced twice but never defined, so both buttons fell back to
+     no background at all. Set one step below the `20` their :hover
+     uses, which is what the surrounding rules imply. */
+  --accent-d:   #c6f13515;
 }
 
 body{
@@ -163,7 +185,7 @@ input,textarea{font-family:inherit;color:inherit}
 }
 #sidebar::after{
   content:'';position:absolute;top:0;right:0;bottom:0;width:1px;
-  background:linear-gradient(180deg,transparent,var(--a1)60,transparent);
+  background:linear-gradient(180deg,transparent,var(--a1-60),transparent);
   opacity:0;transition:.3s;
 }
 #sidebar.open::after{opacity:.4}
@@ -1059,7 +1081,7 @@ input,textarea{font-family:inherit;color:inherit}
   margin-top:8px;
   font-size:12px;color:var(--a1);
   padding:5px 12px;border-radius:7px;
-  border:1px solid var(--a1)30;
+  border:1px solid var(--a1-30);
   background:var(--accent-d);
   cursor:pointer;transition:.15s;
 }
@@ -1320,8 +1342,8 @@ input,textarea{font-family:inherit;color:inherit}
   display:none;
   align-items:center;gap:8px;
   padding:6px 12px;
-  background:var(--a1)15;
-  border:1px solid var(--a1)30;
+  background:var(--a1-15);
+  border:1px solid var(--a1-30);
   border-radius:8px;
   margin:0 12px 6px;
   font-size:12px;color:var(--a1);
@@ -1335,7 +1357,7 @@ input,textarea{font-family:inherit;color:inherit}
 /* ── TOOL ALWAYS ACTIVE PILL ─────────────────── */
 .tool-active-pill{
   display:inline-flex;align-items:center;gap:5px;
-  background:var(--a1)20;border:1px solid var(--a1)40;
+  background:var(--a1-20);border:1px solid var(--a1-40);
   border-radius:99px;padding:3px 10px 3px 6px;
   font-size:12px;color:var(--a1);cursor:pointer;
   margin-bottom:8px;
@@ -1370,7 +1392,7 @@ input,textarea{font-family:inherit;color:inherit}
 html{scroll-behavior:smooth;}
 
 /* Better selection */
-::selection{background:var(--a1)40;color:var(--text);}
+::selection{background:var(--a1-40);color:var(--text);}
 
 /* Premium scrollbar */
 ::-webkit-scrollbar{width:8px;height:8px;}
@@ -1414,7 +1436,7 @@ button:active{transform: scale(.97);}
 
 /* Glow effect on focus */
 input:focus, textarea:focus{
-  box-shadow: 0 0 0 2px var(--a1)30;
+  box-shadow: 0 0 0 2px var(--a1-30);
   border-color: var(--a1) !important;
 }
 
@@ -1423,8 +1445,8 @@ input:focus, textarea:focus{
   animation: sendPulse 3s ease-in-out infinite;
 }
 @keyframes sendPulse{
-  0%,100%{box-shadow: 0 0 0 0 var(--a1)40;}
-  50%{box-shadow: 0 0 0 6px var(--a1)00;}
+  0%,100%{box-shadow: 0 0 0 0 var(--a1-40);}
+  50%{box-shadow: 0 0 0 6px var(--a1-00);}
 }
 
 /* AI avatar floating animation */
@@ -1490,8 +1512,8 @@ input:focus, textarea:focus{
   animation: activeGlow 2s ease-in-out infinite;
 }
 @keyframes activeGlow{
-  0%,100%{box-shadow: 0 0 12px var(--a1)40;}
-  50%{box-shadow: 0 0 20px var(--a1)80;}
+  0%,100%{box-shadow: 0 0 12px var(--a1-40);}
+  50%{box-shadow: 0 0 20px var(--a1-80);}
 }
 
 /* Smooth progress bars */
@@ -1662,7 +1684,7 @@ body.modal-open{overflow:hidden;}
 .pricing-card:hover{
   border-color: var(--a1);
   transform: translateY(-4px);
-  box-shadow: 0 12px 40px var(--a1)20;
+  box-shadow: 0 12px 40px var(--a1-20);
 }
 .pricing-card.featured{
   border-color: var(--a1);
@@ -1690,8 +1712,8 @@ body.modal-open{overflow:hidden;}
 .ai-os-bg::before{
   content:'';position:absolute;inset:-50%;z-index:0;
   background:
-    radial-gradient(circle at 20% 20%, var(--a1)15 0%, transparent 50%),
-    radial-gradient(circle at 80% 80%, var(--a2)15 0%, transparent 50%),
+    radial-gradient(circle at 20% 20%, var(--a1-15) 0%, transparent 50%),
+    radial-gradient(circle at 80% 80%, var(--a2-15) 0%, transparent 50%),
     radial-gradient(circle at 50% 50%, #7c3aed10 0%, transparent 50%);
   animation: aurora 20s ease-in-out infinite;
 }
@@ -1713,11 +1735,11 @@ body.modal-open{overflow:hidden;}
 }
 .live-agent-card.active{
   border-color:var(--a1);
-  box-shadow:0 0 30px var(--a1)40, inset 0 0 20px var(--a1)10;
+  box-shadow:0 0 30px var(--a1-40), inset 0 0 20px var(--a1-10);
 }
 .live-agent-card.thinking::before{
   content:'';position:absolute;inset:0;
-  background:linear-gradient(90deg,transparent,var(--a1)20,transparent);
+  background:linear-gradient(90deg,transparent,var(--a1-20),transparent);
   animation: agentScan 2s linear infinite;
 }
 @keyframes agentScan{
@@ -1788,7 +1810,7 @@ body.modal-open{overflow:hidden;}
   background:radial-gradient(circle,var(--a1),var(--a2));
   display:flex;align-items:center;justify-content:center;
   cursor:pointer;border:none;
-  box-shadow:0 0 40px var(--a1)60;
+  box-shadow:0 0 40px var(--a1-60);
   position:relative;
 }
 .voice-orb::before,.voice-orb::after{
@@ -1810,7 +1832,7 @@ body.modal-open{overflow:hidden;}
 }
 .showcase-card:hover{
   transform:translateY(-6px);
-  box-shadow:0 20px 50px var(--a1)20;
+  box-shadow:0 20px 50px var(--a1-20);
   border-color:var(--a1);
 }
 .showcase-thumb{
@@ -1843,7 +1865,7 @@ body.modal-open{overflow:hidden;}
   transition: all .25s ease;
 }
 .connect-card:hover{border-color:var(--a1);}
-.connect-card.connected{border-color:var(--a2);background:linear-gradient(135deg,var(--bg2),var(--a2)10);}
+.connect-card.connected{border-color:var(--a2);background:linear-gradient(135deg,var(--bg2),var(--a2-10));}
 .connect-icon{font-size:32px;margin-bottom:10px;}
 .connect-name{font-size:14px;font-weight:600;margin-bottom:4px;}
 .connect-status{font-size:11px;color:var(--t3);}
@@ -1858,11 +1880,11 @@ body.modal-open{overflow:hidden;}
   height:100%;background:linear-gradient(90deg,var(--a1),var(--a2));
   border-radius:99px;
   transition: width .5s cubic-bezier(.16,1,.3,1);
-  box-shadow:0 0 20px var(--a1)80;
+  box-shadow:0 0 20px var(--a1-80);
 }
 .live-progress-fill::after{
   content:'';position:absolute;inset:0;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);
+  background:linear-gradient(90deg,transparent,#fff60,transparent);
   animation: progressShine 2s linear infinite;
 }
 @keyframes progressShine{
@@ -1902,12 +1924,12 @@ body.modal-open{overflow:hidden;}
 .dag-node[data-status="pending"]{opacity:.5;}
 .dag-node[data-status="running"]{
   border-color:var(--a2);
-  box-shadow:0 0 24px var(--a2)40;
+  box-shadow:0 0 24px var(--a2-40);
   animation:nodeRunning 1.5s ease-in-out infinite;
 }
 .dag-node[data-status="done"]{
   border-color:var(--a1);
-  background:linear-gradient(135deg,var(--bg),var(--a1)10);
+  background:linear-gradient(135deg,var(--bg),var(--a1-10));
 }
 .dag-node[data-status="error"]{
   border-color:#f44;

@@ -44,7 +44,205 @@
   --atmo-creator:  radial-gradient(ellipse at 70% 100%, rgba(180,100,200,.25), transparent 60%);
   --atmo-strategy: radial-gradient(ellipse at 50% 50%, rgba(80,140,200,.18), transparent 65%);
   --atmo-calm:     radial-gradient(ellipse at 50% 100%, rgba(60,100,140,.15), transparent 70%);
+
+  /* ── Breakpoint scale ──────────────────────────
+     Documented here because CSS cannot use a custom property inside
+     a media query. Every layer must use these three widths verbatim.
+
+     The layers previously collapsed at 720px and 860px while the base
+     layout collapses at 600px, so between roughly 600 and 860 the
+     sidebar, rail and overlays each changed at a different width.
+
+       600px  mobile   — the sidebar collapses here; the one that matters
+       768px  tablet   — the canvas panel goes full width
+       900px  desktop  — the widest layout adjustment in the base sheet
+
+     Anything outside this set is a bug. */
+  --bp-mobile:  600px;
+  --bp-tablet:  768px;
+  --bp-desktop: 900px;
 }
+
+/* ════════════════════════════════════════════════
+   FOUNDATION
+   Platform behaviours the base sheet does not cover. These are
+   correctness rather than decoration: without them the interface is
+   unusable in high contrast, unreadable when printed, and awkward
+   on touch.
+   ════════════════════════════════════════════════ */
+
+/* ── Windows High Contrast / forced colours ──────
+   Forced-colours mode replaces every colour with a system palette and
+   discards background images. Anything whose meaning was carried by a
+   gradient, a glow or a translucent border disappears entirely, so
+   those elements need a real border to stay visible. */
+@media (forced-colors: active) {
+  .nx-glass,
+  .nx-glass-bright,
+  .cine-hologram,
+  .cine-metallic,
+  .nxui-panel,
+  .nxui-card,
+  .nxs-card,
+  .nxo-step,
+  .nxp-step,
+  .nx-chip,
+  .nx-mode {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+
+  /* Buttons rely on a gradient fill that is discarded. */
+  .auth-btn,
+  .nxui-btn,
+  .nxo-btn,
+  .nxs-go,
+  .nxp-btn {
+    border: 1px solid ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+    forced-color-adjust: none;
+  }
+
+  /* Status is signalled only by colour elsewhere; make it structural. */
+  .nxo-step.running  { outline: 2px solid Highlight; }
+  .nxo-step.failed,
+  .nxp-step.failed   { outline: 2px dashed CanvasText; }
+
+  /* Decorative layers carry no information and only add noise. */
+  .nx-ambient-particles,
+  .cine-portal,
+  #auth-overlay::before,
+  #auth-overlay::after {
+    display: none;
+  }
+}
+
+/* ── Print ───────────────────────────────────────
+   Nothing here was printable: a dark background wastes ink, and the
+   navigation, overlays and chrome carry no meaning on paper. What
+   remains is the content the user actually wanted. */
+@media print {
+  *,
+  *::before,
+  *::after {
+    background: #fff !important;
+    color: #000 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    animation: none !important;
+    transition: none !important;
+  }
+
+  #sidebar,
+  #topbar,
+  #backdrop,
+  #auth-overlay,
+  .nxs-rail,
+  .nxs-drawer,
+  .nx-bell,
+  .nx-notif-panel,
+  .cine-mode-bar,
+  .nx-ambient-particles,
+  .nx-resume,
+  #input-wrap,
+  .nxui-tabs,
+  .nxs-stage-close {
+    display: none !important;
+  }
+
+  #main,
+  .nxs-stage {
+    position: static !important;
+    margin: 0 !important;
+    left: 0 !important;
+    width: auto !important;
+    overflow: visible !important;
+  }
+
+  /* A link's destination is invisible on paper unless it is spelled out. */
+  a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 11px;
+    word-break: break-all;
+  }
+
+  /* Keep related content together across page breaks. */
+  .nxui-panel,
+  .nxp-step,
+  .nxo-step,
+  .nxui-card {
+    break-inside: avoid;
+    border: 1px solid #ccc !important;
+  }
+}
+
+/* ── Touch ───────────────────────────────────────
+   On a coarse pointer, targets below about 44px are difficult to hit
+   accurately. Only min-height is raised, so nothing reflows on a
+   mouse-driven layout. */
+@media (pointer: coarse) {
+  button,
+  .sb-nav-btn,
+  .nxs-rail-btn,
+  .nxs-item,
+  .nxui-tab,
+  .auth-tab,
+  .nx-notif-item,
+  [role="button"] {
+    min-height: 44px;
+  }
+
+  /* Hover styling sticks after a tap on touch devices, leaving an
+     element looking permanently active. */
+  .nxs-card:hover,
+  .nxui-card:hover,
+  .nx-magnetic:hover,
+  .nxs-ex-chip:hover {
+    transform: none;
+  }
+}
+
+/* ── Keyboard ────────────────────────────────────
+   A focus ring must never be removed without a replacement. This is
+   the only visible affordance for anyone navigating without a mouse. */
+:where(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--a2, #35f1c6);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (forced-colors: active) {
+  :where(a, button, input, textarea, select, [tabindex]):focus-visible {
+    outline: 2px solid Highlight;
+  }
+}
+
+/* Lets a keyboard user jump past the navigation. Visible only when
+   focused, so it costs nothing visually. */
+.nx-skip-link {
+  position: absolute;
+  left: 12px;
+  top: -60px;
+  z-index: 10000;
+  padding: 10px 16px;
+  background: var(--a2, #35f1c6);
+  color: #000;
+  font-weight: 600;
+  font-size: 13px;
+  border-radius: 0 0 8px 8px;
+  transition: top var(--dur-fast, 180ms) var(--ease-out-soft, ease);
+}
+.nx-skip-link:focus { top: 0; }
+
+/* ── Scrollbars ──────────────────────────────────
+   The base sheet styles WebKit only, so Firefox showed the default
+   light scrollbar against a dark interface. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,.14) transparent;
+}
+
 
 /* Respect reduced motion globally */
 @media (prefers-reduced-motion: reduce) {
@@ -458,7 +656,7 @@ body.nx-focus .chat-content {
 
 /* ─── 20. RESPONSIVE — keep elite on mobile ───────
    ────────────────────────────────────────────────── */
-@media (max-width: 720px) {
+@media (max-width: 600px) {
   .nx-ambient-particles { display: none; }
   .nx-resume { left: 12px; right: 12px; transform: translateY(80px); }
   .nx-resume.show { transform: translateY(0); }

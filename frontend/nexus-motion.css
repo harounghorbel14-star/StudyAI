@@ -52,45 +52,27 @@
   100% { opacity: 1; }
 }
 
-/* A slow radial bloom behind the card. Purely atmospheric — it sits
-   at z-index 0 while .auth-card is z-index 1. */
-#auth-overlay::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(ellipse 60% 50% at 50% 42%, #c6f1350e, transparent 70%),
-    radial-gradient(ellipse 50% 40% at 50% 58%, #35f1c60c, transparent 70%);
-  opacity: 0;
-  animation: nmBootBloom 1600ms var(--m-enter) 180ms both;
-}
-
-@keyframes nmBootBloom {
-  0%   { opacity: 0; transform: scale(.92); }
-  100% { opacity: 1; transform: scale(1); }
-}
-
-/* A single hairline sweeps across once, like a scan settling. */
+/* style.css already places two blurred orbs on #auth-overlay's
+   ::before and ::after. Overwriting them removed an existing effect,
+   so the boot sequence composes with them instead: the orbs are
+   already animating, they simply had no entrance. */
+#auth-overlay::before,
 #auth-overlay::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 1px;
-  z-index: 0;
-  pointer-events: none;
-  background: linear-gradient(90deg, transparent, #35f1c655, transparent);
-  animation: nmBootScan 1400ms var(--m-swap) 240ms both;
+  animation:
+    orb 8s ease-in-out infinite alternate,
+    nmOrbIn 1400ms var(--m-enter) 200ms both;
 }
 
-@keyframes nmBootScan {
-  0%   { transform: translateY(0);     opacity: 0; }
-  15%  {                               opacity: 1; }
-  85%  {                               opacity: 1; }
-  100% { transform: translateY(100vh); opacity: 0; }
+/* ::after carries a -4s delay in the base sheet so the two orbs drift
+   out of phase. Re-declaring the shorthand above resets it, so it is
+   restored here — without this both orbs would move in lockstep. */
+#auth-overlay::after {
+  animation-delay: -4s, 340ms;
+}
+
+@keyframes nmOrbIn {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -560,7 +542,7 @@
 /* ── Low-power and small screens ──────────────────────────
    Blur is the most expensive property here. Dropping it keeps the
    choreography intact on hardware that would otherwise drop frames. */
-@media (max-width: 720px) {
+@media (max-width: 600px) {
   .auth-card,
   #app,
   .nxs-home-h,
@@ -572,3 +554,99 @@
 
   #auth-overlay::after { display: none; }
 }
+
+/* ════════════════════════════════════════════════
+   INTERACTION STATES
+   
+   The base sheet styles the resting and hover states well, but the
+   interface has 111 buttons and only two of them describe what
+   disabled looks like. A control that looks identical whether or not
+   it will respond is the most common source of "nothing happened".
+   ════════════════════════════════════════════════ */
+
+/* ── Disabled ────────────────────────────────────
+   Dimming alone reads as low contrast rather than unavailable, so the
+   cursor changes too and every interaction is suppressed. */
+button:disabled,
+input:disabled,
+textarea:disabled,
+select:disabled,
+[aria-disabled="true"] {
+  opacity: .45;
+  cursor: not-allowed;
+  pointer-events: none;
+  filter: saturate(.6);
+}
+
+/* A control waiting on the network is not disabled — it is busy, and
+   the distinction matters to anyone deciding whether to click again. */
+[aria-busy="true"] {
+  cursor: progress;
+  pointer-events: none;
+}
+
+/* ── Invalid input ───────────────────────────────
+   Only applied once the field has content, so an empty required field
+   is not flagged before it has been filled in. */
+input:not(:placeholder-shown):invalid,
+textarea:not(:placeholder-shown):invalid {
+  border-color: #ef444455;
+}
+input:not(:placeholder-shown):invalid:focus,
+textarea:not(:placeholder-shown):invalid:focus {
+  border-color: #ef4444aa;
+  box-shadow: 0 0 0 3px #ef444415;
+}
+
+/* ── Placeholders ────────────────────────────────
+   A placeholder that competes with real input is easy to misread as a
+   filled field. */
+::placeholder {
+  color: var(--t3, #3d3d5c);
+  opacity: 1;          /* Firefox dims placeholders by default */
+}
+
+/* ── Text handling ───────────────────────────────
+   Headings look unbalanced when the last line holds a single word. */
+h1, h2, h3,
+.auth-title,
+.page-title,
+.nxs-home-h,
+.nxui-title {
+  text-wrap: balance;
+}
+
+/* AI output arrives as prose; paragraphs read better without ragged
+   last lines, and long unbroken strings must not force a scrollbar. */
+.msg-bubble,
+.nxui-result,
+.nxo-out {
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+
+/* ── Numbers ─────────────────────────────────────
+   Counters, timings and progress values shift horizontally as digits
+   change unless the figures are fixed width. */
+.nxo-meta,
+.nxp-bar-meta,
+.nxui-meta,
+.nx-bell-badge,
+.nxp-tile-n,
+.nxs-card-d {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Empty states ────────────────────────────────
+   An empty container that still reserves its padding reads as a
+   loading failure. */
+.nxui-list:empty,
+.nxo-out:empty,
+.auth-error:empty {
+  display: none;
+}
+
+/* Selection is deliberately left to style.css. Its first definition
+   (lime on white) was already corrected there by a later rule using
+   --a1-40 with --text, so overriding it here would discard that fix
+   rather than build on it. */
