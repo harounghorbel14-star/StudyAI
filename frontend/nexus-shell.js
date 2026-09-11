@@ -232,7 +232,7 @@
       body.nxs-on .nx-bell{right:24px}
       body.nxs-on .cine-mode-bar{right:70px}
 
-      @media(max-width:860px){
+      @media(max-width:900px){
         .nxs-rail{width:58px}
         .nxs-rail-lbl{display:none}
         .nxs-rail-btn{width:44px;padding:11px 0}

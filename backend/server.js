@@ -508,7 +508,7 @@ app.use(cors({
 
 // Additional hardening headers (CSP, HSTS, Permissions-Policy)
 try {
- const { securityHeaders } = require('../dist/security/hardening');
+  const { securityHeaders } = require('../dist/security/hardening');
   app.use(securityHeaders());
 } catch (e) {
   console.warn('⚠️ Security headers not applied:', e.message);
@@ -569,7 +569,7 @@ const PUBLIC_FILES = new Set([
   "/index.html", "/share.html", "/design-preview.html",
   "/app.js", "/nexus-shell.js", "/sw.js",
   "/tool-engine.js", "/tools.config.js",
-  "/style.css", "/design-system.css", "/cinematic.css",
+  "/style.css", "/design-system.css", "/cinematic.css", "/nexus-motion.css",
   "/logo.svg", "/manifest.json", "/sitemap.xml", "/robots.txt", "/favicon.ico",
 ]);
 const PUBLIC_DIRS = ["/assets/", "/public/", "/icons/", "/img/"];
