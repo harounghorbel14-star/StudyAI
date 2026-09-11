@@ -226,8 +226,7 @@ body[data-mode="strategy"]::after { background: var(--atmo-strategy); }
   background: linear-gradient(135deg, var(--a1, #c6f135), transparent 50%, var(--a2, #35f1c6));
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
+          mask-composite: exclude;
   opacity: .35;
   animation: nxBreath 4s var(--ease-in-out-soft) infinite;
   pointer-events: none;
