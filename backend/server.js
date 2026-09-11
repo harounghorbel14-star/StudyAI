@@ -498,6 +498,11 @@ const audioUpload = multer({ dest: uploadDir, limits: { fileSize: 25*1024*1024 }
 // 🚀 EXPRESS APP
 // ─────────────────────────────────────────────
 const app = express();
+app.use(express.static(__dirname));
+
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
+});
 app.use(helmet());
 app.use(cors({
   origin: process.env.ALLOWED_ORIGIN || "*",
