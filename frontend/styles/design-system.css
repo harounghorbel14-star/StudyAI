@@ -274,8 +274,8 @@ body[data-mode="strategy"]::after { background: var(--atmo-strategy); }
 /* ─── 9. FOCUS MODE — calm overlay ────────────────
    Toggle body.nx-focus to dim non-focus surfaces.
    ────────────────────────────────────────────────── */
-body.nx-focus .sb,
-body.nx-focus .top,
+body.nx-focus #sidebar,
+body.nx-focus #topbar,
 body.nx-focus .auth-tabs {
   filter: brightness(.7) saturate(.85);
   transition: filter var(--dur-cine) var(--ease-out-soft);

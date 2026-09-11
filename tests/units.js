@@ -1065,6 +1065,27 @@ function testProductArchitecture() {
   assert(app.includes('NXO.resume = function'), 'orchestration resume entry exists');
   assert(shell.includes('window.NXO'), 'Home routes the prompt into orchestration');
 
+  // ── Selectors must exist ──────────────────
+  // The shell targeted #sb while the real id is #sidebar, so the old
+  // 272px sidebar stayed visible under the 76px rail and #main was
+  // shifted by the wrong amount. Every layout override is checked
+  // against the markup it claims to control.
+  const docIds = new Set([...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
+  const designCss = fs.readFileSync(path.join(root, 'design-system.css'), 'utf8');
+  const cineCss = fs.readFileSync(path.join(root, 'cinematic.css'), 'utf8');
+
+  const targeted = new Set();
+  for (const src of [shell, designCss, cineCss]) {
+    for (const m of src.matchAll(/body\.[\w-]+\s+#([\w-]+)/g)) targeted.add(m[1]);
+  }
+  assert(targeted.size > 0, 'layout overrides target concrete elements');
+  const ghosts = [...targeted].filter((id) => !docIds.has(id));
+  assertEqual(ghosts, [], 'every element a layout override targets exists in index.html');
+
+  // The rail hides the original sidebar, otherwise both navs render.
+  assert(shell.includes('#sidebar{display:none'),
+    'the shell hides the original sidebar when active');
+
   // ── Dead code ─────────────────────────────
   assert(!fs.existsSync(path.join(root, 'monitoring/tracing.js')),
     'orphan monitoring/tracing.js is removed (superseded by services/tracer.js)');

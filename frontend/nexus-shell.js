@@ -221,8 +221,13 @@
       .nxs-card-t{color:#fff;font-size:13.5px;font-weight:500;margin-bottom:3px}
       .nxs-card-d{color:#5d6b80;font-size:11.5px;line-height:1.45}
 
-      body.nxs-on #sb{display:none!important}
-      body.nxs-on #main{margin-left:76px!important;transition:margin-left .28s cubic-bezier(.2,.8,.2,1)}
+      /* The original sidebar is #sidebar (272px), not #sb. Targeting the
+         wrong id left it visible underneath the rail, so the old nav and
+         the new one overlapped and #main was pushed by the wrong amount. */
+      body.nxs-on #sidebar{display:none!important}
+      body.nxs-on #backdrop{display:none!important}
+      body.nxs-on #main{margin-left:76px!important;width:auto!important;
+        transition:margin-left .28s cubic-bezier(.2,.8,.2,1)}
       body.nxs-on.nxs-drawer-open #main{margin-left:326px!important}
       body.nxs-on .nx-bell{right:24px}
       body.nxs-on .cine-mode-bar{right:70px}
@@ -236,6 +241,7 @@
         .nxs-stage.shifted{left:58px}
         body.nxs-on #main{margin-left:58px!important}
         body.nxs-on.nxs-drawer-open #main{margin-left:58px!important}
+        body.nxs-on #sidebar{display:none!important}
         .nxs-home{padding-top:5vh}
         .nxs-home-h{font-size:25px}
       }
@@ -454,6 +460,8 @@
     closeDrawer();
     document.body.classList.remove('nxs-on');
     rail.style.display = 'none';
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar) sidebar.style.display = '';
 
     const restore = document.createElement('button');
     restore.textContent = '← Back to Nexus';
