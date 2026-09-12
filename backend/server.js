@@ -573,7 +573,7 @@ const PUBLIC_FILES = new Set([
   "/style.css", "/design-system.css", "/cinematic.css", "/nexus-motion.css",
   "/logo.svg", "/manifest.json", "/sitemap.xml", "/robots.txt", "/favicon.ico",
 ]);
-const PUBLIC_DIRS = ["/assets/", "/public/", "/icons/", "/img/"];
+const PUBLIC_DIRS = ["/assets/", "/public/", "/icons/", "/img/", "/styles/"];
 
 const serveStatic = express.static(__dirname, {
   index: false,          // "/" is handled by the SPA fallback

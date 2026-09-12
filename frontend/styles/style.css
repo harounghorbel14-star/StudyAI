@@ -58,10 +58,6 @@ html,body{height:100%;overflow:hidden}
      no background at all. Set one step below the `20` their :hover
      uses, which is what the surrounding rules imply. */
   --accent-d:   #c6f13515;
-
-  /* Text colour for anything filled with --grad. White over lime
-     measures 1.31:1; this is 15.45:1. */
-  --on-grad:    #06060a;
 }
 
 body{
@@ -118,13 +114,6 @@ input,textarea{font-family:inherit;color:inherit}
 .auth-card{
   width:100%;max-width:400px;
   position:relative;z-index:1;
-  /* The card carried no surface at all, so the form appeared as loose
-     text over the background. It needs its own plane to sit on. */
-  padding:34px 32px 30px;
-  background:linear-gradient(160deg,#13131cf2,#0d0d14f5);
-  border:1px solid var(--border2);
-  border-radius:var(--radius);
-  box-shadow:0 24px 64px #00000066, 0 0 0 1px #ffffff05 inset;
 }
 .auth-brand{
   display:flex;align-items:center;gap:12px;margin-bottom:32px;
@@ -156,12 +145,12 @@ input,textarea{font-family:inherit;color:inherit}
   padding:12px 14px;font-size:14px;
   outline:none;transition:.2s;margin-bottom:10px;
 }
-.auth-input:focus{border-color:var(--a2);box-shadow:0 0 0 3px var(--a2-15)}
+.auth-input:focus{border-color:var(--a1);box-shadow:0 0 0 3px #7c3aed18}
 .auth-input::placeholder{color:var(--t3)}
 
 .auth-btn{
   width:100%;padding:13px;
-  background:var(--grad);color:var(--on-grad);
+  background:var(--grad);color:#fff;
   border-radius:var(--radius-sm);
   font-size:14px;font-weight:600;
   margin-top:4px;transition:.2s;
@@ -605,7 +594,7 @@ input,textarea{font-family:inherit;color:inherit}
 .send-btn{
   width:36px;height:36px;flex-shrink:0;
   display:flex;align-items:center;justify-content:center;
-  background:var(--grad);color:var(--on-grad);
+  background:var(--grad);color:#fff;
   border-radius:10px;transition:.2s;
   box-shadow:var(--glow1);
 }
@@ -700,7 +689,7 @@ input,textarea{font-family:inherit;color:inherit}
 }
 .p-card.pop::after{
   content:'Popular';position:absolute;top:16px;right:-18px;
-  background:var(--grad);color:var(--on-grad);font-size:9px;font-weight:700;
+  background:var(--grad);color:#fff;font-size:9px;font-weight:700;
   padding:4px 26px;transform:rotate(35deg);letter-spacing:.5px;
 }
 .p-name{font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px}
@@ -714,7 +703,7 @@ input,textarea{font-family:inherit;color:inherit}
 .p-features li{font-size:13px;color:var(--t2);display:flex;align-items:center;gap:8px}
 .p-features li::before{content:'✓';color:var(--a2);font-weight:700}
 .p-btn{width:100%;padding:11px;border-radius:9px;font-size:13px;font-weight:500;transition:.2s}
-.p-btn.primary{background:var(--grad);color:var(--on-grad)}
+.p-btn.primary{background:var(--grad);color:#fff}
 .p-btn.primary:hover{opacity:.88;transform:translateY(-1px);box-shadow:var(--glow1)}
 .p-btn.outline{border:1px solid var(--border);color:var(--text)}
 .p-btn.outline:hover{border-color:var(--a1);background:#7c3aed10}
@@ -1895,7 +1884,7 @@ body.modal-open{overflow:hidden;}
 }
 .live-progress-fill::after{
   content:'';position:absolute;inset:0;
-  background:linear-gradient(90deg,transparent,#fff6,transparent);
+  background:linear-gradient(90deg,transparent,#fff60,transparent);
   animation: progressShine 2s linear infinite;
 }
 @keyframes progressShine{
