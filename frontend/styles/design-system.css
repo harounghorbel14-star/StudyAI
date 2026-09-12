@@ -178,18 +178,45 @@
 }
 
 /* ── Touch ───────────────────────────────────────
-   On a coarse pointer, targets below about 44px are difficult to hit
-   accurately. Only min-height is raised, so nothing reflows on a
-   mouse-driven layout. */
+   A coarse pointer needs roughly 44px to hit accurately, but the icon
+   buttons here are deliberately 30px and 36px squares. Forcing
+   min-height on them stretched every icon into a tall rectangle.
+
+   The hit area is extended with a transparent pseudo-element instead,
+   so the button keeps its exact drawn size while becoming easier to
+   tap. */
 @media (pointer: coarse) {
-  button,
-  .sb-nav-btn,
+  .sb-btn,
+  .top-btn,
+  .input-btn,
   .nxs-rail-btn,
+  .nxui-icon-btn {
+    position: relative;
+  }
+
+  .sb-btn::after,
+  .top-btn::after,
+  .input-btn::after,
+  .nxui-icon-btn::after {
+    content: "";
+    position: absolute;
+    /* Expands the target to at least 44px without moving anything. */
+    inset: 50% 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+    /* Sits behind the icon so it never covers it. */
+    z-index: -1;
+  }
+
+  /* Text buttons have room to grow, so they take the height directly. */
+  .auth-btn,
+  .auth-tab,
+  .sb-nav-btn,
   .nxs-item,
   .nxui-tab,
-  .auth-tab,
-  .nx-notif-item,
-  [role="button"] {
+  .nxui-btn,
+  .nx-notif-item {
     min-height: 44px;
   }
 

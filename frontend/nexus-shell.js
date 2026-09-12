@@ -13,6 +13,26 @@
 
   const NXS = (window.NXS = window.NXS || {});
 
+  // Stroke icons matching the set already in index.html: 24×24 box,
+  // currentColor, 2px stroke, round caps. Rendered at 19px in the rail.
+  const ICONS = {
+    home:      '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
+    projects:  '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/>',
+    build:     '<path d="m8 9-4 3 4 3"/><path d="m16 9 4 3-4 3"/><path d="M13.5 6 10.5 18"/>',
+    run:       '<circle cx="12" cy="12" r="9"/><path d="m10 8.5 6 3.5-6 3.5Z"/>',
+    grow:      '<path d="M3 20h18"/><path d="M6 20v-6M11 20V9M16 20v-9M21 20V5"/>',
+    knowledge: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5Z"/><path d="M19 18v3H6.5A2.5 2.5 0 0 1 4 18.5"/>',
+    all:       '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+  };
+
+  function icon(name, size = 19) {
+    const body = ICONS[name];
+    if (!body) return '';
+    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" ` +
+           `stroke="currentColor" stroke-width="2" stroke-linecap="round" ` +
+           `stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+  }
+
   // ─────────────────────────────────────────
   // Information architecture
   //
@@ -23,20 +43,20 @@
     {
       id: 'home',
       label: 'Home',
-      icon: '◇',
+      icon: 'home',
       tagline: 'Start anything',
     },
     {
       id: 'projects',
       label: 'Projects',
-      icon: '▤',
+      icon: 'projects',
       tagline: 'Everything Nexus is working on',
       panelOnOpen: 'renderProjects',
     },
     {
       id: 'build',
       label: 'Build',
-      icon: '◈',
+      icon: 'build',
       tagline: 'Design, code, generate',
       items: [
         { label: 'One-Prompt',   nav: 'navigate_oneprompt', primary: true,
@@ -54,7 +74,7 @@
     {
       id: 'run',
       label: 'Run',
-      icon: '◉',
+      icon: 'run',
       tagline: 'Deploy and operate',
       items: [
         { label: 'Deploy',       nav: 'navigate_deploy', primary: true },
@@ -68,7 +88,7 @@
     {
       id: 'grow',
       label: 'Grow',
-      icon: '◭',
+      icon: 'grow',
       tagline: 'Measure and expand',
       items: [
         { label: 'Business',     panel: 'renderBusiness', primary: true,
@@ -82,7 +102,7 @@
     {
       id: 'knowledge',
       label: 'Knowledge',
-      icon: '◐',
+      icon: 'knowledge',
       tagline: 'Research and remember',
       items: [
         { label: 'Research',     panel: 'renderKnowledge', primary: true,
@@ -138,16 +158,18 @@
         background:linear-gradient(180deg,rgba(14,18,30,.97),rgba(8,11,20,.97));
         border-right:1px solid rgba(255,255,255,.06);backdrop-filter:blur(24px)}
       .nxs-rail-logo{width:34px;height:34px;margin-bottom:14px;border-radius:10px;
-        background:linear-gradient(135deg,#c6f135,#35f1c6);display:flex;align-items:center;
-        justify-content:center;color:#000;font-weight:800;font-size:15px;cursor:pointer;
+        display:flex;align-items:center;justify-content:center;cursor:pointer;
         transition:transform .2s cubic-bezier(.2,.8,.2,1)}
+      .nxs-rail-logo img{display:block}
       .nxs-rail-logo:hover{transform:scale(1.06)}
       .nxs-rail-btn{width:56px;padding:9px 0;border:none;background:none;cursor:pointer;
         border-radius:11px;display:flex;flex-direction:column;align-items:center;gap:3px;
         color:#6b7a90;transition:all .18s cubic-bezier(.2,.8,.2,1);font-family:inherit}
       .nxs-rail-btn:hover{background:rgba(255,255,255,.05);color:#c3d0e0}
       .nxs-rail-btn.active{background:rgba(53,241,198,.1);color:#35f1c6}
-      .nxs-rail-ico{font-size:17px;line-height:1}
+      .nxs-rail-ico{display:flex;align-items:center;justify-content:center;
+        width:20px;height:20px;line-height:0}
+      .nxs-rail-ico svg{display:block}
       .nxs-rail-lbl{font-size:9.5px;letter-spacing:.5px;font-weight:500}
       .nxs-rail-foot{margin-top:auto;display:flex;flex-direction:column;gap:4px}
 
@@ -217,7 +239,10 @@
         border:1px solid rgba(255,255,255,.06);border-radius:13px;cursor:pointer;
         transition:all .22s cubic-bezier(.2,.8,.2,1)}
       .nxs-card:hover{border-color:rgba(53,241,198,.28);transform:translateY(-2px)}
-      .nxs-card-ico{font-size:19px;margin-bottom:9px}
+      .nxs-card-ico{display:flex;align-items:center;justify-content:center;
+        width:34px;height:34px;margin-bottom:11px;border-radius:9px;
+        background:rgba(53,241,198,.08);color:#35f1c6;line-height:0}
+      .nxs-card-ico svg{display:block}
       .nxs-card-t{color:#fff;font-size:13.5px;font-weight:500;margin-bottom:3px}
       .nxs-card-d{color:#5d6b80;font-size:11.5px;line-height:1.45}
 
@@ -272,7 +297,7 @@
 
     const logo = document.createElement('div');
     logo.className = 'nxs-rail-logo';
-    logo.textContent = 'N';
+    logo.innerHTML = '<img src="logo.svg" width="20" height="20" alt="" />';
     logo.title = 'NexusAI — Home';
     logo.onclick = () => openArea('home');
     rail.appendChild(logo);
@@ -283,7 +308,7 @@
       btn.dataset.area = area.id;
       btn.title = area.tagline;
       btn.innerHTML =
-        `<span class="nxs-rail-ico">${area.icon}</span>` +
+        `<span class="nxs-rail-ico">${icon(area.icon)}</span>` +
         `<span class="nxs-rail-lbl">${esc(area.label)}</span>`;
       btn.onclick = () => openArea(area.id);
       rail.appendChild(btn);
@@ -296,7 +321,8 @@
     const all = document.createElement('button');
     all.className = 'nxs-rail-btn';
     all.title = 'All tools (classic sidebar)';
-    all.innerHTML = '<span class="nxs-rail-ico">⋯</span><span class="nxs-rail-lbl">All</span>';
+    all.innerHTML = `<span class="nxs-rail-ico">${icon('all')}</span>` +
+                    `<span class="nxs-rail-lbl">All</span>`;
     all.onclick = showClassic;
     foot.appendChild(all);
 
@@ -506,22 +532,22 @@
 
         <div class="nxs-cards">
           <div class="nxs-card" data-go="build">
-            <div class="nxs-card-ico">◈</div>
+            <div class="nxs-card-ico">${icon('build', 20)}</div>
             <div class="nxs-card-t">Build</div>
             <div class="nxs-card-d">Code, media, voice and dev tools</div>
           </div>
           <div class="nxs-card" data-go="run">
-            <div class="nxs-card-ico">◉</div>
+            <div class="nxs-card-ico">${icon('run', 20)}</div>
             <div class="nxs-card-t">Run</div>
             <div class="nxs-card-d">Deploy, monitor and operate</div>
           </div>
           <div class="nxs-card" data-go="grow">
-            <div class="nxs-card-ico">◭</div>
+            <div class="nxs-card-ico">${icon('grow', 20)}</div>
             <div class="nxs-card-t">Grow</div>
             <div class="nxs-card-d">Metrics, growth and marketing</div>
           </div>
           <div class="nxs-card" data-go="knowledge">
-            <div class="nxs-card-ico">◐</div>
+            <div class="nxs-card-ico">${icon('knowledge', 20)}</div>
             <div class="nxs-card-t">Knowledge</div>
             <div class="nxs-card-d">Research, files and memory</div>
           </div>
