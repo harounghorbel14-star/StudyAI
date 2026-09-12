@@ -1,7 +1,12 @@
 // NexusAI v3 — app.js
 // Chat interface · Voice · Image attach · Tools sidebar
 
-const API = 'https://nexusai-production-6504.up.railway.app';
+const API = (() => {
+  const local = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+  if (local) return `${window.location.protocol}//${window.location.hostname}:3001`;
+  return window.location.origin;
+})();
+const apiUrl = (path) => /^https?:\/\//i.test(path) ? path : `${API}${path}`;
 
 // ── TOOLS ────────────────────────────────────
 const TOOLS = [
@@ -483,7 +488,7 @@ async function renderDashboard(){
 // ── API ───────────────────────────────────────
 async function api(path, opts={}) {
   const isForm = opts.body instanceof FormData;
-  const r = await fetch(API+path, {
+  const r = await fetch(apiUrl(path), {
     ...opts,
     headers:{
       ...(S.token?{Authorization:'Bearer '+S.token}:{}),
@@ -6567,7 +6572,7 @@ function selectToolFromGrid(id){
     if (token) headers.Authorization = `Bearer ${token}`;
     window.dispatchEvent(new CustomEvent('nx:ai-start'));
     try {
-      const r = await fetch(path, { ...opts, headers });
+      const r = await fetch(apiUrl(path), { ...opts, headers });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
       return data;
@@ -7123,7 +7128,7 @@ function selectToolFromGrid(id){
     if (token) headers.Authorization = `Bearer ${token}`;
     window.dispatchEvent(new CustomEvent('nx:ai-start'));
     try {
-      const r = await fetch(path, { ...opts, headers });
+      const r = await fetch(apiUrl(path), { ...opts, headers });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
       return data;
@@ -7865,7 +7870,7 @@ function selectToolFromGrid(id){
     const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     if (token) headers.Authorization = `Bearer ${token}`;
-    const r = await fetch(path, { ...opts, headers });
+    const r = await fetch(apiUrl(path), { ...opts, headers });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
     return data;
@@ -7975,6 +7980,11 @@ function selectToolFromGrid(id){
     }
 
     async function refresh() {
+      const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
+      if (!token) {
+        badge.classList.add('hidden');
+        return;
+      }
       try {
         const r = await api('/api/notifications?limit=20');
         const count = r.count?.unread || 0;
@@ -7993,6 +8003,11 @@ function selectToolFromGrid(id){
     bell.onclick = async () => {
       const isOpen = panel.classList.toggle('open');
       if (!isOpen) return;
+      const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
+      if (!token) {
+        list.innerHTML = '<div class="nx-notif-empty">Sign in to view notifications.</div>';
+        return;
+      }
       try {
         const r = await api('/api/notifications?limit=20');
         renderList(r.notifications || []);
@@ -8287,7 +8302,7 @@ function selectToolFromGrid(id){
     const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     if (token) headers.Authorization = `Bearer ${token}`;
-    const r = await fetch(path, { ...opts, headers });
+    const r = await fetch(apiUrl(path), { ...opts, headers });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
     return data;
@@ -8654,7 +8669,7 @@ function selectToolFromGrid(id){
     const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     if (token) headers.Authorization = `Bearer ${token}`;
-    const r = await fetch(path, { ...opts, headers });
+    const r = await fetch(apiUrl(path), { ...opts, headers });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
     return data;
@@ -9006,7 +9021,7 @@ function selectToolFromGrid(id){
     const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     if (token) headers.Authorization = `Bearer ${token}`;
-    const r = await fetch(path, { ...opts, headers });
+    const r = await fetch(apiUrl(path), { ...opts, headers });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
     return data;
@@ -9648,7 +9663,7 @@ function selectToolFromGrid(id){
 
     (async () => {
       try {
-        const res = await fetch(cfg.url, {
+        const res = await fetch(apiUrl(cfg.url), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -9684,7 +9699,10 @@ function selectToolFromGrid(id){
         }
       } catch (err) {
         if (err.name === 'AbortError') return;
-        handle({ type: 'error', error: err.message });
+        const message = err instanceof TypeError && /fetch|network/i.test(err.message)
+          ? 'Cannot connect to NexusAI. Start the backend with "npm run dev" and open http://localhost:3001.'
+          : err.message;
+        handle({ type: 'error', error: message });
       }
     })();
 
@@ -9697,7 +9715,7 @@ function selectToolFromGrid(id){
   /** Preview the plan without spending anything. */
   NXO.preview = async function (prompt) {
     const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
-    const res = await fetch('/api/orchestrate/plan', {
+    const res = await fetch(apiUrl('/api/orchestrate/plan'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

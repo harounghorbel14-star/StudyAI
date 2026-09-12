@@ -282,7 +282,8 @@ function listTools() { return TOOLS.map(t => ({ id:t.id, label:t.label, category
 // ─────────────────────────────────────────────
 // 🗄️  DATABASE
 // ─────────────────────────────────────────────
-const db = new Database("studyai.db");
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, "..", "studyai.db");
+const db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
@@ -574,9 +575,10 @@ const PUBLIC_FILES = new Set([
   "/logo.svg", "/manifest.json", "/sitemap.xml", "/robots.txt", "/favicon.ico",
 ]);
 const PUBLIC_DIRS = ["/assets/", "/public/", "/icons/", "/img/", "/styles/"];
- 
-const serveStatic = express.static(path.resolve(__dirname, "..", "frontend"), {
-  index: false,
+
+const FRONTEND_DIR = path.join(__dirname, "..", "frontend");
+const serveStatic = express.static(FRONTEND_DIR, {
+  index: false,          // "/" is handled by the SPA fallback
   extensions: false,
   dotfiles: "deny",
   setHeaders(res, filePath) {
@@ -587,30 +589,10 @@ const serveStatic = express.static(path.resolve(__dirname, "..", "frontend"), {
   },
 });
 
-const PUBLIC_FILE_ALIASES = new Map([
-  ["/style.css", "/styles/style.css"],
-  ["/design-system.css", "/styles/design-system.css"],
-  ["/cinematic.css", "/styles/cinematic.css"],
-]);
-
-app.use((req, res, next) => {
-  const target = PUBLIC_FILE_ALIASES.get(req.path);
-  if (!target) return next();
-
-  const originalUrl = req.url;
-  req.url = target;
-
-  return serveStatic(req, res, (err) => {
-    req.url = originalUrl;
-    next(err);
-  });
-});
-
 app.use((req, res, next) => {
   const p = req.path;
   const allowed =
     PUBLIC_FILES.has(p) || PUBLIC_DIRS.some((d) => p.startsWith(d));
-
   if (!allowed) return next();
   return serveStatic(req, res, next);
 });
@@ -4513,7 +4495,7 @@ app.use((req, res, next) => {
   if (req.method !== "GET" && req.method !== "HEAD") {
     return res.status(404).json({ error: "Not found", path: req.path });
   }
-  res.sendFile(path.join(__dirname, "index.html"), (err) => {
+  res.sendFile(path.join(FRONTEND_DIR, "index.html"), (err) => {
     if (err) next(err);
   });
 });
