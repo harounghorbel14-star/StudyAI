@@ -574,8 +574,8 @@ const PUBLIC_FILES = new Set([
   "/logo.svg", "/manifest.json", "/sitemap.xml", "/robots.txt", "/favicon.ico",
 ]);
 const PUBLIC_DIRS = ["/assets/", "/public/", "/icons/", "/img/", "/styles/"];
-
-const serveStatic = express.static(FRONTEND_DIR, {
+ 
+const serveStatic = express.static(path.resolve(__dirname, "..", "frontend"), {
   index: false,
   extensions: false,
   dotfiles: "deny",

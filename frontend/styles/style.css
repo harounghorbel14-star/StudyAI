@@ -1884,7 +1884,7 @@ body.modal-open{overflow:hidden;}
 }
 .live-progress-fill::after{
   content:'';position:absolute;inset:0;
-  background:linear-gradient(90deg,transparent,#fff60,transparent);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);
   animation: progressShine 2s linear infinite;
 }
 @keyframes progressShine{
