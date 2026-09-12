@@ -575,8 +575,8 @@ const PUBLIC_FILES = new Set([
 ]);
 const PUBLIC_DIRS = ["/assets/", "/public/", "/icons/", "/img/", "/styles/"];
 
-const serveStatic = express.static(__dirname, {
-  index: false,          // "/" is handled by the SPA fallback
+const serveStatic = express.static(FRONTEND_DIR, {
+  index: false,
   extensions: false,
   dotfiles: "deny",
   setHeaders(res, filePath) {
@@ -587,10 +587,30 @@ const serveStatic = express.static(__dirname, {
   },
 });
 
+const PUBLIC_FILE_ALIASES = new Map([
+  ["/style.css", "/styles/style.css"],
+  ["/design-system.css", "/styles/design-system.css"],
+  ["/cinematic.css", "/styles/cinematic.css"],
+]);
+
+app.use((req, res, next) => {
+  const target = PUBLIC_FILE_ALIASES.get(req.path);
+  if (!target) return next();
+
+  const originalUrl = req.url;
+  req.url = target;
+
+  return serveStatic(req, res, (err) => {
+    req.url = originalUrl;
+    next(err);
+  });
+});
+
 app.use((req, res, next) => {
   const p = req.path;
   const allowed =
     PUBLIC_FILES.has(p) || PUBLIC_DIRS.some((d) => p.startsWith(d));
+
   if (!allowed) return next();
   return serveStatic(req, res, next);
 });
