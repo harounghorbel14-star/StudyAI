@@ -441,10 +441,12 @@ router.get('/projects/:id/export', requireAuth, wrap(async (req, res) => {
 // ─────────────────────────────────────────────
 // 📊 PROJECT ANALYTICS
 // ─────────────────────────────────────────────
-router.post('/projects/:id/analytics', wrap(async (req, res) => {
+router.post('/projects/:id/analytics', requireAuth, wrap(async (req, res) => {
   const { event } = req.body;
-  const project = db.prepare(`SELECT id, metadata FROM agent_projects WHERE id = ?`)
-                    .get(req.params.id);
+  if (typeof event !== 'string' || !/^[a-zA-Z0-9_.:-]{1,64}$/.test(event))
+    return res.status(400).json({ error: 'Invalid event.' });
+  const project = db.prepare(`SELECT id, metadata FROM agent_projects WHERE id = ? AND user_id = ?`)
+                    .get(req.params.id, req.user.id);
   if (!project) return res.status(404).json({ error: 'Not found' });
 
   const meta = JSON.parse(project.metadata || '{}');

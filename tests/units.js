@@ -1411,7 +1411,11 @@ function testServing() {
 
   // Static serving existed nowhere, so GET / and every asset 404'd and
   // the frontend could not be served by Express at all.
-  assert(src.includes('express.static(__dirname'), 'static file serving is configured');
+  assert(src.includes('express.static(FRONTEND_DIR'), 'static file serving is configured');
+  // Where the frontend lives depends on the layout — server.js may sit
+  // at the root or inside backend/. Assuming __dirname broke the second.
+  assert(src.includes('FRONTEND_CANDIDATES'), 'the frontend directory is detected, not assumed');
+  assert(src.includes('path.resolve('), 'the detected path is absolute, as sendFile requires');
   assert(src.includes("dotfiles: \"deny\""), 'dotfiles are denied');
 
   // The project root holds .env, the database and every server module,
@@ -1435,7 +1439,7 @@ function testServing() {
     'file-like paths 404 instead of receiving the SPA document');
 
   // Express matches in registration order.
-  const staticAt = lineOf('express.static(__dirname');
+  const staticAt = lineOf('express.static(FRONTEND_DIR');
   const lastApi = lines.reduce((acc, l, i) =>
     /^app\.(get|post|put|delete|patch)\(["']\/api\//.test(l) ? i + 1 : acc, 0);
   const lastMount = lines.reduce((acc, l, i) =>

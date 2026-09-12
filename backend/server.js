@@ -19,6 +19,7 @@ const pdfParse     = require("pdf-parse");
 const fs           = require("fs");
 const path         = require("path");
 const { execFile } = require("child_process");
+const { safeRequest, resolvePublicHost } = require("./security/safe-http");
 
 // ─────────────────────────────────────────────
 // 🌍 Polyfill fetch
@@ -603,6 +604,10 @@ app.use((req, res, next) => {
 const generalLimiter = rateLimit({ windowMs:15*60*1000, max:200, message:{error:"Too many requests."}, standardHeaders:true, legacyHeaders:false });
 const authLimiter    = rateLimit({ windowMs:15*60*1000, max:20,  message:{error:"Too many auth attempts."}, standardHeaders:true, legacyHeaders:false });
 const aiLimiter      = rateLimit({ windowMs:60*1000,    max:20,  message:{error:"AI rate limit. Wait a minute."}, standardHeaders:true, legacyHeaders:false });
+const apiKeyLimiter  = rateLimit({ windowMs:60*1000, max:10, keyGenerator:req => {
+  const value = String(req.headers.authorization || "");
+  return `api:${require("crypto").createHash("sha256").update(value).digest("hex")}`;
+}, message:{error:"API rate limit exceeded. Try again later."}, standardHeaders:true, legacyHeaders:false });
 app.use(generalLimiter);
 
 // ─────────────────────────────────────────────
@@ -660,27 +665,25 @@ const VIP_EMAILS = [
   'ghorbelharoun16@gmail.com',
 ];
 
-function requireQuota(req, res, next) {
-  const user = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
-  if (!user) return res.status(401).json({ error:"User not found." });
-
-  // VIP = unlimited Elite
-  if (VIP_EMAILS.includes(user.email.toLowerCase())) {
-    req.dbUser = { ...user, plan:'elite', requests_today:0 };
-    return next();
-  }
-
+const consumeQuota = db.transaction((userId) => {
+  const user = db.prepare("SELECT * FROM users WHERE id=?").get(userId);
+  if (!user) return { ok:false, reason:"User not found." };
+  if (VIP_EMAILS.includes(user.email.toLowerCase())) return { ok:true, user:{ ...user, plan:'elite', requests_today:0 } };
   const today = new Date().toISOString().slice(0,10);
-  if (user.requests_reset_at !== today) {
-    db.prepare("UPDATE users SET requests_today=0,requests_reset_at=? WHERE id=?").run(today, user.id);
-    user.requests_today = 0;
-  }
   const limit = PLAN_LIMITS[user.plan] ?? PLAN_LIMITS.free;
-  if (user.requests_today >= limit) {
-    return res.status(429).json({ error:`Daily limit reached (${limit} requests). Upgrade your plan.`, plan:user.plan, limit, used:user.requests_today });
+  const update = db.prepare("UPDATE users SET requests_today=CASE WHEN requests_reset_at<>? THEN 1 ELSE requests_today+1 END, requests_reset_at=? WHERE id=? AND (requests_reset_at<>? OR requests_today<?)")
+    .run(today, today, user.id, today, limit);
+  const updated = db.prepare("SELECT * FROM users WHERE id=?").get(user.id);
+  if (update.changes !== 1) {
+    return { ok:false, reason:`Daily limit reached (${limit} requests). Upgrade your plan.`, plan:user.plan, limit, used:updated.requests_today };
   }
-  db.prepare("UPDATE users SET requests_today=requests_today+1 WHERE id=?").run(user.id);
-  req.dbUser = { ...user, requests_today:user.requests_today+1 };
+  return { ok:true, user:updated };
+});
+
+function requireQuota(req, res, next) {
+  const result = consumeQuota(req.user.id);
+  if (!result.ok) return res.status(result.reason === "User not found." ? 401 : 429).json({ error:result.reason, ...result });
+  req.dbUser = result.user;
   next();
 }
 
@@ -1585,9 +1588,14 @@ app.post("/api/automation/scrape", requireAuth, requireQuota, aiLimiter, wrap(as
   const {url, extract='main content'} = req.body;
   if(!url) return res.status(400).json({error:"Missing URL."});
   try{
-    const r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0'},signal:AbortSignal.timeout(8000)});
-    if(!r.ok)throw new Error(`HTTP ${r.status}`);
-    const html=await r.text();
+    const parsed = new URL(url);
+    if (!['http:','https:'].includes(parsed.protocol)) throw new Error('Only http and https URLs are allowed');
+    const r=await safeRequest(parsed.toString(),{
+      headers:{'User-Agent':'NexusAI-SafeFetcher/1.0','Accept':'text/html, text/plain;q=0.9'},
+      timeoutMs:8000,
+    });
+    if(r.status < 200 || r.status >= 300) throw new Error(`HTTP ${r.status}`);
+    const html=r.body;
     // Extract text from HTML
     const text=html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi,'')
       .replace(/<style[^>]*>[\s\S]*?<\/style>/gi,'')
@@ -1781,7 +1789,7 @@ app.delete("/api/keys/:id", requireAuth, wrap(async (req,res)=>{
 }));
 
 // External API endpoint (authenticated by API key)
-app.post("/v1/chat", async (req,res)=>{
+app.post("/v1/chat", apiKeyLimiter, async (req,res)=>{
   const authHeader = req.headers.authorization||'';
   const rawKey = authHeader.replace('Bearer ','').trim();
   if(!rawKey.startsWith('nex_')) return res.status(401).json({error:"Invalid API key."});
@@ -1790,9 +1798,14 @@ app.post("/v1/chat", async (req,res)=>{
   if(!keyRecord) return res.status(401).json({error:"Invalid API key."});
   const user = db.prepare(`SELECT * FROM users WHERE id=?`).get(keyRecord.user_id);
   if(!user) return res.status(401).json({error:"User not found."});
+  const quota = consumeQuota(user.id);
+  if (!quota.ok) return res.status(429).json({error:quota.reason, plan:quota.plan, limit:quota.limit, used:quota.used});
   db.prepare(`UPDATE api_keys SET last_used=datetime('now'), requests=requests+1 WHERE id=?`).run(keyRecord.id);
   const {message, system} = req.body;
-  if(!message) return res.status(400).json({error:"Missing message."});
+  if(typeof message !== 'string' || !message.trim() || message.length > 20000)
+    return res.status(400).json({error:"Message is required and must be at most 20,000 characters."});
+  if(system != null && (typeof system !== 'string' || system.length > 10000))
+    return res.status(400).json({error:"System prompt is too large."});
   const reply = await chatComplete(system||"You are NexusAI, a helpful assistant.", message, "gpt-4o");
   res.json({reply, model:"gpt-4o", provider:"NexusAI"});
 });
@@ -1805,13 +1818,8 @@ app.get("/api/credits", requireAuth, wrap(async (req,res)=>{
   res.json({credits: user?.credits||0});
 }));
 
-app.post("/api/credits/add", requireAuth, wrap(async (req,res)=>{
-  // In production: verify payment first
-  const {amount=100} = req.body;
-  db.prepare(`UPDATE users SET credits=credits+? WHERE id=?`).run(Number(amount), req.user.id);
-  const user = db.prepare(`SELECT credits FROM users WHERE id=?`).get(req.user.id);
-  res.json({ok:true, credits:user.credits});
-}));
+// Credits are provisioned only by verified payment/webhook flows. There is no
+// user-callable credit mutation endpoint.
 
 // ─────────────────────────────────────────────
 // 👥 TEAM COLLABORATION
@@ -1839,7 +1847,11 @@ app.post("/api/teams/join", requireAuth, wrap(async (req,res)=>{
 }));
 
 app.get("/api/teams/:id/members", requireAuth, wrap(async (req,res)=>{
-  const members = db.prepare(`SELECT u.email,tm.role,tm.joined_at FROM team_members tm JOIN users u ON tm.user_id=u.id WHERE tm.team_id=?`).all(Number(req.params.id));
+  const teamId = Number(req.params.id);
+  if (!Number.isInteger(teamId) || teamId < 1) return res.status(400).json({error:"Invalid team id."});
+  const authorized = db.prepare(`SELECT 1 FROM team_members WHERE team_id=? AND user_id=?`).get(teamId, req.user.id);
+  if (!authorized) return res.status(404).json({error:"Team not found."});
+  const members = db.prepare(`SELECT u.email,tm.role,tm.joined_at FROM team_members tm JOIN users u ON tm.user_id=u.id WHERE tm.team_id=?`).all(teamId);
   res.json({members});
 }));
 
@@ -1854,6 +1866,14 @@ app.get("/api/webhooks", requireAuth, wrap(async (req,res)=>{
 app.post("/api/webhooks", requireAuth, wrap(async (req,res)=>{
   const {url,events='all'} = req.body;
   if(!url) return res.status(400).json({error:"Missing URL."});
+  let parsed;
+  try {
+    parsed = new URL(url);
+    if (!['http:','https:'].includes(parsed.protocol)) throw new Error('Only http and https URLs are allowed');
+    await resolvePublicHost(parsed.hostname);
+  } catch (e) {
+    return res.status(400).json({error:`Invalid webhook URL: ${e.message}`});
+  }
   const id = db.prepare(`INSERT INTO webhooks (user_id,url,events) VALUES (?,?,?)`).run(req.user.id, url, events).lastInsertRowid;
   res.json({ok:true, id});
 }));
@@ -1866,10 +1886,11 @@ app.delete("/api/webhooks/:id", requireAuth, wrap(async (req,res)=>{
 async function triggerWebhooks(userId, event, data){
   const hooks = db.prepare(`SELECT url FROM webhooks WHERE user_id=? AND active=1`).all(userId);
   for(const hook of hooks){
-    fetch(hook.url,{
+    safeRequest(hook.url,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({event, data, timestamp:new Date().toISOString()}),
+      timeoutMs:5000,
     }).catch(()=>{});
   }
 }
