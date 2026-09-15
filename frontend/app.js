@@ -1,12 +1,50 @@
 // NexusAI v3 — app.js
 // Chat interface · Voice · Image attach · Tools sidebar
 
-const API = (() => {
-  const local = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
-  if (local) return `${window.location.protocol}//${window.location.hostname}:3001`;
-  return window.location.origin;
+// ── API endpoint resolution ──────────────────
+// One definition for the whole frontend. Everything that talks to the
+// backend resolves through here, so there is a single place to change
+// and no file can drift onto a different host.
+//
+// In production the API is served from the same origin as the page, so
+// requests are left relative: they inherit the protocol, host and port
+// automatically. That matters most on mobile, where an absolute URL to
+// a different host turns every call into a cross-origin request and a
+// stale hard-coded host fails silently.
+//
+// In development the frontend is sometimes opened from a different port
+// (Live Server, or a bundler's dev server) while the API stays on 3001,
+// so that one case is pointed at the API port explicitly.
+const API_ORIGIN = (() => {
+  const { hostname, protocol, port } = window.location;
+  const isLocal = ['localhost', '127.0.0.1', '::1'].includes(hostname);
+  const API_PORT = '3001';
+  if (isLocal && port !== API_PORT) {
+    return `${protocol}//${hostname}:${API_PORT}`;
+  }
+  return '';                      // same-origin: keep requests relative
 })();
-const apiUrl = (path) => /^https?:\/\//i.test(path) ? path : `${API}${path}`;
+
+/** Base path for API routes. Resolves to "/api" in production. */
+const API_BASE = `${API_ORIGIN}/api`;
+
+/** Kept as the origin prefix so existing `fetch(API + '/api/x')` calls work. */
+const API = API_ORIGIN;
+
+/** Absolute URLs are passed through untouched. */
+const apiUrl = (path) =>
+  /^https?:\/\//i.test(path) ? path : `${API_ORIGIN}${path}`;
+
+/** WebSocket endpoint, derived from the same rule. */
+const wsUrl = (path = '/ws') =>
+  ((API_ORIGIN || window.location.origin).replace(/^http/, 'ws')) + path;
+
+// Exposed so nexus-shell.js and any later module resolve identically
+// instead of hard-coding their own paths.
+window.API_BASE = API_BASE;
+window.API_ORIGIN = API_ORIGIN;
+window.apiUrl = apiUrl;
+window.wsUrl = wsUrl;
 
 // ── TOOLS ────────────────────────────────────
 const TOOLS = [
@@ -5271,7 +5309,7 @@ async function navigate_apikeys(){
       <div class="page-title">🔑 API Access</div>
       <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;font-size:13px;color:var(--t2)">
         Use NexusAI in your own apps.<br/>
-        <code style="background:var(--bg3);padding:4px 8px;border-radius:5px;color:var(--a2)">POST https://nexusai-production-6504.up.railway.app/v1/chat</code><br/>
+        <code style="background:var(--bg3);padding:4px 8px;border-radius:5px;color:var(--a2)">POST ${window.location.origin}/v1/chat</code><br/>
         <code style="background:var(--bg3);padding:4px 8px;border-radius:5px;color:var(--a2);display:block;margin-top:6px">Authorization: Bearer YOUR_KEY</code>
       </div>
       <button onclick="createApiKey()" style="background:var(--grad);color:#000;border:none;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:16px">+ Create API Key</button>
@@ -8094,7 +8132,8 @@ function selectToolFromGrid(id){
       this.throttleTimer = null;
       this.lastCursor = null;
       this.onMessage = options.onMessage || (() => {});
-      this.wsUrl = options.wsUrl || (location.origin.replace(/^http/, 'ws') + '/ws');
+      // Resolved through the shared rule so it follows the API, not the page.
+      this.wsUrl = options.wsUrl || wsUrl('/ws');
     }
 
     connect(user) {
@@ -9611,7 +9650,7 @@ function selectToolFromGrid(id){
             if (!evt.approval_id) { msg.textContent = 'Approval could not be recorded.'; return; }
             els.final.querySelectorAll('button').forEach(b => { b.disabled = true; });
             try {
-              await fetch(`/api/project-workspace/approvals/${evt.approval_id}/${decision}`, {
+              await fetch(apiUrl(`/api/project-workspace/approvals/${evt.approval_id}/${decision}`), {
                 method: 'POST',
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
               });
@@ -9699,9 +9738,13 @@ function selectToolFromGrid(id){
         }
       } catch (err) {
         if (err.name === 'AbortError') return;
-        const message = err instanceof TypeError && /fetch|network/i.test(err.message)
-          ? 'Cannot connect to NexusAI. Start the backend with "npm run dev" and open http://localhost:3001.'
-          : err.message;
+        const isNetwork = err instanceof TypeError && /fetch|network/i.test(err.message);
+        const isLocal = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+        const message = !isNetwork
+          ? err.message
+          : isLocal
+            ? 'Cannot reach the API. Start the backend with "npm run dev".'
+            : 'Cannot reach the API. Check your connection and try again.';
         handle({ type: 'error', error: message });
       }
     })();
