@@ -15,32 +15,37 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      # Every server file lives under backend/. The previous version ran
+      # `node --check server.js` from the checkout root, where no such
+      # file exists, so the job failed with MODULE_NOT_FOUND before
+      # checking anything.
+      #
+      # Paths are discovered rather than listed, so adding a directory
+      # under backend/ does not silently go unchecked. `-print0` and
+      # `read -r -d ''` keep it correct if a path ever contains a space.
       - name: Check syntax of all backend files
         run: |
-          set -e
-          echo "🔍 Checking server.js..."
-          node --check server.js
-          echo "🔍 Checking services/..."
-          for f in services/*.js; do node --check "$f"; done
-          echo "🔍 Checking security/..."
-          for f in security/*.js; do node --check "$f"; done
-          echo "🔍 Checking routes/..."
-          for f in routes/*.js; do node --check "$f"; done
-          echo "🔍 Checking router/..."
-          for f in router/*.js; do node --check "$f"; done
-          echo "🔍 Checking queues/..."
-          for f in queues/*.js; do node --check "$f"; done
-          echo "🔍 Checking workers/..."
-          for f in workers/*.js; do node --check "$f"; done
-          echo "🔍 Checking realtime/..."
-          for f in realtime/*.js; do node --check "$f"; done
-          echo "🔍 Checking monitoring/..."
-          for f in monitoring/*.js; do node --check "$f"; done
-          echo "🔍 Checking resilience/..."
-          for f in resilience/*.js; do node --check "$f"; done
-          echo "🔍 Checking agents/..."
-          for f in agents/*.js; do node --check "$f"; done
-          echo "✅ All files parse cleanly"
+          set -euo pipefail
+          test -d backend || { echo "backend/ not found at $(pwd)"; exit 1; }
+          count=0
+          while IFS= read -r -d '' f; do
+            node --check "$f"
+            count=$((count + 1))
+          done < <(find backend -type f -name '*.js' \
+                     -not -path '*/node_modules/*' \
+                     -not -path '*/dist/*' \
+                     -print0)
+          echo "$count backend file(s) parse cleanly"
+          test "$count" -gt 0 || { echo "no .js files found under backend/"; exit 1; }
+
+      # tests/ sits at the repository root, not under backend/.
+      - name: Check syntax of test files
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' f; do
+            node --check "$f"
+          done < <(find tests -type f -name '*.js' -not -path '*/node_modules/*' -print0)
+          echo "test files parse cleanly"
 
   typecheck:
     name: TypeScript Type Check
@@ -52,6 +57,8 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+      # The root package.json and tsconfig.json cover the whole project;
+      # tsconfig's include is already backend/**/*.ts.
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
       - name: Type check (strict mode)
@@ -73,8 +80,10 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Build TypeScript
         run: npx tsc
+      # The file in the repository is tests/units.js. The workflow asked
+      # for tests/unit.js, which does not exist.
       - name: Run unit tests
-        run: node tests/unit.js
+        run: node tests/units.js
 
   integration-test:
     name: Integration Tests
@@ -96,6 +105,21 @@ jobs:
           NODE_ENV: test
           JWT_SECRET: test-jwt-secret-do-not-use-in-prod
           DEPLOY_KEY: test-deploy-key-32-chars-1234567890
+
+  # Mirrors what Railway does: Root Directory is backend, so it installs
+  # from backend/package-lock.json with npm ci. Catching a lockfile drift
+  # here means finding it in CI rather than in a failed deployment.
+  backend-install:
+    name: Backend Lockfile (Railway parity)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: npm ci in backend
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
 
   security-audit:
     name: Security Audit
