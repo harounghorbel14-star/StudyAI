@@ -282,8 +282,7 @@ function listTools() { return TOOLS.map(t => ({ id:t.id, label:t.label, category
 // ─────────────────────────────────────────────
 // 🗄️  DATABASE
 // ─────────────────────────────────────────────
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, "..", "studyai.db");
-const db = new Database(DB_PATH);
+const db = new Database("studyai.db");
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
@@ -2147,6 +2146,7 @@ app.post("/api/search", requireAuth, requireQuota, aiLimiter, wrap(async (req, r
 }));
 app.get("/api/tools", requireAuth, (_req,res) => res.json({ tools:listTools() }));
 app.get("/health", (_req,res) => res.json({ status:"ok", timestamp:new Date().toISOString() }));
+app.get("/api/health", (_req,res) => res.json({ status:"ok", timestamp:new Date().toISOString() }));
 
 // ─────────────────────────────────────────────
 // 💡 SMART SUGGESTIONS
@@ -4757,7 +4757,7 @@ try {
   console.warn('⚠️ Realtime not attached:', e.message);
 }
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`💀 NexusAI running on port ${PORT}`);
   console.log(`   Tools loaded: ${TOOLS.length}`);
   console.log(`   Mode: ${process.env.NODE_ENV || "development"}`);
