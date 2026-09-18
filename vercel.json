@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/api/health",
+      "destination": "https://REPLACE_WITH_RAILWAY_DOMAIN/health"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://REPLACE_WITH_RAILWAY_DOMAIN/api/:path*"
+    }
+  ]
+}

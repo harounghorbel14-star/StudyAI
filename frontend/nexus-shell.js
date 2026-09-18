@@ -13,6 +13,12 @@
 
   const NXS = (window.NXS = window.NXS || {});
 
+  // Resolved through the shared helper from app.js, which loads first.
+  // The fallback keeps the shell working if it is ever loaded alone —
+  // a relative path is correct whenever the API is same-origin.
+  const toApi = (path) =>
+    (typeof window.apiUrl === 'function' ? window.apiUrl(path) : path);
+
   // ─────────────────────────────────────────
   // Information architecture
   //
@@ -608,7 +614,7 @@
     try {
       const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
       if (!token) return;
-      const res = await fetch('/api/project-workspace?limit=4', {
+      const res = await fetch(toApi('/api/project-workspace?limit=4'), {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
@@ -656,7 +662,7 @@
     try {
       const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
       if (!token) return;
-      const res = await fetch('/api/dreamspace/insights?unseen=1&limit=2', {
+      const res = await fetch(toApi('/api/dreamspace/insights?unseen=1&limit=2'), {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
@@ -695,7 +701,7 @@
     try {
       const token = (window.getAuthToken ? window.getAuthToken() : '') || localStorage.getItem('nx_t') || '';
       if (!token) { communityUnlocked = false; return; }
-      const res = await fetch('/api/community/marketplace?limit=5', {
+      const res = await fetch(toApi('/api/community/marketplace?limit=5'), {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) { communityUnlocked = false; return; }

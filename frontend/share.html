@@ -114,7 +114,20 @@ pre{
 </div>
 
 <script>
-const API='https://nexusai-production-6504.up.railway.app';
+// share.html is a standalone page and does not load app.js, so it
+// repeats the resolution rule rather than importing it.
+//
+// This was pinned to a Railway host that is no longer the backend, so
+// on nexusaitools.it.com every request left the site and failed. Same
+// origin in production; the API port only in local development.
+const API = (() => {
+  const { hostname, protocol, port } = window.location;
+  const isLocal = ['localhost', '127.0.0.1', '::1'].includes(hostname);
+  const API_PORT = '3001';
+  if (isLocal && port !== API_PORT) return `${protocol}//${hostname}:${API_PORT}`;
+  return '';                      // same-origin: keep requests relative
+})();
+const API_BASE = `${API}/api`;
 const params=new URLSearchParams(location.search);
 const shareId=params.get('id')||location.pathname.split('/').pop();
 
