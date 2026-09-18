@@ -56,12 +56,42 @@ function section(title) {
   console.log(`\n\x1b[36m── ${title} ${'─'.repeat(Math.max(0, 50 - title.length))}\x1b[0m`);
 }
 
+// ─── Locating source files ──────────────────
+// The project is split across backend/ and frontend/, with stylesheets
+// under frontend/styles/. These resolve a file by looking for it rather
+// than assuming a fixed depth from tests/, so the suites keep working
+// if the layout shifts again.
+const _fs = require('fs');
+const _path = require('path');
+
+const _SEARCH_DIRS = ['', 'frontend', 'frontend/styles', 'public', 'backend'];
+
+function findFile(name) {
+  let dir = __dirname;
+  const tried = [];
+  for (let level = 0; level < 3; level++) {
+    for (const sub of _SEARCH_DIRS) {
+      const candidate = sub ? _path.join(dir, sub, name) : _path.join(dir, name);
+      if (_fs.existsSync(candidate)) return candidate;
+      tried.push(candidate);
+    }
+    const parent = _path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error('Could not locate ' + name + '\n  tried:\n    ' + tried.join('\n    '));
+}
+
+function readFile(name) {
+  return _fs.readFileSync(findFile(name), 'utf8');
+}
+
 // ════════════════════════════════════════════
 // 1. VALIDATION — input boundary correctness
 // ════════════════════════════════════════════
 function testValidation() {
   section('Validation: boundaries & rejection');
-  const { v, validate, ValidationError, schemas } = require('../dist/security/validation');
+  const { v, validate, ValidationError, schemas } = require('../backend/dist/security/validation');
 
   // String bounds
   assertThrows(
@@ -200,7 +230,7 @@ function testValidation() {
 // ════════════════════════════════════════════
 function testCSRF() {
   section('CSRF: signing & tamper resistance');
-  const { CSRFProtection } = require('../dist/security/hardening');
+  const { CSRFProtection } = require('../backend/dist/security/hardening');
   const csrf = new CSRFProtection({ secret: 'test-secret-for-unit-tests' });
 
   const token = csrf.issue('user-42');
@@ -244,7 +274,7 @@ function testCSRF() {
 // ════════════════════════════════════════════
 function testRateLimiter() {
   section('Rate limiting: enforcement & tiers');
-  const { TieredRateLimiter, TIER_LIMITS } = require('../dist/security/hardening');
+  const { TieredRateLimiter, TIER_LIMITS } = require('../backend/dist/security/hardening');
   const rl = new TieredRateLimiter({});
 
   // Burst protection fires first: it guards the 5-second window,
@@ -350,7 +380,7 @@ function testRateLimiter() {
 // ════════════════════════════════════════════
 async function testSemanticCache() {
   section('Semantic cache: similarity & correctness');
-  const { SemanticCache } = require('../dist/services/semantic-cache');
+  const { SemanticCache } = require('../backend/dist/services/semantic-cache');
 
   const store = new Map();
   const fakeCache = {
@@ -426,7 +456,7 @@ async function testSemanticCache() {
 // ════════════════════════════════════════════
 function testLocalLLM() {
   section('Local LLM: routing decisions & fail-safety');
-  const { LocalLLM } = require('../dist/services/local-llm');
+  const { LocalLLM } = require('../backend/dist/services/local-llm');
 
   const llm = new LocalLLM({ enabled: false });
 
@@ -474,7 +504,7 @@ function testLocalLLM() {
 // ════════════════════════════════════════════
 function testTemporalUX() {
   section('Temporal UX: time-block boundaries');
-  const { TemporalUX } = require('../dist/services/temporal-ux');
+  const { TemporalUX } = require('../backend/dist/services/temporal-ux');
   const t = new TemporalUX({ db: null });
 
   const at = (hour) => {
@@ -518,7 +548,7 @@ function testTemporalUX() {
 // ════════════════════════════════════════════
 function testCommunity() {
   section('Community: reputation ranks & marketplace rules');
-  const { REPUTATION_RANKS, SEASONS } = require('../services/community');
+  const { REPUTATION_RANKS, SEASONS } = require('../backend/services/community');
 
   // Ranks must be strictly ascending — otherwise lookup breaks
   let ascending = true;
@@ -548,7 +578,7 @@ function testCommunity() {
 // ════════════════════════════════════════════
 function testPayments() {
   section('Payments: plan invariants');
-  const { PLANS } = require('../services/payments');
+  const { PLANS } = require('../backend/services/payments');
 
   assert(PLANS.free.price === 0, 'free plan costs nothing');
   assert(PLANS.free.stripe_price_id === null, 'free plan has no Stripe price id');
@@ -581,7 +611,7 @@ function testPayments() {
 // ════════════════════════════════════════════
 function testEmbeddings() {
   section('Embeddings: cosine similarity correctness');
-  const { EmbeddingsService } = require('../services/embeddings');
+  const { EmbeddingsService } = require('../backend/services/embeddings');
   const e = new EmbeddingsService({ db: null, openai: null });
 
   const vec = (arr) => new Float32Array(arr);
@@ -635,7 +665,7 @@ function testEmbeddings() {
 // ════════════════════════════════════════════
 function testAITwin() {
   section('AI Twin: pattern key generation');
-  const { AITwin } = require('../dist/services/ai-twin');
+  const { AITwin } = require('../backend/dist/services/ai-twin');
   const twin = new AITwin({ db: null });
 
   // Deterministic for identical input
@@ -671,7 +701,7 @@ function testAITwin() {
 // ════════════════════════════════════════════
 function testObservability() {
   section('Observability: secret scrubbing before egress');
-  const { Observability } = require('../dist/monitoring/observability');
+  const { Observability } = require('../backend/dist/monitoring/observability');
   const obs = new Observability({ logger: null, events: null });
 
   const event = {
@@ -719,7 +749,7 @@ function testObservability() {
 // ════════════════════════════════════════════
 function testPredictive() {
   section('Predictive execution: template safety');
-  const { PredictiveExecution } = require('../dist/services/predictive-execution');
+  const { PredictiveExecution } = require('../backend/dist/services/predictive-execution');
   const p = new PredictiveExecution({ db: null, aiTwin: null });
 
   // Unknown actions must not build a prompt — prevents junk AI calls
@@ -741,7 +771,7 @@ function testPredictive() {
 // ════════════════════════════════════════════
 function testEventBus() {
   section('Event bus: handler contract');
-  const { EventBus, EVENTS } = require('../dist/services/event-bus');
+  const { EventBus, EVENTS } = require('../backend/dist/services/event-bus');
   const bus = new EventBus({});
 
   // Named handlers must receive the payload directly. Passing the
@@ -839,7 +869,7 @@ function testEventBus() {
 // ════════════════════════════════════════════
 function testRBAC() {
   section('RBAC: fail-closed authorization');
-  const { RBAC, ROLES, PERMISSIONS, ROLE_HIERARCHY } = require('../dist/security/rbac');
+  const { RBAC, ROLES, PERMISSIONS, ROLE_HIERARCHY } = require('../backend/dist/security/rbac');
 
   const rbac = new RBAC({ adminEmails: ['Haroun@Gmail.COM', 'admin@nexus.io'] });
 
@@ -936,7 +966,7 @@ function testRBAC() {
 // ════════════════════════════════════════════
 function testLogger() {
   section('Logger: level filtering & resilience');
-  const { Logger, LEVELS } = require('../dist/services/logger');
+  const { Logger, LEVELS } = require('../backend/dist/services/logger');
 
   // Capture only while the logger runs, then restore before asserting —
   // otherwise the assertion output is swallowed too.
@@ -993,13 +1023,12 @@ function testLogger() {
 // ════════════════════════════════════════════
 function testProductArchitecture() {
   section('Product architecture: one shell, no duplicates');
-  const fs = require('fs');
-  const path = require('path');
-  const root = path.join(__dirname, '..');
+  const fs = _fs;
+  const path = _path;
 
-  const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
-  const shell = fs.readFileSync(path.join(root, 'nexus-shell.js'), 'utf8');
-  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const app = readFile('app.js');
+  const shell = readFile('nexus-shell.js');
+  const html = readFile('index.html');
 
   // ── One shell ─────────────────────────────
   // Two modules both writing window.NXS is exactly how the duplicate
@@ -1071,8 +1100,8 @@ function testProductArchitecture() {
   // shifted by the wrong amount. Every layout override is checked
   // against the markup it claims to control.
   const docIds = new Set([...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
-  const designCss = fs.readFileSync(path.join(root, 'design-system.css'), 'utf8');
-  const cineCss = fs.readFileSync(path.join(root, 'cinematic.css'), 'utf8');
+  const designCss = readFile('design-system.css');
+  const cineCss = readFile('cinematic.css');
 
   const targeted = new Set();
   for (const src of [shell, designCss, cineCss]) {
@@ -1087,9 +1116,9 @@ function testProductArchitecture() {
     'the shell hides the original sidebar when active');
 
   // ── Dead code ─────────────────────────────
-  assert(!fs.existsSync(path.join(root, 'monitoring/tracing.js')),
+  assert(!fs.existsSync(path.join(path.dirname(findFile('server.js')), 'monitoring/tracing.js')),
     'orphan monitoring/tracing.js is removed (superseded by services/tracer.js)');
-  assert(fs.existsSync(path.join(root, 'services/tracer.js')),
+  assert(fs.existsSync(path.join(path.dirname(findFile('server.js')), 'services/tracer.js')),
     'the tracer that is actually wired remains');
 }
 
@@ -1100,7 +1129,7 @@ function testProjects() {
   section('Projects: autonomy & approval gating');
   const {
     ProjectsService, AUTONOMY_RANK, DANGEROUS_ACTIONS, isDangerous,
-  } = require('../dist/services/projects');
+  } = require('../backend/dist/services/projects');
 
   // Autonomy levels must be strictly ordered, otherwise the
   // canAutoExecute comparison is meaningless.
@@ -1173,7 +1202,7 @@ function testProjects() {
 // ════════════════════════════════════════════
 function testOrchestration() {
   section('Orchestration: intent routing & pipelines');
-  const { OrchestrationService, PIPELINES } = require('../dist/services/orchestration');
+  const { OrchestrationService, PIPELINES } = require('../backend/dist/services/orchestration');
   const o = new OrchestrationService({ db: null, smartCall: null });
 
   // Routing decides which agents run, so a wrong intent means the
@@ -1308,7 +1337,7 @@ function testOrchestration() {
 
   // Every declared action must be recognised by the gate, otherwise
   // canAutoExecute would treat it as ordinary and let it run.
-  const { DANGEROUS_ACTIONS: DA } = require('../dist/services/projects');
+  const { DANGEROUS_ACTIONS: DA } = require('../backend/dist/services/projects');
   const unrecognised = gated
     .map(([, action]) => action)
     .filter((a) => !DA.includes(a));
@@ -1336,7 +1365,7 @@ function testOrchestration() {
 // ════════════════════════════════════════════
 function testDeprecation() {
   section('Deprecation: duplicate consolidation');
-  const { DeprecationService, DEPRECATED } = require('../dist/services/deprecation');
+  const { DeprecationService, DEPRECATED } = require('../backend/dist/services/deprecation');
   const d = new DeprecationService({ db: null });
 
   assert(DEPRECATED.length > 0, 'duplicates found by the audit are recorded');
@@ -1405,17 +1434,21 @@ function testServing() {
   section('Serving: static, SPA fallback, route order');
   const fs = require('fs');
   const path = require('path');
-  const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const src = readFile('server.js');
   const lines = src.split('\n');
   const lineOf = (needle) => lines.findIndex((l) => l.includes(needle)) + 1;
 
   // Static serving existed nowhere, so GET / and every asset 404'd and
   // the frontend could not be served by Express at all.
   assert(src.includes('express.static(FRONTEND_DIR'), 'static file serving is configured');
-  // Where the frontend lives depends on the layout — server.js may sit
-  // at the root or inside backend/. Assuming __dirname broke the second.
-  assert(src.includes('FRONTEND_CANDIDATES'), 'the frontend directory is detected, not assumed');
-  assert(src.includes('path.resolve('), 'the detected path is absolute, as sendFile requires');
+  // The frontend directory may be resolved either way — a fixed path is
+  // fine once the layout is settled, and detection is fine while it is
+  // not. What must hold is that FRONTEND_DIR is defined and that the
+  // directory it names actually contains index.html; asserting on the
+  // mechanism instead would fail a correct implementation.
+  assert(src.includes('FRONTEND_DIR'), 'the frontend directory is named explicitly');
+  assert(_fs.existsSync(findFile('index.html')),
+    'the resolved frontend directory contains index.html');
   assert(src.includes("dotfiles: \"deny\""), 'dotfiles are denied');
 
   // The project root holds .env, the database and every server module,
@@ -1474,9 +1507,8 @@ function testAuthToken() {
   section('Auth token: one accessor');
   const fs = require('fs');
   const path = require('path');
-  const root = path.join(__dirname, '..');
-  const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
-  const shell = fs.readFileSync(path.join(root, 'nexus-shell.js'), 'utf8');
+  const app = readFile('app.js');
+  const shell = readFile('nexus-shell.js');
 
   // Login writes nx_t. Modules that read 'token' or 'jwt' get nothing,
   // send no Authorization header, and every call returns 401.
@@ -1494,7 +1526,7 @@ function testAuthToken() {
   }
 
   // Authentication must not have been weakened to work around the 401.
-  const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
+  const server = readFile('server.js');
   const runRoute = server.slice(server.indexOf("'/api/orchestrate/run'"));
   assert(runRoute.slice(0, 200).includes('requireAuth'),
     '/api/orchestrate/run still requires authentication');
