@@ -261,7 +261,8 @@ async function run() {
   // ── Boot services ──────────────────────────────
   let services;
   try {
-    const { initServices } = require('../services');
+    // The composition root lives under backend/, not beside tests/.
+    const { initServices } = require('../backend/services');
     services = initServices(db, /*openai*/ null, {
       startWorkers: false, startBackups: false,
       startHealthMonitor: false, startSecretRotation: false,
