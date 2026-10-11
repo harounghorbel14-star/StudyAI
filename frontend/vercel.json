@@ -3,11 +3,11 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://REPLACE_WITH_RAILWAY_DOMAIN/api/:path*"
+      "destination": "https://nexusai-production-6504.up.railway.app/api/:path*"
     },
     {
       "source": "/health",
-      "destination": "https://REPLACE_WITH_RAILWAY_DOMAIN/health"
+      "destination": "https://nexusai-production-6504.up.railway.app/health"
     }
   ]
 }
