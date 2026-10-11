@@ -21,6 +21,10 @@ const path         = require("path");
 const { execFile } = require("child_process");
 const { safeRequest, resolvePublicHost } = require("./security/safe-http");
 const { adminEmails, vipEmails, isAdminEmail, isVipEmail } = require("./security/privileged");
+const { SessionService } = require("./security/sessions");
+const { PasswordResetService, validatePassword } = require("./security/password-reset");
+const guestPolicy = require("./security/guest");
+const { Mailer } = require("./services/mailer");
 
 // ─────────────────────────────────────────────
 // 🌍 Polyfill fetch
@@ -42,7 +46,7 @@ const JWT_SECRET            = process.env.JWT_SECRET;
 const BCRYPT_ROUNDS         = Number(process.env.BCRYPT_ROUNDS) || 12;
 const PORT                  = Number(process.env.PORT) || 3001;
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
-const PLAN_LIMITS           = { free:10, pro:500, elite:Infinity };
+const PLAN_LIMITS           = { guest:Number(process.env.GUEST_DAILY_REQUESTS || 5), free:10, pro:500, elite:Infinity };
 const STRIPE_PRICES         = { pro:process.env.STRIPE_PRICE_PRO, elite:process.env.STRIPE_PRICE_ELITE };
 
 // ─────────────────────────────────────────────
@@ -283,7 +287,9 @@ function listTools() { return TOOLS.map(t => ({ id:t.id, label:t.label, category
 // ─────────────────────────────────────────────
 // 🗄️  DATABASE
 // ─────────────────────────────────────────────
-const db = new Database("studyai.db");
+// DB_PATH lets the database live on a mounted volume (Railway) so
+// accounts survive redeploys, and lets tests use a throwaway file.
+const db = new Database(process.env.DB_PATH || "studyai.db");
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
@@ -614,6 +620,8 @@ app.use((req, res, next) => {
 // ─────────────────────────────────────────────
 const generalLimiter = rateLimit({ windowMs:15*60*1000, max:200, message:{error:"Too many requests."}, standardHeaders:true, legacyHeaders:false });
 const authLimiter    = rateLimit({ windowMs:15*60*1000, max:20,  message:{error:"Too many auth attempts."}, standardHeaders:true, legacyHeaders:false });
+const forgotLimiter  = rateLimit({ windowMs:60*60*1000, max:5,   message:{error:"Too many reset requests. Try again later."}, standardHeaders:true, legacyHeaders:false });
+const guestLimiter   = rateLimit({ windowMs:60*60*1000, max:Number(process.env.GUEST_SESSIONS_PER_IP_PER_HOUR || 3), message:{error:"Too many guest sessions from this network. Try again later or create a free account."}, standardHeaders:true, legacyHeaders:false });
 const aiLimiter      = rateLimit({ windowMs:60*1000,    max:20,  message:{error:"AI rate limit. Wait a minute."}, standardHeaders:true, legacyHeaders:false });
 const apiKeyLimiter  = rateLimit({ windowMs:60*1000, max:10, keyGenerator:req => {
   const value = String(req.headers.authorization || "");
@@ -660,11 +668,32 @@ function saveProject(userId, title, feature, input, output) {
 // ─────────────────────────────────────────────
 // 🔐 MIDDLEWARE
 // ─────────────────────────────────────────────
+const sessions = new SessionService(db, { secret: JWT_SECRET });
+const mailer = new Mailer({ logger: console });
+if (!mailer.isConfigured()) {
+  console.warn(`⚠️  Password-reset email is not configured (missing: ${mailer.missingConfig().join(", ")}). Reset requests are accepted but no email is sent.`);
+}
+const passwordResets = new PasswordResetService({
+  db, bcrypt, rounds: BCRYPT_ROUNDS, sessions, mailer,
+  appUrl: process.env.APP_URL || "", logger: console,
+});
+// Expired guests and stale revocations are removed hourly.
+setInterval(() => { try { sessions.purgeExpired(); } catch (_) {} }, 3_600_000).unref();
+
+// Identity, plan and guest status come from the database row (see
+// security/sessions.js), never from client-editable token claims.
 function requireAuth(req, res, next) {
   const header = req.headers["authorization"];
-  if (!header?.startsWith("Bearer ")) return res.status(401).json({ error:"Missing Authorization header." });
-  try { req.user = jwt.verify(header.slice(7), JWT_SECRET); next(); }
-  catch(err) { res.status(401).json({ error: err.name==="TokenExpiredError" ? "Token expired." : "Invalid token." }); }
+  if (!header?.startsWith("Bearer ")) return res.status(401).json({ error:"Missing Authorization header.", code:"NO_TOKEN" });
+  try {
+    req.user = sessions.verify(header.slice(7));
+  } catch (err) {
+    return res.status(401).json({ error: err.message || "Invalid token.", code: err.code || "TOKEN_INVALID" });
+  }
+  if (req.user.guest && !guestPolicy.isGuestAllowed(req.method, req.originalUrl)) {
+    return res.status(403).json({ error:"Guest mode: create a free account to use this feature.", code:"GUEST_RESTRICTED" });
+  }
+  next();
 }
 
 // ─────────────────────────────────────────────
@@ -701,38 +730,111 @@ function requireQuota(req, res, next) {
 app.post("/api/signup", authLimiter, wrap(async (req,res) => {
   const err = validateBody(req.body, ["email","password"]);
   if (err) return res.status(400).json({ error:err });
-  const { email, password } = req.body;
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error:"Invalid email format." });
-  if (password.length < 8) return res.status(400).json({ error:"Password must be at least 8 characters." });
-  if (db.prepare("SELECT id FROM users WHERE email=?").get(email.toLowerCase())) return res.status(409).json({ error:"Email already registered." });
+  const email = req.body.email.trim().toLowerCase();
+  const { password } = req.body;
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error:"Invalid email format." });
+  if (guestPolicy.isGuestEmail(email)) return res.status(400).json({ error:"Invalid email format." });
+  const pwErr = validatePassword(password);
+  if (pwErr) return res.status(400).json({ error:pwErr });
+  if (db.prepare("SELECT id FROM users WHERE email=?").get(email)) return res.status(409).json({ error:"Email already registered." });
   const hashed = await bcrypt.hash(password, BCRYPT_ROUNDS);
   let stripeCustomerId = null;
-  try { const c = await stripe.customers.create({ email:email.toLowerCase() }); stripeCustomerId = c.id; } catch(_) {}
-  db.prepare("INSERT INTO users (email,password,stripe_customer_id) VALUES (?,?,?)").run(email.toLowerCase(), hashed, stripeCustomerId);
+  try { const c = await stripe.customers.create({ email }); stripeCustomerId = c.id; } catch(_) {}
+  try {
+    db.prepare("INSERT INTO users (email,password,stripe_customer_id) VALUES (?,?,?)").run(email, hashed, stripeCustomerId);
+  } catch (e) {
+    // Two simultaneous signups for one address: the UNIQUE index decides.
+    if (/UNIQUE/i.test(e.message)) return res.status(409).json({ error:"Email already registered." });
+    throw e;
+  }
   res.status(201).json({ ok:true, message:"Account created. Free plan active." });
 }));
 
 app.post("/api/login", authLimiter, wrap(async (req,res) => {
   const err = validateBody(req.body, ["email","password"]);
   if (err) return res.status(400).json({ error:err });
-  const { email, password } = req.body;
-  const user = db.prepare("SELECT * FROM users WHERE email=?").get(email.toLowerCase());
-  const match = user
-    ? await bcrypt.compare(password, user.password)
+  const email = req.body.email.trim().toLowerCase();
+  const { password } = req.body;
+  const user = password.length <= 1024
+    ? db.prepare("SELECT * FROM users WHERE email=?").get(email)
+    : null;
+  // Guest rows have unusable passwords; never let them through here.
+  const candidate = user && !user.is_guest ? user : null;
+  const match = candidate
+    ? await bcrypt.compare(password, candidate.password)
     : await bcrypt.compare(password, "$2b$12$invalidhashfortimingprotection0000000000000");
-  if (!user || !match) return res.status(401).json({ error:"Invalid email or password." });
-  const token = jwt.sign({ id:user.id, email:user.email, plan:user.plan }, JWT_SECRET, { expiresIn:"24h" });
-  res.json({ token, expiresIn:"24h", plan:user.plan, user:{ id:user.id, email:user.email, plan:user.plan } });
+  if (!candidate || !match) return res.status(401).json({ error:"Invalid email or password." });
+  const { token, expiresAt } = sessions.issue(candidate);
+  res.json({ token, expiresIn:"24h", expiresAt, plan:candidate.plan, user:{ id:candidate.id, email:candidate.email, plan:candidate.plan } });
+}));
+
+// Ends this session server-side; the token stops working immediately.
+app.post("/api/logout", requireAuth, wrap(async (req,res) => {
+  sessions.revoke(req.user.jti, req.user.exp);
+  res.json({ ok:true });
+}));
+
+// Neutral response whether or not the account exists. Email is sent in
+// the background so response time does not reveal it either.
+app.post("/api/auth/forgot", forgotLimiter, wrap(async (req,res) => {
+  const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error:"Enter a valid email address." });
+  }
+  setImmediate(() => {
+    passwordResets.request(email).catch((e) => console.error("Password reset request failed:", e.message));
+  });
+  res.json({
+    ok:true,
+    message:"If an account exists for that email, we've sent a link to reset the password.",
+    emailConfigured: mailer.isConfigured(),
+  });
+}));
+
+app.post("/api/auth/reset", authLimiter, wrap(async (req,res) => {
+  const { token, password } = req.body || {};
+  const result = await passwordResets.reset(token, password);
+  if (!result.ok) return res.status(400).json({ error:result.error });
+  res.json({ ok:true, message:"Password updated. Sign in with your new password." });
+}));
+
+// Real, isolated guest identity — see security/guest.js.
+app.post("/api/auth/guest", guestLimiter, wrap(async (req,res) => {
+  if (process.env.GUEST_ACCESS === "off") return res.status(404).json({ error:"Guest access is disabled." });
+  const guest = await guestPolicy.createGuest(db, bcrypt);
+  const { token, expiresAt } = sessions.issue(guest, { ttl: `${guestPolicy.GUEST_TTL_HOURS()}h` });
+  res.status(201).json({
+    token, expiresAt, guest:true, plan:"guest",
+    limits:{ daily_requests: PLAN_LIMITS.guest },
+    notice:"Guest data is temporary and is deleted when the session expires.",
+  });
+}));
+
+app.get("/api/auth/config", wrap(async (_req,res) => {
+  res.json({
+    passwordReset:{ emailConfigured: mailer.isConfigured() },
+    guest:{ enabled: process.env.GUEST_ACCESS !== "off", dailyRequests: PLAN_LIMITS.guest, ttlHours: guestPolicy.GUEST_TTL_HOURS() },
+  });
 }));
 
 // ─────────────────────────────────────────────
 // 👤 USER ROUTES
 // ─────────────────────────────────────────────
 app.get("/api/me", requireAuth, wrap(async (req,res) => {
-  const user = db.prepare("SELECT id,email,plan,requests_today,requests_reset_at,created_at FROM users WHERE id=?").get(req.user.id);
+  const user = db.prepare("SELECT id,email,plan,requests_today,requests_reset_at,created_at,is_guest,guest_expires_at FROM users WHERE id=?").get(req.user.id);
   if (!user) return res.status(404).json({ error:"User not found." });
-  const limit = PLAN_LIMITS[user.plan] ?? PLAN_LIMITS.free;
-  res.json({ ...user, limit, remaining: limit===Infinity ? null : Math.max(0, limit-user.requests_today) });
+  const effectivePlan = isVipEmail(user.email) ? "elite" : user.plan;
+  const limit = PLAN_LIMITS[effectivePlan] ?? PLAN_LIMITS.free;
+  // requests_today only counts for the day in requests_reset_at.
+  const used = user.requests_reset_at === new Date().toISOString().slice(0,10) ? user.requests_today : 0;
+  const { is_guest, guest_expires_at, ...rest } = user;
+  res.json({
+    ...rest, plan: effectivePlan, requests_today: used,
+    limit: limit===Infinity ? null : limit,
+    remaining: limit===Infinity ? null : Math.max(0, limit-used),
+    guest: !!is_guest,
+    ...(is_guest ? { guest_expires_at: new Date(guest_expires_at).toISOString() } : {}),
+  });
 }));
 
 app.get("/api/history", requireAuth, wrap(async (req,res) => {
@@ -3199,8 +3301,8 @@ try {
   const { initServices } = require('./services');
   services = initServices(db, openai, {
     startWorkers: true,
-    dbPath: 'studyai.db',
-    backupDir: './backups',
+    dbPath: process.env.DB_PATH || 'studyai.db',
+    backupDir: process.env.BACKUP_DIR || path.join(path.dirname(process.env.DB_PATH || 'studyai.db'), 'backups'),
     maxBackups: 14,
   });
 
@@ -4610,9 +4712,22 @@ class RealtimeService {
     }
   }
 
+  // The socket used to trust a client-supplied user_id, so anyone
+  // could act as any user: join their workspaces, read live edits and
+  // chat, and spend their AI quota. It now requires the same session
+  // token as the HTTP API.
   _handleAuth(ws, msg) {
-    if (!msg.user_id) return this._send(ws, { type: 'error', error: 'auth requires user_id' });
-    ws.user = { id: Number(msg.user_id), email: msg.email || '', name: msg.name || 'User' };
+    let identity;
+    try {
+      identity = sessions.verify(String(msg.token || ''));
+    } catch (err) {
+      ws.user = null;
+      return this._send(ws, { type: 'auth.error', error: err.message, code: err.code });
+    }
+    if (identity.guest) {
+      return this._send(ws, { type: 'auth.error', error: 'Guest mode: create a free account to use collaboration.', code: 'GUEST_RESTRICTED' });
+    }
+    ws.user = { id: identity.id, email: identity.email, name: String(msg.name || identity.email.split('@')[0]).slice(0, 60) };
     this._send(ws, { type: 'auth.ok', user_id: ws.user.id });
   }
 
@@ -4684,6 +4799,10 @@ class RealtimeService {
     const crypto = require('crypto');
     const reqId = msg.req_id || crypto.randomBytes(6).toString('hex');
 
+    // Same daily quota as HTTP AI routes; plan comes from the database.
+    const quota = consumeQuota(ws.user.id);
+    if (!quota.ok) return this._send(ws, { type: 'ai.error', req_id: reqId, error: quota.reason });
+
     this._broadcastToRoomId(ws.workspaceId, {
       type: 'ai.thinking', req_id: reqId,
       by: { id: ws.user.id, name: ws.user.name },
@@ -4693,7 +4812,7 @@ class RealtimeService {
     try {
       const result = await this.smartCall({
         prompt, system: msg.system, task: msg.task,
-        user_id: ws.user.id, tier: msg.tier || 'free',
+        user_id: ws.user.id, tier: quota.user.plan || 'free',
       });
       this._broadcastToRoomId(ws.workspaceId, {
         type: 'ai.result', req_id: reqId,

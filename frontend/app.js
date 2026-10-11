@@ -536,67 +536,244 @@ async function api(path, opts={}) {
     body:isForm?opts.body:opts.body?JSON.stringify(opts.body):undefined,
   });
   const d = await r.json().catch(()=>({}));
-  if(!r.ok) throw new Error(d.error||'Error');
+  if(!r.ok){
+    // A token the server no longer accepts (expired, logged out
+    // elsewhere, password reset, guest expiry) ends the session here
+    // too, instead of leaving the UI half signed-in.
+    if(r.status===401 && S.token && !/^\/api\/(login|signup|auth\/)/.test(path)){
+      sessionEnded(d.code==='GUEST_EXPIRED'
+        ? 'Your guest session has expired. Sign up to keep your work.'
+        : 'Your session has ended. Please sign in again.');
+    }
+    const err=new Error(d.error||(r.status>=500?'The server had a problem. Please try again.':'Request failed.'));
+    err.status=r.status; err.code=d.code;
+    throw err;
+  }
   return d;
 }
 
 // ── AUTH ──────────────────────────────────────
 function switchTab(mode){
   S.authMode=mode;
-  document.getElementById('tab-login').classList.toggle('active',mode==='login');
-  document.getElementById('tab-signup').classList.toggle('active',mode==='signup');
-  document.getElementById('auth-btn').textContent=mode==='login'?'Continue':'Create account';
-  document.getElementById('auth-heading').textContent=mode==='login'?'Welcome back':'Create account';
-  document.getElementById('auth-subtext').textContent=mode==='login'?'Sign in to continue':'Start for free';
-  document.getElementById('auth-error').textContent='';
+  const login=mode==='login';
+  for(const [id,on] of [['tab-login',login],['tab-signup',!login]]){
+    const t=document.getElementById(id);
+    t.classList.toggle('active',on); t.setAttribute('aria-selected',String(on));
+  }
+  document.getElementById('auth-btn').textContent=login?'Continue':'Create account';
+  document.getElementById('auth-heading').textContent=login?'Welcome back':'Create account';
+  document.getElementById('auth-subtext').textContent=login?'Sign in to continue':'Start for free';
+  document.getElementById('auth-forgot-link').hidden=!login;
+  document.getElementById('auth-password').setAttribute('autocomplete',login?'current-password':'new-password');
+  clearAuthErrors();
 }
 
-async function handleAuth(){
+const AUTH_VIEWS={
+  credentials:null,
+  forgot:['Reset your password','Enter your account email and we\'ll send you a reset link.'],
+  reset:['Choose a new password','Use at least 8 characters.'],
+};
+function showAuthView(view){
+  for(const v of Object.keys(AUTH_VIEWS)) document.getElementById('auth-view-'+v).hidden=(v!==view);
+  if(view==='credentials'){ switchTab(S.authMode||'login'); document.getElementById('auth-email').focus(); return; }
+  const [h,sub]=AUTH_VIEWS[view];
+  document.getElementById('auth-heading').textContent=h;
+  document.getElementById('auth-subtext').textContent=sub;
+  if(view==='forgot'){
+    const f=document.getElementById('forgot-email');
+    f.value=document.getElementById('auth-email').value.trim();
+    document.getElementById('forgot-msg').textContent='';
+    f.focus();
+  }
+  if(view==='reset'){ document.getElementById('reset-error').textContent=''; document.getElementById('reset-password').focus(); }
+}
+
+/** Show/hide a password without touching its value or submitting. */
+function togglePasswordVisibility(btn){
+  const input=document.getElementById(btn.dataset.target);
+  const show=input.type==='password';
+  const {selectionStart,selectionEnd}=input;
+  input.type=show?'text':'password';
+  btn.setAttribute('aria-pressed',String(show));
+  btn.setAttribute('aria-label',show?'Hide password':'Show password');
+  input.focus();
+  try{ input.setSelectionRange(selectionStart,selectionEnd); }catch(_){}
+}
+
+const EMAIL_RE=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function setFieldError(id,msg){
+  const input=document.getElementById(id);
+  input.setAttribute('aria-invalid',msg?'true':'false');
+  const out=document.getElementById(id+'-err');
+  if(out) out.textContent=msg||'';
+}
+function clearAuthErrors(){
+  setFieldError('auth-email',''); setFieldError('auth-password','');
+  document.getElementById('auth-error').textContent='';
+}
+function setBusy(btn,busy,label){
+  btn.disabled=busy; btn.setAttribute('aria-busy',String(busy));
+  if(label) btn.textContent=label;
+}
+
+function storeSession(token,email){
+  S.token=token;
+  localStorage.setItem('nx_t',token);
+  if(email){ localStorage.setItem('nx_email',email); S.rememberedEmail=email; }
+}
+
+async function handleAuth(ev){
+  ev?.preventDefault?.();
   const email=document.getElementById('auth-email').value.trim();
   const password=document.getElementById('auth-password').value;
   const err=document.getElementById('auth-error');
-  err.textContent='';
-  if(!email||!password){err.textContent='Please fill all fields.';return;}
+  clearAuthErrors();
+  let bad=false;
+  if(!email){ setFieldError('auth-email','Enter your email address.'); bad=true; }
+  else if(!EMAIL_RE.test(email)){ setFieldError('auth-email','That doesn\'t look like a valid email address.'); bad=true; }
+  if(!password){ setFieldError('auth-password','Enter your password.'); bad=true; }
+  else if(S.authMode==='signup'&&password.length<8){ setFieldError('auth-password','Use at least 8 characters.'); bad=true; }
+  if(bad) return;
   const btn=document.getElementById('auth-btn');
-  btn.textContent='...';btn.disabled=true;
+  const idle=S.authMode==='login'?'Continue':'Create account';
+  setBusy(btn,true,S.authMode==='login'?'Signing in…':'Creating account…');
   try{
     if(S.authMode==='signup'){
       await api('/api/signup',{method:'POST',body:{email,password}});
       toast('Account created!','success');
     }
     const d=await api('/api/login',{method:'POST',body:{email,password}});
-    S.token=d.token;
-    localStorage.setItem('nx_t',d.token);
-    localStorage.setItem('nx_email',email); // ✅ remember email
-    S.rememberedEmail=email;
+    storeSession(d.token,email);
+    document.getElementById('auth-password').value='';
     await init();
-  }catch(e){err.textContent=e.message;}
-  finally{btn.disabled=false;btn.textContent=S.authMode==='login'?'Continue':'Create account';}
+  }catch(e){
+    err.textContent=e.status===429?'Too many attempts. Please wait a few minutes and try again.'
+      :(e instanceof TypeError?'Can\'t reach the server. Check your connection and try again.':e.message);
+  }finally{ setBusy(btn,false,idle); }
 }
 
-function logout(){
-  S.token='';S.user=null;
-  localStorage.removeItem('nx_t');
+async function handleForgot(ev){
+  ev?.preventDefault?.();
+  const email=document.getElementById('forgot-email').value.trim();
+  const msg=document.getElementById('forgot-msg');
+  if(!EMAIL_RE.test(email)){ msg.textContent='Enter a valid email address.'; return; }
+  const btn=document.getElementById('forgot-btn');
+  setBusy(btn,true,'Sending…');
+  try{
+    const d=await api('/api/auth/forgot',{method:'POST',body:{email}});
+    msg.textContent=d.message+(d.emailConfigured===false?' (Note: email delivery is not configured on this server yet, so no message will arrive. Please contact support.)':'');
+  }catch(e){ msg.textContent=e.message; }
+  finally{ setBusy(btn,false,'Send reset link'); }
+}
+
+async function handleReset(ev){
+  ev?.preventDefault?.();
+  const p1=document.getElementById('reset-password').value;
+  const p2=document.getElementById('reset-password2').value;
+  const err=document.getElementById('reset-error');
+  err.textContent='';
+  if(p1.length<8){ err.textContent='Use at least 8 characters.'; return; }
+  if(p1!==p2){ err.textContent='The passwords don\'t match.'; return; }
+  const btn=document.getElementById('reset-btn');
+  setBusy(btn,true,'Saving…');
+  try{
+    await api('/api/auth/reset',{method:'POST',body:{token:S.resetToken,password:p1}});
+    S.resetToken='';
+    toast('Password updated. Sign in with your new password.','success');
+    document.getElementById('reset-password').value='';
+    document.getElementById('reset-password2').value='';
+    showAuthView('credentials');
+  }catch(e){ err.textContent=e.message; }
+  finally{ setBusy(btn,false,'Set new password'); }
+}
+
+async function continueAsGuest(){
+  const btn=document.getElementById('auth-guest-btn');
+  const err=document.getElementById('auth-error');
+  err.textContent='';
+  setBusy(btn,true,'Starting guest session…');
+  try{
+    const d=await api('/api/auth/guest',{method:'POST'});
+    storeSession(d.token);
+    localStorage.removeItem('nx_email');
+    await init();
+    toast(d.notice||'Guest session started.','info');
+  }catch(e){ err.textContent=e.message; }
+  finally{ setBusy(btn,false,'Continue as Guest'); }
+}
+
+function showAuthOverlay(message){
+  // Anything layered over the app (first-run onboarding, modals) must
+  // not stay on top of the sign-in form after the session ends.
+  document.querySelectorAll('.nx-onb-overlay').forEach((el)=>el.remove());
   document.getElementById('auth-overlay').style.display='flex';
   document.getElementById('app').style.display='none';
+  document.getElementById('guest-pill').hidden=true;
   closeSidebar();
+  showAuthView('credentials');
+  if(message) document.getElementById('auth-error').textContent=message;
 }
+
+function clearLocalSession(){
+  S.token='';S.user=null;
+  localStorage.removeItem('nx_t');
+}
+
+function sessionEnded(message){
+  if(!S.token) return;
+  clearLocalSession();
+  showAuthOverlay(message);
+}
+
+/** Leave guest mode for the sign-up or sign-in form. */
+async function leaveGuestMode(mode){
+  await logout();
+  switchTab(mode||'signup');
+}
+
+async function logout(){
+  const token=S.token;
+  clearLocalSession();
+  // Revoke server-side so the token stops working everywhere.
+  if(token){
+    try{ await fetch(apiUrl('/api/logout'),{method:'POST',headers:{Authorization:'Bearer '+token}}); }catch(_){}
+  }
+  showAuthOverlay();
+}
+
+// Password-reset links arrive as /?reset=<token>. The token is moved
+// into memory and removed from the address bar and history at once.
+(function captureResetToken(){
+  try{
+    const url=new URL(window.location.href);
+    const t=url.searchParams.get('reset');
+    if(!t) return;
+    S.resetToken=t;
+    url.searchParams.delete('reset');
+    history.replaceState(null,'',url.pathname+(url.search||'')+url.hash);
+    const open=()=>{ document.getElementById('auth-overlay').style.display='flex'; showAuthView('reset'); };
+    if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',open); else open();
+  }catch(_){}
+})();
 
 // ── INIT ──────────────────────────────────────
 async function init(){
-  try{S.user=await api('/api/me');}catch(e){logout();return;}
+  if(S.resetToken) return;   // a reset link takes priority over a stored session
+  try{S.user=await api('/api/me');}catch(e){ clearLocalSession(); showAuthOverlay(e.status===401?'':e.message); return; }
   document.getElementById('auth-overlay').style.display='none';
   document.getElementById('app').style.display='block';
   const email=S.user?.email||'';
   const plan=S.user?.plan||'free';
   const used=S.user?.requests_today||0;
-  const limit=plan==='elite'?'∞':plan==='pro'?500:10;
+  const limit=S.user?.limit==null?'∞':S.user.limit;
+  const isGuest=!!S.user?.guest;
+  document.getElementById('guest-pill').hidden=!isGuest;
   document.getElementById('sb-av').textContent=email[0]?.toUpperCase()||'U';
-  document.getElementById('sb-email').textContent=email;
+  document.getElementById('sb-email').textContent=isGuest?'Guest':email;
   document.getElementById('sb-plan').textContent=`${plan.charAt(0).toUpperCase()+plan.slice(1)} · ${used}/${limit}`;
   document.getElementById('usage-pill').textContent=`${used}/${limit}`;
   // Remember email for next visit
-  localStorage.setItem('nx_email',email);
+  if(!isGuest) localStorage.setItem('nx_email',email);
   renderToolList('');
   loadHistory();
   renderTemplates();
@@ -607,8 +784,8 @@ async function init(){
   // Auto greeting
   setTimeout(()=>{
     const hour=new Date().getHours();
-    const timeGreet=hour<12?'Good morning':'hour'<18?'Good afternoon':'Good evening';
-    const name=(S.user?.email||'').split('@')[0];
+    const timeGreet=hour<12?'Good morning':hour<18?'Good afternoon':'Good evening';
+    const name=S.user?.guest?'there':(S.user?.email||'').split('@')[0];
     const greetings=[
       `${timeGreet}, **${name}**! 👋\n\nI'm NexusAI — your AI assistant with 150+ tools. What would you like to create today?`,
       `Hey **${name}**! ✨\n\nReady to create something amazing? Choose a tool from the sidebar or just tell me what you need.`,
@@ -8151,7 +8328,7 @@ function selectToolFromGrid(id){
 
     _onOpen() {
       this.reconnectDelay = 1000;
-      this._send({ type: 'auth', user_id: this.user.id, email: this.user.email, name: this.user.name });
+      this._send({ type: 'auth', token: (window.getAuthToken ? window.getAuthToken() : localStorage.getItem('nx_t')) || '', name: this.user.name });
     }
 
     _onMessage(e) {
