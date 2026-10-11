@@ -20,6 +20,7 @@ const fs           = require("fs");
 const path         = require("path");
 const { execFile } = require("child_process");
 const { safeRequest, resolvePublicHost } = require("./security/safe-http");
+const { adminEmails, vipEmails, isAdminEmail, isVipEmail } = require("./security/privileged");
 
 // ─────────────────────────────────────────────
 // 🌍 Polyfill fetch
@@ -499,6 +500,14 @@ const audioUpload = multer({ dest: uploadDir, limits: { fileSize: 25*1024*1024 }
 // 🚀 EXPRESS APP
 // ─────────────────────────────────────────────
 const app = express();
+// Railway terminates TLS at its edge proxy, so without this every request
+// appears to come from the proxy and all users share one rate-limit
+// bucket — 20 failed logins from anyone would lock everyone out.
+// TRUST_PROXY is the number of proxy hops in front of the app: 1 for
+// Railway alone; 2 when all traffic arrives via the Vercel rewrite.
+app.set("trust proxy", Number.isInteger(Number(process.env.TRUST_PROXY)) && process.env.TRUST_PROXY !== ""
+  ? Number(process.env.TRUST_PROXY)
+  : 1);
 app.use(helmet());
 app.use(cors({
   origin: process.env.ALLOWED_ORIGIN || "*",
@@ -509,7 +518,7 @@ app.use(cors({
 
 // Additional hardening headers (CSP, HSTS, Permissions-Policy)
 try {
-  const { securityHeaders } = require('../dist/security/hardening');
+  const { securityHeaders } = require('./dist/security/hardening');
   app.use(securityHeaders());
 } catch (e) {
   console.warn('⚠️ Security headers not applied:', e.message);
@@ -576,6 +585,7 @@ const PUBLIC_FILES = new Set([
 const PUBLIC_DIRS = ["/assets/", "/public/", "/icons/", "/img/", "/styles/"];
 
 const FRONTEND_DIR = path.join(__dirname, "..", "frontend");
+const FRONTEND_AVAILABLE = fs.existsSync(path.join(FRONTEND_DIR, "index.html"));
 const serveStatic = express.static(FRONTEND_DIR, {
   index: false,          // "/" is handled by the SPA fallback
   extensions: false,
@@ -660,16 +670,13 @@ function requireAuth(req, res, next) {
 // ─────────────────────────────────────────────
 // 👑 VIP WHITELIST — Free Elite access
 // ─────────────────────────────────────────────
-const VIP_EMAILS = [
-  'haroun.ghorbel@gmail.com',
-  'harounghorbel14@gmail.com',
-  'ghorbelharoun16@gmail.com',
-];
+// Configured through VIP_EMAILS / ADMIN_EMAILS — see security/privileged.js.
+const VIP_EMAILS = vipEmails();
 
 const consumeQuota = db.transaction((userId) => {
   const user = db.prepare("SELECT * FROM users WHERE id=?").get(userId);
   if (!user) return { ok:false, reason:"User not found." };
-  if (VIP_EMAILS.includes(user.email.toLowerCase())) return { ok:true, user:{ ...user, plan:'elite', requests_today:0 } };
+  if (isVipEmail(user.email)) return { ok:true, user:{ ...user, plan:'elite', requests_today:0 } };
   const today = new Date().toISOString().slice(0,10);
   const limit = PLAN_LIMITS[user.plan] ?? PLAN_LIMITS.free;
   const update = db.prepare("UPDATE users SET requests_today=CASE WHEN requests_reset_at<>? THEN 1 ELSE requests_today+1 END, requests_reset_at=? WHERE id=? AND (requests_reset_at<>? OR requests_today<?)")
@@ -1644,10 +1651,8 @@ app.post("/api/queue/:id/retry", requireAuth, wrap(async (req,res)=>{
   res.json({ok:true});
 }));
 
-const ADMIN_EMAILS = ['haroun.ghorbel@gmail.com','harounghorbel14@gmail.com','ghorbelharoun16@gmail.com'];
-
 function requireAdmin(req,res,next){
-  if(!ADMIN_EMAILS.includes(req.user?.email?.toLowerCase()))
+  if(!isAdminEmail(req.user?.email))
     return res.status(403).json({error:"Admin access required."});
   next();
 }
@@ -1767,7 +1772,7 @@ const crypto = require('crypto');
 
 app.get("/api/keys", requireAuth, wrap(async (req,res)=>{
   const user = db.prepare(`SELECT plan FROM users WHERE id=?`).get(req.user.id);
-  if(!['pro','elite'].includes(user?.plan) && !VIP_EMAILS.includes(req.user.email))
+  if(!['pro','elite'].includes(user?.plan) && !isVipEmail(req.user.email))
     return res.status(403).json({error:"API access requires Pro or Elite plan."});
   const keys = db.prepare(`SELECT id,name,last_used,requests,created_at FROM api_keys WHERE user_id=?`).all(req.user.id);
   res.json({keys});
@@ -1775,7 +1780,7 @@ app.get("/api/keys", requireAuth, wrap(async (req,res)=>{
 
 app.post("/api/keys", requireAuth, wrap(async (req,res)=>{
   const user = db.prepare(`SELECT plan FROM users WHERE id=?`).get(req.user.id);
-  if(!['pro','elite'].includes(user?.plan) && !VIP_EMAILS.includes(req.user.email))
+  if(!['pro','elite'].includes(user?.plan) && !isVipEmail(req.user.email))
     return res.status(403).json({error:"API access requires Pro or Elite plan."});
   const rawKey = 'nex_'+crypto.randomBytes(24).toString('hex');
   const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
@@ -3487,10 +3492,14 @@ app.post('/api/workspaces/:id/invite', requireAuth, requireServices, wrap(async 
   }
   const { email, role } = req.body || {};
   if (!email) return res.status(400).json({ error: 'email required' });
-  const invite = services.workspaces.createInvite({
-    workspace_id: id, email, role: role || 'member', invited_by: req.user.id,
-  });
-  res.json(invite);
+  try {
+    const invite = services.workspaces.createInvite({
+      workspace_id: id, email, role: role || 'member', invited_by: req.user.id,
+    });
+    res.json(invite);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 }));
 
 app.post('/api/workspaces/accept/:token', requireAuth, requireServices, wrap(async (req, res) => {
@@ -3507,8 +3516,12 @@ app.put('/api/workspaces/:id/members/:userId', requireAuth, requireServices, wra
   }
   const { role } = req.body || {};
   if (!role) return res.status(400).json({ error: 'role required' });
-  const ok = services.workspaces.updateMemberRole(wsId, targetId, role, req.user.id);
-  res.json({ ok });
+  try {
+    const ok = services.workspaces.updateMemberRole(wsId, targetId, role, req.user.id);
+    res.json({ ok });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 }));
 
 app.delete('/api/workspaces/:id/members/:userId', requireAuth, requireServices, wrap(async (req, res) => {
@@ -4495,6 +4508,10 @@ app.use((req, res, next) => {
   if (req.method !== "GET" && req.method !== "HEAD") {
     return res.status(404).json({ error: "Not found", path: req.path });
   }
+  // On Railway the service root is backend/, so frontend/ is not
+  // deployed (Vercel serves it). Answer that case with a plain 404
+  // instead of logging an ENOENT error for every page request.
+  if (!FRONTEND_AVAILABLE) return res.status(404).json({ error: "Frontend is served separately." });
   res.sendFile(path.join(FRONTEND_DIR, "index.html"), (err) => {
     if (err) next(err);
   });

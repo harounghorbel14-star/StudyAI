@@ -8,16 +8,18 @@
     "dev": "tsc && nodemon backend/server.js",
     "test:syntax": "node tests/syntax.js",
     "stripe:listen": "stripe listen --forward-to localhost:3001/api/stripe/webhook",
-    "migrate:pg": "node scripts/migrate-to-postgres.js",
-    "deploy": "node scripts/deploy.js",
+    "migrate:pg": "node backend/scripts/migrate-to-postgres.js",
+    "deploy": "node backend/scripts/deploy.js",
     "test:e2e": "playwright test",
-    "test:unit": "node tests/unit.js",
+    "test:unit": "node tests/units.js",
     "test:load": "node tests/load.js",
-    "test:all": "node tests/unit.js && node tests/integration-mock.js",
+    "test:all": "node tests/units.js && node tests/integration-mock.js && node tests/security-phase1.js",
     "build": "tsc",
     "build:watch": "tsc --watch",
     "typecheck": "tsc --noEmit",
-    "prestart": "tsc"
+    "prestart": "tsc",
+    "test:security": "node tests/security-phase1.js",
+    "test": "npm run build && npm run test:all"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",
@@ -51,5 +53,8 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
   }
 }

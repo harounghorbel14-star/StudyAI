@@ -6,24 +6,24 @@
   "scripts": {
     "start": "node server.js",
     "dev": "tsc -p ../tsconfig.json && nodemon server.js",
-    "test": "tsc && node tests/unit.js && node tests/integration-mock.js",
+    "test": "tsc && node ../tests/units.js && node ../tests/integration-mock.js && node ../tests/security-phase1.js",
     "test:syntax": "node ../tests/syntax.js",
     "stripe:listen": "stripe listen --forward-to localhost:3001/api/stripe/webhook",
     "migrate:pg": "node scripts/migrate-to-postgres.js",
     "deploy": "node scripts/deploy.js",
-    "test:e2e": "playwright test",
-    "test:unit": "node tests/unit.js",
-    "test:load": "node tests/load.js",
-    "test:all": "node tests/unit.js && node tests/integration-mock.js",
+    "test:e2e": "playwright test -c ../playwright.config.js",
+    "test:unit": "node ../tests/units.js",
+    "test:load": "node ../tests/load.js",
+    "test:all": "node ../tests/units.js && node ../tests/integration-mock.js",
     "build": "tsc",
     "build:watch": "tsc --watch",
     "typecheck": "tsc --noEmit",
-    "prestart": "tsc"
+    "test:security": "node ../tests/security-phase1.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",
     "@upstash/redis": "^1.31.0",
-    "bcrypt": "^5.1.1",
+    "bcrypt": "^6.0.0",
     "better-sqlite3": "^9.4.3",
     "bullmq": "^5.7.0",
     "compression": "^1.7.4",
@@ -51,6 +51,9 @@
     "@types/node": "^20.12.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": "18.20.8"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
   }
 }

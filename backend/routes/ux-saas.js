@@ -5,6 +5,8 @@ const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
 
+const { isAdminEmail } = require('../security/privileged');
+
 module.exports = (db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete, VIP_EMAILS) => {
 
 // ── DB Tables ─────────────────────────────────
@@ -129,7 +131,7 @@ router.get('/features', wrap(async (req,res)=>{
 }));
 
 router.post('/features', requireAuth, wrap(async (req,res)=>{
-  if(!VIP_EMAILS.includes(req.user.email.toLowerCase())) return res.status(403).json({error:'Admin only.'});
+  if(!isAdminEmail(req.user.email)) return res.status(403).json({error:'Admin only.'});
   const {name, enabled=1, rollout_pct=100, description} = req.body;
   if(!name) return res.status(400).json({error:'Missing name.'});
   db.prepare(`INSERT OR REPLACE INTO feature_flags (name,enabled,rollout_pct,description) VALUES (?,?,?,?)`).run(name,enabled,rollout_pct,description||'');
@@ -295,7 +297,7 @@ router.post('/integrations/trigger', requireAuth, requireQuota, aiLimiter, wrap(
 
 // ── 16. SaaS Metrics Dashboard ────────────────
 router.get('/metrics', requireAuth, wrap(async (req,res)=>{
-  if(!VIP_EMAILS.includes(req.user.email.toLowerCase())){
+  if(!isAdminEmail(req.user.email)){
     // Return user's own metrics
     const myMetrics = {
       total_requests: db.prepare(`SELECT COUNT(*) as c FROM conversations WHERE user_id=? AND role='user'`).get(req.user.id).c,

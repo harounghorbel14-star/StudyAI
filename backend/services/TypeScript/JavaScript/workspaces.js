@@ -6,6 +6,10 @@ const crypto = require('crypto');
 
 const ROLES = Object.freeze({ OWNER: 'owner', ADMIN: 'admin', MEMBER: 'member', VIEWER: 'viewer' });
 
+// Roles that can be granted through invites or role changes. 'owner' is
+// deliberately absent: it is set once, at creation.
+const ASSIGNABLE_ROLES = [ROLES.ADMIN, ROLES.MEMBER, ROLES.VIEWER];
+
 const PERMISSIONS = {
   [ROLES.OWNER]:  ['read', 'write', 'delete', 'invite', 'manage', 'transfer'],
   [ROLES.ADMIN]:  ['read', 'write', 'delete', 'invite', 'manage'],
@@ -170,10 +174,27 @@ class WorkspacesService {
     } catch (_) { return false; }
   }
 
+  // Ownership is only ever held by the creator (there is no transfer
+  // flow), and only the owner may grant, change or revoke admin. Without
+  // this an admin could promote themselves to owner, demote the real
+  // owner, or invite a second account as owner.
+  _assertCanAssign(workspaceId, actorId, targetRole, newRole) {
+    if (newRole !== undefined && !ASSIGNABLE_ROLES.includes(newRole)) {
+      throw new Error('Invalid role');
+    }
+    if (targetRole === ROLES.OWNER) throw new Error('Cannot change the workspace owner');
+    const actorRole = this.getMemberRole(workspaceId, actorId);
+    if ((newRole === ROLES.ADMIN || targetRole === ROLES.ADMIN) && actorRole !== ROLES.OWNER) {
+      throw new Error('Only the owner can manage admins');
+    }
+  }
+
   removeMember(workspaceId, userId, removedBy) {
+    const role = this.getMemberRole(workspaceId, userId);
+    if (role === ROLES.OWNER) throw new Error('Cannot remove owner');
+    // Leaving a workspace yourself is always allowed.
+    if (Number(userId) !== Number(removedBy)) this._assertCanAssign(workspaceId, removedBy, role);
     try {
-      const role = this.getMemberRole(workspaceId, userId);
-      if (role === ROLES.OWNER) throw new Error('Cannot remove owner');
       this.db.prepare(`DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?`)
         .run(workspaceId, userId);
       this._activity({ workspace_id: workspaceId, user_id: removedBy, action: 'member.removed', target_id: userId });
@@ -182,9 +203,10 @@ class WorkspacesService {
   }
 
   updateMemberRole(workspaceId, userId, newRole, updatedBy) {
-    if (!ROLES[newRole.toUpperCase()] && !Object.values(ROLES).includes(newRole)) {
-      throw new Error('Invalid role');
-    }
+    newRole = String(newRole || '').toLowerCase();
+    const targetRole = this.getMemberRole(workspaceId, userId);
+    if (!targetRole) throw new Error('Not a member of this workspace');
+    this._assertCanAssign(workspaceId, updatedBy, targetRole, newRole);
     try {
       this.db.prepare(`UPDATE workspace_members SET role = ? WHERE workspace_id = ? AND user_id = ?`)
         .run(newRole, workspaceId, userId);
@@ -195,6 +217,8 @@ class WorkspacesService {
 
   // ─── Invites ─────────────────────────────
   createInvite({ workspace_id, email, role = ROLES.MEMBER, invited_by, ttl_hours = 168 }) {
+    role = String(role || ROLES.MEMBER).toLowerCase();
+    this._assertCanAssign(workspace_id, invited_by, undefined, role);
     const token = crypto.randomBytes(24).toString('hex');
     const expires_at = Date.now() + ttl_hours * 60 * 60 * 1000;
 

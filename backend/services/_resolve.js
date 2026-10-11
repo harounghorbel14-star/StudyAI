@@ -16,7 +16,10 @@
 const path = require('path');
 const fs = require('fs');
 
-const ROOT = path.resolve(__dirname, '../..');
+// backend/ — both tsconfigs (repo root and backend/) emit to backend/dist,
+// so this works whether the app is started from the repo root or with
+// backend/ as the deploy root (Railway).
+const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 
 const cache = new Map();
@@ -31,24 +34,24 @@ function load(relativePath) {
   if (cache.has(relativePath)) return cache.get(relativePath);
 
   const compiled = path.join(DIST, `${relativePath}.js`);
-const typescriptCompiled = path.join(
-  DIST,
-  relativePath.split('/').slice(0, -1).join('/'),
-  'TypeScript',
-  relativePath.split('/').pop() + '.js'
-);
-const original = path.join(ROOT, `${relativePath}.js`);
+  const typescriptCompiled = path.join(
+    DIST,
+    path.dirname(relativePath),
+    'TypeScript',
+    `${path.basename(relativePath)}.js`
+  );
+  const original = path.join(ROOT, `${relativePath}.js`);
   let resolved;
   if (fs.existsSync(compiled)) {
-  resolved = require(compiled);
-} else if (fs.existsSync(typescriptCompiled)) {
-  resolved = require(typescriptCompiled);
-} else if (fs.existsSync(original)) {
+    resolved = require(compiled);
+  } else if (fs.existsSync(typescriptCompiled)) {
+    resolved = require(typescriptCompiled);
+  } else if (fs.existsSync(original)) {
     resolved = require(original);
   } else {
     throw new Error(
       `Cannot resolve module "${relativePath}" — checked:\n` +
-      `  ${compiled}\n  ${original}`
+      `  ${compiled}\n  ${typescriptCompiled}\n  ${original}`
     );
   }
 
@@ -60,7 +63,9 @@ const original = path.join(ROOT, `${relativePath}.js`);
 function migrationStatus(modules) {
   return modules.map((m) => ({
     module: m,
-    compiled: fs.existsSync(path.join(DIST, `${m}.js`)),
+    compiled:
+      fs.existsSync(path.join(DIST, `${m}.js`)) ||
+      fs.existsSync(path.join(DIST, path.dirname(m), 'TypeScript', `${path.basename(m)}.js`)),
     source: fs.existsSync(path.join(ROOT, `${m}.ts`)) ? 'typescript' : 'javascript',
   }));
 }

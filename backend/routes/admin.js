@@ -3,6 +3,7 @@
 // Backup · Cost · Audit · Protection · Health · Anomalies
 // ============================================================
 const express = require('express');
+const { isAdminEmail } = require('../security/privileged');
 
 module.exports = (db, services, requireAuth, wrap) => {
 const router = express.Router();
@@ -10,9 +11,7 @@ const { backup, cost, audit, protection, healthMonitor, AUDIT_ACTIONS } = servic
 
 // ─── Admin guard: only specific user IDs ─────
 function requireAdmin(req, res, next) {
-  const adminEmails = (process.env.ADMIN_EMAILS || 'haroun.ghorbel@gmail.com,harounghorbel14-star@gmail.com').split(',').map(s => s.trim().toLowerCase());
-  const email = String(req.user?.email || '').toLowerCase();
-  if (!adminEmails.includes(email)) {
+  if (!isAdminEmail(req.user?.email)) {
     return res.status(403).json({ error: 'Admin only' });
   }
   next();
