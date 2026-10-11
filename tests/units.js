@@ -380,7 +380,7 @@ function testRateLimiter() {
 // ════════════════════════════════════════════
 async function testSemanticCache() {
   section('Semantic cache: similarity & correctness');
-  const { SemanticCache } = require('../backend/dist/services/semantic-cache');
+  const { SemanticCache } = require('../backend/dist/services/TypeScript/semantic-cache');
 
   const store = new Map();
   const fakeCache = {
@@ -456,7 +456,7 @@ async function testSemanticCache() {
 // ════════════════════════════════════════════
 function testLocalLLM() {
   section('Local LLM: routing decisions & fail-safety');
-  const { LocalLLM } = require('../backend/dist/services/local-llm');
+  const { LocalLLM } = require('../backend/dist/services/TypeScript/local-llm');
 
   const llm = new LocalLLM({ enabled: false });
 
@@ -504,7 +504,7 @@ function testLocalLLM() {
 // ════════════════════════════════════════════
 function testTemporalUX() {
   section('Temporal UX: time-block boundaries');
-  const { TemporalUX } = require('../backend/dist/services/temporal-ux');
+  const { TemporalUX } = require('../backend/dist/services/TypeScript/temporal-ux');
   const t = new TemporalUX({ db: null });
 
   const at = (hour) => {
@@ -665,7 +665,7 @@ function testEmbeddings() {
 // ════════════════════════════════════════════
 function testAITwin() {
   section('AI Twin: pattern key generation');
-  const { AITwin } = require('../backend/dist/services/ai-twin');
+  const { AITwin } = require('../backend/dist/services/TypeScript/ai-twin');
   const twin = new AITwin({ db: null });
 
   // Deterministic for identical input
@@ -749,7 +749,7 @@ function testObservability() {
 // ════════════════════════════════════════════
 function testPredictive() {
   section('Predictive execution: template safety');
-  const { PredictiveExecution } = require('../backend/dist/services/predictive-execution');
+  const { PredictiveExecution } = require('../backend/dist/services/TypeScript/predictive-execution');
   const p = new PredictiveExecution({ db: null, aiTwin: null });
 
   // Unknown actions must not build a prompt — prevents junk AI calls
@@ -771,7 +771,7 @@ function testPredictive() {
 // ════════════════════════════════════════════
 function testEventBus() {
   section('Event bus: handler contract');
-  const { EventBus, EVENTS } = require('../backend/dist/services/event-bus');
+  const { EventBus, EVENTS } = require('../backend/dist/services/TypeScript/event-bus');
   const bus = new EventBus({});
 
   // Named handlers must receive the payload directly. Passing the
@@ -966,7 +966,7 @@ function testRBAC() {
 // ════════════════════════════════════════════
 function testLogger() {
   section('Logger: level filtering & resilience');
-  const { Logger, LEVELS } = require('../backend/dist/services/logger');
+  const { Logger, LEVELS } = require('../backend/dist/services/TypeScript/logger');
 
   // Capture only while the logger runs, then restore before asserting —
   // otherwise the assertion output is swallowed too.
@@ -1129,7 +1129,7 @@ function testProjects() {
   section('Projects: autonomy & approval gating');
   const {
     ProjectsService, AUTONOMY_RANK, DANGEROUS_ACTIONS, isDangerous,
-  } = require('../backend/dist/services/projects');
+  } = require('../backend/dist/services/TypeScript/projects');
 
   // Autonomy levels must be strictly ordered, otherwise the
   // canAutoExecute comparison is meaningless.
@@ -1202,7 +1202,7 @@ function testProjects() {
 // ════════════════════════════════════════════
 function testOrchestration() {
   section('Orchestration: intent routing & pipelines');
-  const { OrchestrationService, PIPELINES } = require('../backend/dist/services/orchestration');
+  const { OrchestrationService, PIPELINES } = require('../backend/dist/services/TypeScript/orchestration');
   const o = new OrchestrationService({ db: null, smartCall: null });
 
   // Routing decides which agents run, so a wrong intent means the
@@ -1337,7 +1337,7 @@ function testOrchestration() {
 
   // Every declared action must be recognised by the gate, otherwise
   // canAutoExecute would treat it as ordinary and let it run.
-  const { DANGEROUS_ACTIONS: DA } = require('../backend/dist/services/projects');
+  const { DANGEROUS_ACTIONS: DA } = require('../backend/dist/services/TypeScript/projects');
   const unrecognised = gated
     .map(([, action]) => action)
     .filter((a) => !DA.includes(a));
@@ -1365,7 +1365,7 @@ function testOrchestration() {
 // ════════════════════════════════════════════
 function testDeprecation() {
   section('Deprecation: duplicate consolidation');
-  const { DeprecationService, DEPRECATED } = require('../backend/dist/services/deprecation');
+  const { DeprecationService, DEPRECATED } = require('../backend/dist/services/TypeScript/deprecation');
   const d = new DeprecationService({ db: null });
 
   assert(DEPRECATED.length > 0, 'duplicates found by the audit are recorded');

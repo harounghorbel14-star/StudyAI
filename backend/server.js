@@ -509,7 +509,7 @@ app.use(cors({
 
 // Additional hardening headers (CSP, HSTS, Permissions-Policy)
 try {
-  const { securityHeaders } = require('../dist/security/hardening');
+  const { securityHeaders } = require('./dist/security/hardening');
   app.use(securityHeaders());
 } catch (e) {
   console.warn('⚠️ Security headers not applied:', e.message);
