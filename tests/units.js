@@ -1478,7 +1478,7 @@ function testServing() {
   const lastMount = lines.reduce((acc, l, i) =>
     l.includes("app.use('/api/") ? i + 1 : acc, 0);
   const fallbackAt = lineOf('Written as app.use rather than');
-  const errorAt = lineOf('app.use((err,_req,res,_next)');
+  const errorAt = lineOf('app.use((err,');
   const listenAt = lineOf('httpServer.listen(PORT');
 
   assert(fallbackAt > lastApi, 'the SPA fallback is registered after every /api route');

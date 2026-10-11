@@ -534,12 +534,22 @@ const app = express();
 app.set("trust proxy", Number.isInteger(Number(process.env.TRUST_PROXY)) && process.env.TRUST_PROXY !== ""
   ? Number(process.env.TRUST_PROXY)
   : 1);
+// Correlation id: returned on every response and in every error body,
+// and logged with server-side failures, so a message in the browser can
+// be matched to the log line that explains it. An incoming
+// X-Request-Id (e.g. from a proxy) is reused only if it looks like one.
+app.use((req, res, next) => {
+  const incoming = req.headers["x-request-id"];
+  req.id = typeof incoming === "string" && /^[\w.-]{8,64}$/.test(incoming) ? incoming : require("crypto").randomBytes(8).toString("hex");
+  res.setHeader("X-Request-Id", req.id);
+  next();
+});
 app.use(helmet());
 app.use(cors({
   origin: process.env.ALLOWED_ORIGIN || "*",
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "x-csrf-token"],
-  exposedHeaders: ["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-Quota-Limit", "X-Quota-Remaining", "Retry-After"],
+  exposedHeaders: ["X-Request-Id", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-Quota-Limit", "X-Quota-Remaining", "Retry-After"],
 }));
 
 // Additional hardening headers (CSP, HSTS, Permissions-Policy)
@@ -4676,12 +4686,19 @@ app.use((req, res, next) => {
 // ─────────────────────────────────────────────
 // 🧯 ERROR HANDLER
 // ─────────────────────────────────────────────
-app.use((err,_req,res,_next) => {
-  console.error("❌", err.message || err);
-  if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error:"File too large." });
-  const status = err.status || err.statusCode || 500;
-  const message = process.env.NODE_ENV === "production" ? "Internal server error." : err.message || "Unknown error";
-  res.status(status).json({ error:message });
+app.use((err,req,res,_next) => {
+  if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error:"File too large.", request_id:req.id });
+  // Malformed JSON bodies used to surface as "Internal server error."
+  if (err.type === "entity.parse.failed") return res.status(400).json({ error:"Malformed JSON in request body.", request_id:req.id });
+  const status = Number(err.status || err.statusCode) || 500;
+  if (status >= 500) {
+    // Method, path and error only: never the body (passwords, tokens).
+    console.error(JSON.stringify({ level:"error", request_id:req.id, method:req.method, path:req.originalUrl.split("?")[0], status, error:String(err.message || err).slice(0, 500), code:err.code, stack:process.env.NODE_ENV === "production" ? undefined : String(err.stack || "").split("\n").slice(0, 4).join(" | ") }));
+  }
+  const message = status < 500
+    ? (err.expose !== false && err.message ? err.message : "Bad request.")
+    : (process.env.NODE_ENV === "production" ? "Internal server error." : err.message || "Unknown error");
+  res.status(status).json({ error:message, request_id:req.id });
 });
 
 // ─────────────────────────────────────────────
