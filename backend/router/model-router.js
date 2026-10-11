@@ -86,67 +86,110 @@ function detectTask(prompt, hint) {
 }
 
 /**
- * Select best available model for task.
+ * Thrown when no configured model can serve a request. The message names
+ * the setting to change, so the caller can show it instead of a stack.
  */
-function selectModel(taskType, options = {}) {
-  const candidates = MODEL_REGISTRY[taskType] || MODEL_REGISTRY['reasoning-fast'];
-  const available = candidates.filter(c => PROVIDERS[c.provider]?.available);
-
-  if (!available.length) {
-    // Final fallback: OpenAI mini
-    return { provider: 'openai', model: 'gpt-4o-mini', cost: 1, quality: 7 };
+class ModelUnavailableError extends Error {
+  constructor(message, attempts = []) {
+    super(message);
+    this.name = 'ModelUnavailableError';
+    this.code = 'MODEL_UNAVAILABLE';
+    this.status = 503;
+    this.attempts = attempts;
   }
+}
 
-  // Sort by quality if quality preferred, else cost
-  if (options.preferCheap) {
-    return available.sort((a, b) => a.cost - b.cost)[0];
-  }
-  return available[0]; // first in list (priority order)
+const INFERENCE_MODES = ['hybrid', 'local-only', 'cloud'];
+
+/**
+ * INFERENCE_MODE:
+ *   hybrid     (default) local model for its configured tasks, cloud otherwise
+ *              and as fallback when the local server fails.
+ *   local-only never sends a prompt to a cloud provider; if the local
+ *              server is down the request fails with MODEL_UNAVAILABLE.
+ *   cloud      never uses the local server.
+ */
+function inferenceMode(env = process.env) {
+  const mode = String(env.INFERENCE_MODE || 'hybrid').trim().toLowerCase();
+  return INFERENCE_MODES.includes(mode) ? mode : 'hybrid';
+}
+
+function availableCloudProviders() {
+  return Object.keys(PROVIDERS).filter((p) => p !== 'replicate' && PROVIDERS[p].available);
 }
 
 /**
- * Execute with the right provider.
- * Returns: { output, model, provider, task_type, duration_ms, usage }
+ * Ordered candidates for a task among providers that are configured.
+ * Returns copies: callers may annotate them without touching the
+ * shared registry.
+ */
+function candidatesFor(taskType, options = {}) {
+  const candidates = (MODEL_REGISTRY[taskType] || MODEL_REGISTRY['reasoning-fast'])
+    .filter((c) => PROVIDERS[c.provider]?.available)
+    .map((c) => ({ ...c }));
+  if (options.preferCheap) candidates.sort((a, b) => a.cost - b.cost);
+  return candidates;
+}
+
+/**
+ * Select best available model for task (a copy, never the registry entry).
+ */
+function selectModel(taskType, options = {}) {
+  const [first] = candidatesFor(taskType, options);
+  // Kept for callers that only want a label; execute() refuses to call
+  // a provider that is not configured.
+  return first || { provider: 'openai', model: 'gpt-4o-mini', cost: 1, quality: 7, unconfigured: true };
+}
+
+/**
+ * Execute with the right provider, falling back through every other
+ * configured candidate for the task.
+ * Returns: { output, model, provider, task_type, duration_ms, usage, attempts }
+ *
+ * The previous version reassigned provider/model on the object returned
+ * by selectModel — which was the MODEL_REGISTRY entry itself — so one
+ * failed call permanently rewrote the registry for every later request.
  */
 async function execute(clients, options) {
   const { prompt, system, task, max_tokens, temperature = 0.7, json = false, history = [] } = options;
   const taskType = detectTask(prompt, task);
-  const choice = selectModel(taskType, options);
+  const candidates = candidatesFor(taskType, options);
+  if (!candidates.length) {
+    throw new ModelUnavailableError(
+      'No cloud AI provider is configured. Set OPENAI_API_KEY, ANTHROPIC_API_KEY or DEEPSEEK_API_KEY, '
+      + 'or run a local model (LOCAL_LLM_ENABLED=true, INFERENCE_MODE=local-only).',
+    );
+  }
   const startTime = Date.now();
-
-  const maxRetries = options.maxRetries ?? 1;
-  let attempt = 0;
-  let lastError;
-
-  while (attempt <= maxRetries) {
-    try {
-      const result = await callProvider(clients, choice, { prompt, system, max_tokens, temperature, json, history });
-      return {
-        output: result.output,
-        provider: choice.provider,
-        model: choice.model,
-        task_type: taskType,
-        duration_ms: Date.now() - startTime,
-        usage: result.usage,
-        attempt: attempt + 1,
-      };
-    } catch (err) {
-      lastError = err;
-      attempt++;
-
-      // Try fallback provider after first failure
-      if (attempt <= maxRetries) {
-        const allCandidates = MODEL_REGISTRY[taskType] || [];
-        const fallback = allCandidates.find(c => c.provider !== choice.provider && PROVIDERS[c.provider]?.available);
-        if (fallback) {
-          choice.provider = fallback.provider;
-          choice.model = fallback.model;
-        }
-        await new Promise(r => setTimeout(r, 1000 * attempt));
+  const retriesPerCandidate = Math.max(0, options.maxRetries ?? 0);
+  const attempts = [];
+  for (const choice of candidates) {
+    for (let i = 0; i <= retriesPerCandidate; i++) {
+      const t0 = Date.now();
+      try {
+        const result = await callProvider(clients, choice, { prompt, system, max_tokens, temperature, json, history });
+        attempts.push({ provider: choice.provider, model: choice.model, ok: true, ms: Date.now() - t0 });
+        return {
+          output: result.output,
+          provider: choice.provider,
+          model: choice.model,
+          task_type: taskType,
+          duration_ms: Date.now() - startTime,
+          usage: result.usage,
+          attempt: attempts.length,
+          attempts,
+        };
+      } catch (err) {
+        attempts.push({ provider: choice.provider, model: choice.model, ok: false, ms: Date.now() - t0, error: String(err.message).slice(0, 200) });
+        if (i < retriesPerCandidate) await new Promise((r) => setTimeout(r, 500 * (i + 1)));
       }
     }
   }
-  throw lastError;
+  const last = attempts[attempts.length - 1];
+  const err = new Error(`All configured providers failed for ${taskType}: ${last?.error || 'unknown error'}`);
+  err.code = 'PROVIDERS_FAILED';
+  err.attempts = attempts;
+  throw err;
 }
 
 async function callProvider(clients, choice, params) {
@@ -220,6 +263,11 @@ function safeJsonParse(text) {
 }
 
 module.exports = {
+  ModelUnavailableError,
+  INFERENCE_MODES,
+  inferenceMode,
+  availableCloudProviders,
+  candidatesFor,
   PROVIDERS,
   MODEL_REGISTRY,
   TASK_PATTERNS,

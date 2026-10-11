@@ -37,7 +37,10 @@ if (!globalThis.fetch) {
 // ─────────────────────────────────────────────
 // ⚙️  ENV VALIDATION
 // ─────────────────────────────────────────────
-const REQUIRED_ENV = ["OPENAI_API_KEY","JWT_SECRET","STRIPE_SECRET_KEY","STRIPE_WEBHOOK_SECRET"];
+const { inferenceMode } = require("./router/model-router");
+const INFERENCE_MODE = inferenceMode();
+// In local-only mode no prompt may reach OpenAI, so its key is not required.
+const REQUIRED_ENV = [...(INFERENCE_MODE === "local-only" ? [] : ["OPENAI_API_KEY"]),"JWT_SECRET","STRIPE_SECRET_KEY","STRIPE_WEBHOOK_SECRET"];
 for (const key of REQUIRED_ENV) {
   if (!process.env[key]) { console.error(`❌  Missing env: ${key}`); process.exit(1); }
 }
@@ -52,7 +55,24 @@ const STRIPE_PRICES         = { pro:process.env.STRIPE_PRICE_PRO, elite:process.
 // ─────────────────────────────────────────────
 // 🤖 OpenAI + Stripe
 // ─────────────────────────────────────────────
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// About 70 routes call this client directly rather than through the
+// model router, so local-only mode is enforced here: the client is
+// pointed at the local server's OpenAI-compatible API (Ollama and vLLM
+// both serve /v1/chat/completions) and every request is pinned to the
+// configured local model. Nothing can fall through to api.openai.com.
+// Endpoints a local server does not offer (images, speech) fail with an
+// error rather than silently using the cloud.
+function createOpenAIClient() {
+  if (INFERENCE_MODE !== "local-only") return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const baseURL = `${String(process.env.LOCAL_LLM_URL || "http://localhost:11434").replace(/\/+$/, "")}/v1`;
+  const localModel = process.env.LOCAL_LLM_MODEL || "llama3.1:8b";
+  const client = new OpenAI({ apiKey: process.env.LOCAL_LLM_API_KEY || "local", baseURL, maxRetries: 0 });
+  const create = client.chat.completions.create.bind(client.chat.completions);
+  client.chat.completions.create = (params, opts) => create({ ...params, model: localModel }, opts);
+  console.log(`🔒 INFERENCE_MODE=local-only: all chat completions go to ${baseURL} (${localModel}); no cloud fallback.`);
+  return client;
+}
+const openai = createOpenAIClient();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion:"2024-04-10" });
 
 // ─────────────────────────────────────────────
@@ -4189,6 +4209,12 @@ app.get('/api/reality-map', requireAuth, requireServices, wrap(async (req, res) 
 }));
 
 // ───── LOCAL LLM (self-hosted, no API dependency) ────────
+// Which models can serve requests right now, and whether prompts leave
+// this server. Lets the UI be honest about local vs cloud inference.
+app.get('/api/inference/status', requireAuth, requireServices, wrap(async (_req, res) => {
+  res.json(services.inferenceStatus());
+}));
+
 app.get('/api/local-llm/status', requireAuth, requireServices, wrap(async (_req, res) => {
   res.json(services.localLLM.getStatus());
 }));

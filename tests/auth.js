@@ -147,7 +147,7 @@ const { startServer, makeRunner, sleep } = require('./helpers/harness');
     // Budget: the daily guest quota is enforced on the server.
     let lastStatus = 0; let allowed = 0;
     for (let i = 0; i < 7; i++) {
-      r = await call('POST', '/api/chat', { token: guest, body: { message: `hello ${i}` } });
+      r = await call('POST', '/api/chat', { token: guest, body: { input: `hello ${i}`, no_rewrite: true } });
       lastStatus = r.status;
       if (r.status !== 429) allowed++;
     }
