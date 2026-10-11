@@ -603,7 +603,7 @@ app.use(express.json({ limit:"2mb" }));
 // secrets and the database can never be downloaded.
 const PUBLIC_FILES = new Set([
   "/index.html", "/share.html", "/design-preview.html",
-  "/app.js", "/nexus-shell.js", "/sw.js",
+  "/app.js", "/nexus-shell.js", "/agent-panel.js", "/sw.js",
   "/tool-engine.js", "/tools.config.js",
   "/style.css", "/design-system.css", "/cinematic.css", "/nexus-motion.css",
   "/logo.svg", "/manifest.json", "/sitemap.xml", "/robots.txt", "/favicon.ico",
@@ -3441,6 +3441,30 @@ try{
   app.use('/api/dev', devRoute(db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete));
   console.log('✅ Dev Tools routes loaded');
 }catch(e){console.warn('⚠️ Dev routes:', e.message);}
+
+// ── Autonomous agent: plan → tools → evaluate → verify (agent/) ──
+let agentRunner = null;
+try{
+  const { AgentRunner } = require('./agent/runner');
+  const { AgentMemory } = require('./agent/memory');
+  const { buildDefaultTools } = require('./agent/default-tools');
+  const agentMemory = new AgentMemory(db);
+  agentRunner = new AgentRunner({
+    db, memory: agentMemory, logger: console,
+    tools: null,
+    // Every model call goes through smartCall: provider routing,
+    // local-only enforcement, circuit breakers and cost tracking.
+    llmFor: (user) => services?.smartCall ? async (p) => {
+      const r = await services.smartCall({ ...p, user_id: user.id, tier: user.guest ? 'free' : user.plan, cacheable: false });
+      if (p.json && typeof r.output === 'string') { try { r.output = JSON.parse(r.output.replace(/```json|```/g, '').trim()); } catch (_) {} }
+      return r;
+    } : null,
+  });
+  agentRunner.tools = buildDefaultTools({ db, memory: agentMemory, scoreSource: services?.knowledge?.scoreSource?.bind(services.knowledge) });
+  const agentRoute = require('./routes/agent');
+  app.use('/api/agent', agentRoute({ runner: agentRunner, memory: agentMemory, requireAuth, requireQuota, aiLimiter, wrap }));
+  console.log('✅ Agent runtime loaded (tools: ' + agentRunner.tools.describe().map((t) => t.name).join(', ') + ')');
+}catch(e){console.warn('⚠️ Agent runtime:', e.message);}
 
 try{
   const uxRoute = require('./routes/ux-saas');

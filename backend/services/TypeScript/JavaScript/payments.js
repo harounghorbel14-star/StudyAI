@@ -80,6 +80,9 @@ class PaymentsService {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`).run();
+    // routes/ also creates this table with fewer columns; whichever runs
+    // first wins, so add any column this service needs but is missing.
+    try { this.db.prepare(`ALTER TABLE subscriptions ADD COLUMN cancel_at_period_end INTEGER DEFAULT 0`).run(); } catch (_) { /* already present */ }
 
     this.db.prepare(`CREATE TABLE IF NOT EXISTS payment_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

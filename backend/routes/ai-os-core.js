@@ -512,8 +512,12 @@ setInterval(processJobs, 10000);
 // 🤖 AUTONOMOUS MODE (AI runs forever, decides, improves, launches)
 // ═══════════════════════════════════════════════════════════
 router.post('/autonomous/full', requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
-  const {goal, max_iterations=10, time_limit_seconds=300} = req.body;
+  const {goal} = req.body;
   if(!goal) return res.status(400).json({error:'Missing goal'});
+  // One quota unit used to buy up to 3 GPT-4o calls per iteration for
+  // as many iterations and seconds as the client asked for. Clamp both.
+  const max_iterations = Math.min(Math.max(1, Number(req.body.max_iterations) || 5), 5);
+  const time_limit_seconds = Math.min(Math.max(10, Number(req.body.time_limit_seconds) || 120), 120);
 
   res.setHeader('Content-Type','text/event-stream');
   res.setHeader('Cache-Control','no-cache');

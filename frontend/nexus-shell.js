@@ -33,6 +33,15 @@
       tagline: 'Start anything',
     },
     {
+      // The verified agent: plans, researches with cited sources, checks
+      // its own work and asks before acting outside NexusAI.
+      id: 'agent',
+      label: 'Agent',
+      icon: '◎',
+      tagline: 'Research, verify, act with approval',
+      action: 'openAgentPanel',
+    },
+    {
       id: 'projects',
       label: 'Projects',
       icon: '▤',
@@ -348,6 +357,12 @@
     if (id === 'home') {
       closeDrawer();
       renderHome();
+      return;
+    }
+
+    if (area.action) {
+      closeDrawer();
+      if (typeof window[area.action] === 'function') window[area.action]();
       return;
     }
 
