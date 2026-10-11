@@ -51,7 +51,7 @@ APP_URL=https://nexusaitools.it.com
 ALLOWED_ORIGIN=https://nexusaitools.it.com
 ADMIN_EMAILS=you@example.com,other-admin@example.com
 VIP_EMAILS=...         # optional; defaults to ADMIN_EMAILS
-TRUST_PROXY=2          # if all traffic arrives via the Vercel rewrite; default 1
+TRUST_PROXY=2          # REQUIRED behind the Vercel rewrite (see below); default 1
 PORT                   # set by Railway automatically; do not hard-code
 ```
 
@@ -75,6 +75,20 @@ Point `DB_PATH` at a mounted Railway volume, for example `/data/studyai.db`.
 **AI models and research.** See [docs/AGENT.md](docs/AGENT.md) for
 `INFERENCE_MODE` (hybrid / local-only / cloud), local model servers, and
 search providers (`TAVILY_API_KEY`, `BRAVE_SEARCH_API_KEY`, `SEARXNG_URL`).
+
+**`TRUST_PROXY=2` behind Vercel.** Requests pass through two proxies (Vercel,
+then Railway's edge). With the default of 1 the backend sees Vercel's server
+as the client, so every visitor routed through it shares one rate-limit
+bucket: three guest sessions an hour and twenty sign-in attempts per 15
+minutes across all those users. With 2 it uses the visitor address Vercel
+forwards. The trade-off: anyone who calls the Railway URL directly can forge
+that header, so keep the Railway domain unadvertised.
+
+**When sign-in says "Can't reach the NexusAI server (502 DNS_HOSTNAME_NOT_FOUND …)"**:
+`frontend/vercel.json` still points at a host that does not exist. That is
+the `REPLACE_WITH_RAILWAY_DOMAIN` placeholder until step 2 below is done.
+Errors that do come from the backend carry a `Reference:` id; search the
+Railway logs for it.
 
 `ADMIN_EMAILS` grants full admin access by email. Signup does not verify
 email ownership, so **every address in that list must already be

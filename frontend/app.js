@@ -524,6 +524,26 @@ async function renderDashboard(){
 }
 
 // ── API ───────────────────────────────────────
+// Classify a failed response. Only the NexusAI backend sets
+// X-Request-Id and answers with JSON, so a response without them came
+// from something in front of it (Vercel rewrite to a dead host, a
+// platform error page) and the backend never saw the request.
+function describeFailure(r, d){
+  const requestId = r.headers.get('x-request-id') || d.request_id || '';
+  const fromBackend = !!requestId && d && typeof d === 'object' && 'error' in d;
+  if(!fromBackend){
+    const edge = r.headers.get('x-vercel-error') || '';
+    return {
+      code:'BACKEND_UNREACHABLE', requestId:'',
+      message:`Can't reach the NexusAI server right now (${r.status}${edge?` ${edge}`:''} from the hosting gateway). `
+        +'Sign-in and guest mode need the backend; please try again later.',
+    };
+  }
+  if(r.status>=500) return { code:d.code||'SERVER_ERROR', requestId, message:`Something went wrong on our side. Please try again. (Reference: ${requestId})` };
+  if(r.status===429) return { code:'RATE_LIMITED', requestId, message:d.error||'Too many requests. Please wait a moment and try again.' };
+  return { code:d.code, requestId, message:d.error||'Request failed.' };
+}
+
 async function api(path, opts={}) {
   const isForm = opts.body instanceof FormData;
   const r = await fetch(apiUrl(path), {
@@ -535,7 +555,16 @@ async function api(path, opts={}) {
     },
     body:isForm?opts.body:opts.body?JSON.stringify(opts.body):undefined,
   });
-  const d = await r.json().catch(()=>({}));
+  const raw = await r.text().catch(()=> '');
+  let d = {};
+  try{ d = raw ? JSON.parse(raw) : {}; }catch(_){ d = { _nonJson:true }; }
+  if(r.ok && d._nonJson){
+    // A 200 HTML page for an /api call means the request was answered by
+    // the static site, not the API — never treat that as success.
+    const err=new Error("The NexusAI API isn't reachable at this address. Please try again later.");
+    err.status=502; err.code='BACKEND_UNREACHABLE';
+    throw err;
+  }
   if(!r.ok){
     // A token the server no longer accepts (expired, logged out
     // elsewhere, password reset, guest expiry) ends the session here
@@ -545,8 +574,10 @@ async function api(path, opts={}) {
         ? 'Your guest session has expired. Sign up to keep your work.'
         : 'Your session has ended. Please sign in again.');
     }
-    const err=new Error(d.error||(r.status>=500?'The server had a problem. Please try again.':'Request failed.'));
-    err.status=r.status; err.code=d.code;
+    const f=describeFailure(r, d);
+    const err=new Error(f.message);
+    err.status=r.status; err.code=f.code; err.requestId=f.requestId;
+    console.warn('[api]', path, r.status, f.code, f.requestId||'(no request id: response did not come from the NexusAI backend)');
     throw err;
   }
   return d;
@@ -702,6 +733,23 @@ async function continueAsGuest(){
   finally{ setBusy(btn,false,'Continue as Guest'); }
 }
 
+// One probe when the sign-in screen is shown: if the backend cannot be
+// reached, say so before the user types a password.
+async function checkBackendReachable(){
+  const banner=document.getElementById('auth-backend-status');
+  if(!banner) return;
+  try{
+    const r=await fetch(apiUrl('/api/health'),{cache:'no-store'});
+    const d=await r.json().catch(()=>null);
+    const ok=r.ok && d && d.status==='ok';
+    banner.hidden=ok;
+    if(!ok) banner.textContent=`NexusAI's server can't be reached right now (${r.status}${r.headers.get('x-vercel-error')?' '+r.headers.get('x-vercel-error'):''}). Sign-in and guest mode will not work until it is back.`;
+  }catch(_){
+    banner.hidden=false;
+    banner.textContent="NexusAI's server can't be reached right now. Check your connection; sign-in and guest mode need it.";
+  }
+}
+
 function showAuthOverlay(message){
   // Anything layered over the app (first-run onboarding, modals) must
   // not stay on top of the sign-in form after the session ends.
@@ -712,6 +760,7 @@ function showAuthOverlay(message){
   closeSidebar();
   showAuthView('credentials');
   if(message) document.getElementById('auth-error').textContent=message;
+  checkBackendReachable();
 }
 
 function clearLocalSession(){
@@ -759,7 +808,13 @@ async function logout(){
 // ── INIT ──────────────────────────────────────
 async function init(){
   if(S.resetToken) return;   // a reset link takes priority over a stored session
-  try{S.user=await api('/api/me');}catch(e){ clearLocalSession(); showAuthOverlay(e.status===401?'':e.message); return; }
+  try{S.user=await api('/api/me');}catch(e){
+    // Only the server rejecting the token ends the session; an outage
+    // keeps it so the user is still signed in once the backend is back.
+    if(e.status===401) clearLocalSession();
+    showAuthOverlay(e.status===401?'':e.message);
+    return;
+  }
   document.getElementById('auth-overlay').style.display='none';
   document.getElementById('app').style.display='block';
   const email=S.user?.email||'';
@@ -5969,7 +6024,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     setTimeout(()=>{intro.remove();localStorage.setItem('nx_intro_seen','1');},4000);
   }
   initTheme();
-  if(S.token)init();
+  if(S.token)init(); else checkBackendReachable();
 });
 
 function selectToolFromGrid(id){

@@ -22,7 +22,7 @@
     "test": "npm run build && npm run test:all",
     "test:agent": "node tests/research.js && node tests/agent.js && node tests/schema.js",
     "test:server": "node tests/auth.js && node tests/inference.js && node tests/agent-api.js",
-    "test:browser": "node tests/e2e-auth.js && node tests/e2e-agent.js"
+    "test:browser": "node tests/e2e-auth.js && node tests/e2e-agent.js && node tests/e2e-deploy.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",

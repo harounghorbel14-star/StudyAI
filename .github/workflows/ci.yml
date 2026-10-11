@@ -178,6 +178,8 @@ jobs:
         run: node tests/e2e-auth.js
       - name: Agent panel
         run: node tests/e2e-agent.js
+      - name: Login and guest through the vercel.json rewrites
+        run: node tests/e2e-deploy.js
 
   # Mirrors Railway: the service's Root Directory is backend/, so only
   # that directory is available, the Node version comes from

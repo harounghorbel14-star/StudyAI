@@ -166,6 +166,8 @@ input,textarea{font-family:inherit;color:inherit}
 .auth-btn:active{transform:none}
 .auth-error{font-size:13px;color:#f87171;text-align:center;margin-top:12px;min-height:18px}
 .auth-error:empty{margin-top:0;min-height:0}
+.auth-backend-status{font-size:12.5px;color:#fbbf24;background:#f59e0b14;border:1px solid #f59e0b55;border-radius:8px;padding:8px 10px;margin:-12px 0 16px}
+.auth-backend-status[hidden]{display:none}
 .auth-label{display:block;font-size:12.5px;font-weight:500;color:var(--t2);margin:0 0 6px}
 .auth-label-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
 .auth-link{font-size:12.5px;color:var(--a2,#a78bfa);background:none;padding:0;cursor:pointer;text-decoration:none}

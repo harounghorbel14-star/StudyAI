@@ -189,6 +189,30 @@ const { startServer, makeRunner, sleep } = require('./helpers/harness');
     m = await wsTalk({ type: 'auth', token: aliceToken });
     t.check(m?.type === 'auth.error', 'socket refuses a logged-out token');
 
+    // ── Diagnosability ──────────────────────────────────────
+    t.section('Errors are diagnosable without leaking secrets');
+    r = await call('POST', '/api/login', { body: { email, password: 'wrong-password' } });
+    t.check(/^[0-9a-f]{16}$/.test(r.headers.get('x-request-id') || '') && r.body.error, 'every response carries an X-Request-Id');
+    const bad = await fetch(srv.base + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 Chrome/120', 'Accept-Language': 'en' }, body: '{"email":' });
+    const badBody = await bad.json();
+    t.check(bad.status === 400 && /Malformed JSON/.test(badBody.error) && badBody.request_id, 'a malformed JSON body is a 400 with a clear message, not "Internal server error"');
+
+    // Simulated database failure during login (table unavailable).
+    const broken = new Database(srv.dbPath);
+    broken.prepare('ALTER TABLE users RENAME TO users_offline').run();
+    const secretPw = 'Sup3r-Secret-Pa55word!';
+    r = await call('POST', '/api/login', { body: { email, password: secretPw } });
+    t.check(r.status === 500 && typeof r.body?.error === 'string' && r.body.request_id === r.headers.get('x-request-id'), 'a database failure returns JSON 500 with the request id');
+    await sleep(200);
+    const logLine = srv.log().split('\n').find((l) => l.includes(r.body.request_id)) || '';
+    t.check(/"path":"\/api\/login"/.test(logLine) && /users/.test(logLine), 'the server log has the request id, route and cause');
+    t.check(!srv.log().includes(secretPw), 'the password never appears in the logs');
+    // A different client IP (the per-IP guest limit was used up above).
+    r = await call('POST', '/api/auth/guest', { body: {}, headers: { 'X-Forwarded-For': '198.51.100.9' } });
+    t.check(r.status >= 500 && r.body?.request_id, 'guest creation failing on the database also returns a diagnosable JSON error');
+    broken.prepare('ALTER TABLE users_offline RENAME TO users').run();
+    broken.close();
+
     r = await call('GET', '/api/auth/config');
     t.check(r.status === 200 && r.body.passwordReset.emailConfigured === true, '/api/auth/config reports email delivery status');
     db.close();
@@ -197,5 +221,16 @@ const { startServer, makeRunner, sleep } = require('./helpers/harness');
   } finally {
     await srv.stop();
   }
+
+  // Missing configuration: the server refuses to start and names the
+  // variable, without printing any secret values.
+  t.section('Missing environment');
+  const { spawnSync } = require('child_process');
+  const out = spawnSync(process.execPath, [require('path').join(__dirname, '..', 'backend', 'server.js')], {
+    env: { PATH: process.env.PATH, NODE_ENV: 'test', OPENAI_API_KEY: 'sk-test-dummy', STRIPE_SECRET_KEY: 'sk_test_dummy', STRIPE_WEBHOOK_SECRET: 'whsec_dummy', DB_PATH: require('os').tmpdir() + '/nx-missing-env.db' },
+    encoding: 'utf8', timeout: 20000,
+  });
+  t.check(out.status === 1 && /Missing env: JWT_SECRET/.test(out.stderr + out.stdout), 'missing JWT_SECRET stops startup with a message naming it');
+  t.check(!/sk-test-dummy|sk_test_dummy|whsec_dummy/.test(out.stderr + out.stdout), 'no secret values are printed');
   t.done();
 })();
