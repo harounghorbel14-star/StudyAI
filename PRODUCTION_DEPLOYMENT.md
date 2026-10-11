@@ -55,6 +55,27 @@ TRUST_PROXY=2          # if all traffic arrives via the Vercel rewrite; default 
 PORT                   # set by Railway automatically; do not hard-code
 ```
 
+**Password reset email.** Set both of these to send reset links. Without them,
+reset requests are still accepted and handled safely, but no email is sent.
+The startup log names the missing settings, and the UI tells the user.
+
+```
+RESEND_API_KEY        # https://resend.com — verify the sending domain there
+MAIL_FROM=NexusAI <no-reply@nexusaitools.it.com>
+APP_URL=https://nexusaitools.it.com   # reset links point here
+```
+
+**Guests.** `GUEST_ACCESS=off` disables "Continue as Guest". Limits:
+`GUEST_DAILY_REQUESTS` (5), `GUEST_SESSIONS_PER_IP_PER_HOUR` (3) and
+`GUEST_TTL_HOURS` (24). Expired guests are deleted hourly.
+
+**Database location.** `DB_PATH` (default `studyai.db`) and `BACKUP_DIR`.
+Point `DB_PATH` at a mounted Railway volume, for example `/data/studyai.db`.
+
+**AI models and research.** See [docs/AGENT.md](docs/AGENT.md) for
+`INFERENCE_MODE` (hybrid / local-only / cloud), local model servers, and
+search providers (`TAVILY_API_KEY`, `BRAVE_SEARCH_API_KEY`, `SEARXNG_URL`).
+
 `ADMIN_EMAILS` grants full admin access by email. Signup does not verify
 email ownership, so **every address in that list must already be
 registered by its real owner**. Otherwise whoever signs up with it first

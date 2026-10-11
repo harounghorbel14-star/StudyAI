@@ -99,11 +99,7 @@
 .auth-card > .auth-brand   { animation-delay: 320ms; }
 .auth-card > .auth-title   { animation-delay: 400ms; }
 .auth-card > .auth-sub     { animation-delay: 460ms; }
-.auth-card > .auth-tabs    { animation-delay: 520ms; }
-.auth-card > #auth-email   { animation-delay: 580ms; }
-.auth-card > #auth-password{ animation-delay: 630ms; }
-.auth-card > .auth-btn     { animation-delay: 690ms; }
-.auth-card > .auth-error   { animation-delay: 690ms; }
+.auth-card > .auth-view    { animation-delay: 540ms; }
 
 @keyframes nmRise {
   0%   { opacity: 0; transform: translateY(10px); }

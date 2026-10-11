@@ -200,13 +200,28 @@ function initServices(db, openai, options = {}) {
     }
 
     const taskType = modelRouter.detectTask(params.prompt, params.task);
+    const mode = modelRouter.inferenceMode();
+    const localOnly = mode === 'local-only' || params.localOnly === true;
+    if (localOnly && (!localLLM || !localLLM.enabled)) {
+      throw new modelRouter.ModelUnavailableError(
+        'Local-only inference is selected but no local model server is enabled. '
+        + 'Set LOCAL_LLM_ENABLED=true and LOCAL_LLM_URL (Ollama or an OpenAI-compatible server).',
+      );
+    }
+    if (localOnly && !localLLM.available) await localLLM.checkHealth(true).catch(() => false);
+    if (localOnly && !localLLM.available) {
+      throw new modelRouter.ModelUnavailableError(
+        `Local-only inference is selected but the local model server at ${localLLM.baseUrl} is not reachable.`,
+      );
+    }
 
-    // ── Local LLM routing (transparent, falls back to cloud) ──
+    // ── Local LLM routing ──
+    // hybrid: falls back to cloud on failure. local-only: never does.
     if (localLLM && localLLM.shouldRouteLocal({
       task: taskType,
       tier: params.tier,
-      forceLocal: params.forceLocal,
-      forceCloud: params.forceCloud,
+      forceLocal: params.forceLocal || localOnly,
+      forceCloud: params.forceCloud || mode === 'cloud',
     })) {
       const localTimer = metrics.startTimer('ai_call_duration', { provider: 'local' });
       try {
@@ -251,10 +266,17 @@ function initServices(db, openai, options = {}) {
         return standardizedLocal;
       } catch (localErr) {
         localTimer();
+        if (localOnly) {
+          throw new modelRouter.ModelUnavailableError(`Local model failed and local-only mode forbids cloud fallback: ${localErr.message}`);
+        }
         localLLM.stats.fallbacks++;
         logger.warn('Local LLM failed, falling back to cloud', { err: localErr.message });
         // Fall through to cloud providers below
       }
+    }
+    if (localOnly) {
+      // shouldRouteLocal refused (e.g. too many consecutive failures).
+      throw new modelRouter.ModelUnavailableError('Local model is unavailable and local-only mode forbids cloud fallback.');
     }
 
     const choice = modelRouter.selectModel(taskType);
@@ -315,6 +337,21 @@ function initServices(db, openai, options = {}) {
       });
       throw err;
     }
+  }
+
+  /** What can actually serve requests right now, for the UI and ops. */
+  function inferenceStatus() {
+    const mode = modelRouter.inferenceMode();
+    const cloud = modelRouter.availableCloudProviders();
+    const local = localLLM ? localLLM.getStatus() : null;
+    const localReady = !!(localLLM && localLLM.enabled && localLLM.available);
+    return {
+      mode,
+      cloud_providers: mode === 'local-only' ? [] : cloud,
+      local: local && { enabled: localLLM.enabled, available: localLLM.available, url: localLLM.baseUrl, backend: localLLM.backend, models: local.installed_models },
+      can_serve: mode === 'local-only' ? localReady : mode === 'cloud' ? cloud.length > 0 : (cloud.length > 0 || localReady),
+      sends_prompts_to_third_parties: mode !== 'local-only' && cloud.length > 0,
+    };
   }
 
   // ── 16. Compound intelligence ─────────────
@@ -520,7 +557,7 @@ function initServices(db, openai, options = {}) {
   const servicesObj = {
     logger, cache, memory, queues, metrics, breakers,
     events, tracer, adaptive, contracts, audit, rbac, protection,
-    cost, backup, knowledge,
+    cost, backup, knowledge, inferenceStatus,
     repoIntel, media, business, workspaces, voice, secrets, community,
     disasterRecovery, semanticCache, pmf,
     aiTwin, memoryFabric, temporalUX,

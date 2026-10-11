@@ -43,6 +43,11 @@ class NotificationService {
       read INTEGER DEFAULT 0,
       created_at INTEGER NOT NULL
     )`).run();
+    // routes/ also creates this table with fewer columns; whichever runs
+    // first wins, so add any column this service needs but is missing.
+    try { this.db.prepare(`ALTER TABLE notifications ADD COLUMN link TEXT`).run(); } catch (_) { /* already present */ }
+    try { this.db.prepare(`ALTER TABLE notifications ADD COLUMN metadata TEXT`).run(); } catch (_) { /* already present */ }
+    try { this.db.prepare(`ALTER TABLE notifications ADD COLUMN priority TEXT DEFAULT 'medium'`).run(); } catch (_) { /* already present */ }
 
     this.db.prepare(`CREATE TABLE IF NOT EXISTS notification_prefs (
       user_id INTEGER PRIMARY KEY,

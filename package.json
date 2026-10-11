@@ -13,13 +13,16 @@
     "test:e2e": "playwright test",
     "test:unit": "node tests/units.js",
     "test:load": "node tests/load.js",
-    "test:all": "node tests/units.js && node tests/integration-mock.js && node tests/security-phase1.js",
+    "test:all": "node tests/units.js && node tests/integration-mock.js && node tests/security-phase1.js && npm run test:agent && npm run test:server",
     "build": "tsc",
     "build:watch": "tsc --watch",
     "typecheck": "tsc --noEmit",
     "prestart": "tsc",
     "test:security": "node tests/security-phase1.js",
-    "test": "npm run build && npm run test:all"
+    "test": "npm run build && npm run test:all",
+    "test:agent": "node tests/research.js && node tests/agent.js && node tests/schema.js",
+    "test:server": "node tests/auth.js && node tests/inference.js && node tests/agent-api.js",
+    "test:browser": "node tests/e2e-auth.js && node tests/e2e-agent.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",
