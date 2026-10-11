@@ -20,15 +20,31 @@ class BackupService {
     }
   }
 
+  // ─── Path safety ───────────────────────────
+  // Filenames reach verify()/delete() straight from URL params, and the
+  // label comes from a request body. Only names this service could have
+  // produced are accepted, and the result must stay inside backupDir.
+  _safePath(filename) {
+    const name = String(filename || '');
+    if (!/^[A-Za-z0-9_.-]+\.db$/.test(name) || name.includes('..')) {
+      throw new Error('Invalid backup filename');
+    }
+    const root = path.resolve(this.backupDir);
+    const fullPath = path.resolve(root, name);
+    if (path.dirname(fullPath) !== root) throw new Error('Invalid backup filename');
+    return fullPath;
+  }
+
   // ─── Create a new backup ───────────────────
   createBackup(label = 'auto') {
+    label = String(label || 'auto').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 40) || 'auto';
     if (!this.dbPath || !fs.existsSync(this.dbPath)) {
       return { ok: false, error: 'DB file not found' };
     }
     try {
       const ts = new Date().toISOString().replace(/[:.]/g, '-');
       const filename = `nexusai_${label}_${ts}.db`;
-      const fullPath = path.join(this.backupDir, filename);
+      const fullPath = this._safePath(filename);
 
       fs.copyFileSync(this.dbPath, fullPath);
       const checksum = this._checksum(fullPath);
@@ -84,7 +100,7 @@ class BackupService {
   // ─── Verify a backup ──────────────────────
   verify(filename) {
     try {
-      const fullPath = path.join(this.backupDir, filename);
+      const fullPath = this._safePath(filename);
       if (!fs.existsSync(fullPath)) return { ok: false, error: 'Not found' };
       const meta = JSON.parse(fs.readFileSync(fullPath + '.meta.json', 'utf8'));
       const currentChecksum = this._checksum(fullPath);
@@ -98,7 +114,7 @@ class BackupService {
   // ─── Delete a backup ──────────────────────
   delete(filename) {
     try {
-      const fullPath = path.join(this.backupDir, filename);
+      const fullPath = this._safePath(filename);
       if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
       if (fs.existsSync(fullPath + '.meta.json')) fs.unlinkSync(fullPath + '.meta.json');
       this.logger?.info('Backup deleted', { filename });

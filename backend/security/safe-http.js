@@ -16,10 +16,13 @@ function isBlockedAddress(address) {
       (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
       (a === 100 && b >= 64 && b <= 127) || (a === 198 && (b === 18 || b === 19)) ||
       (a === 0) || (a === 192 && b === 0) || (a === 198 && b === 51) ||
-      (a === 203 && b === 0);
+      (a === 203 && b === 0) || a >= 224;  // multicast, reserved, broadcast
   }
   if (net.isIPv6(normalized)) {
-    return normalized === '::' || normalized.startsWith('fc') || normalized.startsWith('fd') ||
+    // '::x' covers IPv4-compatible forms such as ::127.0.0.1, and
+    // 64:ff9b:: is NAT64, which can embed any internal IPv4 address.
+    return normalized.startsWith('::') || normalized.startsWith('64:ff9b:') ||
+      normalized.startsWith('fc') || normalized.startsWith('fd') ||
       normalized.startsWith('fe8') || normalized.startsWith('fe9') || normalized.startsWith('fea') ||
       normalized.startsWith('feb') || normalized.startsWith('2001:db8:') || normalized.startsWith('ff');
   }

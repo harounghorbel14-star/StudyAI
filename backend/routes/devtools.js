@@ -2,7 +2,11 @@
 // 💻 DEV TOOLS ROUTES
 // ============================================================
 const express = require('express');
+const http = require('http');
+const { safeRequest } = require('../security/safe-http');
 const router = express.Router();
+
+const API_TEST_METHODS = new Set(['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS']);
 
 module.exports = (db, openai, requireAuth, requireQuota, aiLimiter, wrap, chatComplete) => {
 
@@ -182,16 +186,26 @@ router.post('/refactor', requireAuth, requireQuota, aiLimiter, wrap(async (req,r
 router.post('/api-test', requireAuth, requireQuota, aiLimiter, wrap(async (req,res)=>{
   const {endpoint, method='GET', headers={}, body:reqBody} = req.body;
   if(!endpoint) return res.status(400).json({error:'Missing endpoint.'});
+  const verb=String(method).toUpperCase();
+  if(!API_TEST_METHODS.has(verb)) return res.status(400).json({error:'Unsupported method.'});
   try{
-    const opts={method,headers:{'Content-Type':'application/json',...headers}};
-    if(reqBody&&method!=='GET')opts.body=JSON.stringify(reqBody);
+    // The URL is user-supplied and the response is echoed back, so this
+    // must not reach localhost, the cloud metadata service or the
+    // private network. safeRequest resolves DNS once, rejects private
+    // and reserved ranges, and re-checks every redirect hop.
+    const outHeaders={'Content-Type':'application/json'};
+    if(headers&&typeof headers==='object'){
+      for(const [k,v] of Object.entries(headers)){
+        if(!/^host$/i.test(k)) outHeaders[k]=String(v);
+      }
+    }
+    const body=(reqBody!==undefined&&verb!=='GET'&&verb!=='HEAD')?JSON.stringify(reqBody):null;
     const start=Date.now();
-    const r=await fetch(endpoint,{...opts,signal:AbortSignal.timeout(10000)});
+    const r=await safeRequest(String(endpoint),{method:verb,headers:outHeaders,body,timeoutMs:10000});
     const elapsed=Date.now()-start;
-    const text=await r.text();
-    let data;try{data=JSON.parse(text);}catch(_){data=text;}
-    res.json({status:r.status,statusText:r.statusText,elapsed_ms:elapsed,headers:Object.fromEntries(r.headers),data});
-  }catch(e){res.json({error:e.message});}
+    let data;try{data=JSON.parse(r.body);}catch(_){data=r.body;}
+    res.json({status:r.status,statusText:http.STATUS_CODES[r.status]||'',elapsed_ms:elapsed,headers:r.headers,data});
+  }catch(e){res.status(400).json({error:e.message});}
 }));
 
 // ── 13. Docker Helper ─────────────────────────

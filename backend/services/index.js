@@ -103,7 +103,7 @@ function initServices(db, openai, options = {}) {
   const audit = new AuditLogger(db, { logger, events });
 
   // ── 9b. RBAC ─────────────────────────────
-  const rbac = new RBAC({ audit });
+  const rbac = new RBAC({ audit, adminEmails: require('../security/privileged').adminEmails() });
 
   // ── 10. Protection (bot/abuse) ────────────
   const protection = new ProtectionService(db, { logger, events, audit, metrics });
