@@ -5,19 +5,24 @@
 // (tests/helpers/vercel-emulator.js), so the browser talks to the app
 // exactly as it does on nexusaitools.it.com:
 //
-//   A. the committed frontend/vercel.json — reproduces production today:
-//      the rewrite targets the REPLACE_WITH_RAILWAY_DOMAIN placeholder,
-//      Vercel answers 502 DNS_HOSTNAME_NOT_FOUND (plain text), and the
-//      UI must say the backend is unreachable — never "logged in".
-//   B. the config scripts/set-backend-domain.js generates once a real
-//      Railway host is known, mapped to a locally running backend:
-//      login, guest mode, restrictions, logout and server errors work
-//      end to end through the rewrite.
+//   A. a rewrite to a host that does not resolve (what production had
+//      while vercel.json held a placeholder): Vercel answers 502
+//      DNS_HOSTNAME_NOT_FOUND in plain text, and the UI must say the
+//      backend is unreachable — never "logged in".
+//   B. the COMMITTED frontend/vercel.json, unchanged, with its backend
+//      host mapped to a locally running server: login, guest mode,
+//      restrictions, logout and server errors work end to end through
+//      the exact rewrite rules that ship.
 // ============================================================
 const { chromium } = require('@playwright/test');
 const { startServer, makeRunner, sleep } = require('./helpers/harness');
 const { startVercelEmulator } = require('./helpers/vercel-emulator');
+const fs = require('fs');
+const path = require('path');
 const { buildConfig } = require('../scripts/set-backend-domain');
+
+const COMMITTED = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'frontend', 'vercel.json'), 'utf8'));
+const COMMITTED_HOST = new URL(COMMITTED.rewrites.find((r) => r.source === '/api/:path*').destination.replace(':path*', 'x')).hostname;
 
 const USER = { email: 'existing@example.com', password: 'existing-pass-1' };
 
@@ -40,8 +45,8 @@ async function newPage(browser) {
   const browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}) });
   try {
     // ── A ──
-    t.section('A. Committed frontend/vercel.json (placeholder host) — production today');
-    let vercel = await startVercelEmulator({ port: 3001 });
+    t.section('A. Rewrite to a backend host that does not resolve');
+    let vercel = await startVercelEmulator({ port: 3001, config: buildConfig('backend-down.invalid') });
     let { page, errors } = await newPage(browser);
     await page.goto(vercel.url + '/');
     await page.waitForSelector('#auth-backend-status:not([hidden])', { timeout: 10000 });
@@ -52,7 +57,7 @@ async function newPage(browser) {
     await page.waitForFunction(() => document.getElementById('auth-error').textContent.length > 0);
     const loginMsg = await page.textContent('#auth-error');
     t.check(/Can't reach the NexusAI server/.test(loginMsg) && /502/.test(loginMsg) && /DNS_HOSTNAME_NOT_FOUND/.test(loginMsg), `login explains the real failure: "${loginMsg}"`);
-    t.check(vercel.log.some((l) => l.path === '/api/login' && /replace_with_railway_domain/i.test(l.destination)), 'the request was rewritten to the placeholder host (the root cause)');
+    t.check(vercel.log.some((l) => l.path === '/api/login' && /backend-down\.invalid/.test(l.destination)), 'the request was rewritten to the unresolvable host');
     t.check(await page.evaluate(() => localStorage.getItem('nx_t')) === null && !(await page.isVisible('#app')), 'no session is stored and the app is not opened');
     await page.click('#auth-guest-btn');
     await page.waitForFunction(() => /Can't reach/.test(document.getElementById('auth-error').textContent));
@@ -62,9 +67,11 @@ async function newPage(browser) {
     await vercel.close();
 
     // ── B ──
-    t.section('B. vercel.json generated for a real backend host');
-    const HOST = 'nexus-backend.up.railway.app';
-    vercel = await startVercelEmulator({ port: 3001, config: buildConfig(HOST), hostMap: { [HOST]: backend.base } });
+    t.section(`B. Committed frontend/vercel.json (→ ${COMMITTED_HOST})`);
+    t.check(!/REPLACE_WITH/i.test(JSON.stringify(COMMITTED)) && /\.up\.railway\.app$/.test(COMMITTED_HOST), 'the committed config targets a real Railway host, no placeholder');
+    t.check(COMMITTED.rewrites.some((r) => r.source === '/health' && r.destination === `https://${COMMITTED_HOST}/health`), 'it also routes /health to the backend');
+    const HOST = COMMITTED_HOST;
+    vercel = await startVercelEmulator({ port: 3001, config: COMMITTED, hostMap: { [HOST]: backend.base } });
     ({ page, errors } = await newPage(browser));
     await page.goto(vercel.url + '/');
     await sleep(800);
