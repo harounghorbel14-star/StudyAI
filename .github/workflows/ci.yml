@@ -3,8 +3,13 @@ name: NexusAI CI
 on:
   push:
     branches: [ main, develop ]
+  # Any base branch, so stacked PRs are checked too.
   pull_request:
-    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   syntax-check:
@@ -15,37 +20,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      # Every server file lives under backend/. The previous version ran
-      # `node --check server.js` from the checkout root, where no such
-      # file exists, so the job failed with MODULE_NOT_FOUND before
-      # checking anything.
-      #
-      # Paths are discovered rather than listed, so adding a directory
-      # under backend/ does not silently go unchecked. `-print0` and
-      # `read -r -d ''` keep it correct if a path ever contains a space.
-      - name: Check syntax of all backend files
+      # Paths are discovered rather than listed, so a new directory does
+      # not silently go unchecked. `-print0` / `read -d ''` keep it
+      # correct for paths containing spaces.
+      - name: Check syntax of backend, scripts and test files
         run: |
           set -euo pipefail
-          test -d backend || { echo "backend/ not found at $(pwd)"; exit 1; }
           count=0
           while IFS= read -r -d '' f; do
             node --check "$f"
             count=$((count + 1))
-          done < <(find backend -type f -name '*.js' \
+          done < <(find backend scripts tests -type f -name '*.js' \
                      -not -path '*/node_modules/*' \
                      -not -path '*/dist/*' \
                      -print0)
-          echo "$count backend file(s) parse cleanly"
-          test "$count" -gt 0 || { echo "no .js files found under backend/"; exit 1; }
-
-      # tests/ sits at the repository root, not under backend/.
-      - name: Check syntax of test files
-        run: |
-          set -euo pipefail
-          while IFS= read -r -d '' f; do
-            node --check "$f"
-          done < <(find tests -type f -name '*.js' -not -path '*/node_modules/*' -print0)
-          echo "test files parse cleanly"
+          echo "$count file(s) parse cleanly"
+          test "$count" -gt 0 || { echo "no .js files found"; exit 1; }
 
   typecheck:
     name: TypeScript Type Check
@@ -57,14 +47,17 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-      # The root package.json and tsconfig.json cover the whole project;
-      # tsconfig's include is already backend/**/*.ts.
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
       - name: Type check (strict mode)
         run: npx tsc --noEmit
+      # Both tsconfigs emit to backend/dist, which is where server.js,
+      # services/_resolve.js and the tests load compiled modules from.
       - name: Build
-        run: npx tsc
+        run: |
+          npx tsc
+          test -f backend/dist/security/hardening.js
+          test -f backend/dist/services/TypeScript/semantic-cache.js
 
   unit-test:
     name: Unit Tests
@@ -80,8 +73,6 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Build TypeScript
         run: npx tsc
-      # The file in the repository is tests/units.js. The workflow asked
-      # for tests/unit.js, which does not exist.
       - name: Run unit tests
         run: node tests/units.js
 
@@ -106,28 +97,111 @@ jobs:
           JWT_SECRET: test-jwt-secret-do-not-use-in-prod
           DEPLOY_KEY: test-deploy-key-32-chars-1234567890
 
-  # Mirrors what Railway does: Root Directory is backend, so it installs
-  # from backend/package-lock.json with npm ci. Catching a lockfile drift
-  # here means finding it in CI rather than in a failed deployment.
-  backend-install:
-    name: Backend Lockfile (Railway parity)
+  security-test:
+    name: Security Regression Tests
     runs-on: ubuntu-latest
+    needs: syntax-check
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: npm ci in backend
-        working-directory: backend
+          cache: 'npm'
+      - name: Install dependencies
         run: npm ci --no-audit --no-fund
+      - name: Run security regression tests
+        run: node tests/security-phase1.js
 
-  security-audit:
-    name: Security Audit
+  # Mirrors Railway: the service's Root Directory is backend/, so only
+  # that directory is available, the Node version comes from
+  # backend/package.json "engines" (matched by backend/.nvmrc), and the
+  # install is `npm ci` from backend/package-lock.json. The server is
+  # then started exactly as Railway starts it and probed over HTTP.
+  railway-parity:
+    name: Backend Build & Boot (Railway parity)
     runs-on: ubuntu-latest
-    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: backend/.nvmrc
+      - name: engines.node matches .nvmrc
+        run: |
+          set -euo pipefail
+          nvmrc="$(tr -d '[:space:]' < backend/.nvmrc)"
+          engines="$(node -p "require('./backend/package.json').engines.node")"
+          echo ".nvmrc=$nvmrc engines.node=$engines runtime=$(node -v)"
+          test "$engines" = "$nvmrc" || { echo "::error::backend/package.json engines.node ($engines) must equal backend/.nvmrc ($nvmrc) — Railway resolves the Node version from engines first"; exit 1; }
+          test "v$nvmrc" = "$(node -v)"
+      - name: Copy backend/ alone, as Railway sees it
+        run: cp -r backend "$RUNNER_TEMP/app"
+      - name: npm ci (no C toolchain needed)
+        working-directory: ${{ runner.temp }}/app
+        run: npm ci --no-audit --no-fund
+      - name: npm run build
+        working-directory: ${{ runner.temp }}/app
+        run: npm run build && test -f dist/security/hardening.js
+      - name: npm start and probe /health and /api/login
+        working-directory: ${{ runner.temp }}/app
+        env:
+          NODE_ENV: production
+          PORT: '3999'
+          # Dummy values: the server refuses to boot without them, and
+          # no request in this job reaches OpenAI or Stripe.
+          OPENAI_API_KEY: sk-ci-dummy
+          STRIPE_SECRET_KEY: sk_test_ci_dummy
+          STRIPE_WEBHOOK_SECRET: whsec_ci_dummy
+          JWT_SECRET: ci-jwt-secret-not-used-anywhere-else-0123456789
+          DEPLOY_KEY: ci-deploy-key-32-chars-0123456789ab
+        run: |
+          set -euo pipefail
+          npm start > server.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3999/health > /dev/null 2>&1 && break
+            sleep 1
+          done
+          echo "--- /health";     curl -fsS http://127.0.0.1:3999/health; echo
+          echo "--- /api/health"; curl -fsS http://127.0.0.1:3999/api/health; echo
+          code=$(curl -s -o login.json -w '%{http_code}' -X POST http://127.0.0.1:3999/api/login \
+                   -H 'Content-Type: application/json' \
+                   -d '{"email":"ci-probe@example.com","password":"not-a-real-password"}')
+          echo "--- /api/login -> $code $(cat login.json)"
+          test "$code" = "401"
+          grep -q 'content-security-policy' <(curl -sI http://127.0.0.1:3999/health | tr 'A-Z' 'a-z') \
+            || { echo "::error::security headers from dist/security/hardening were not applied"; exit 1; }
+          if grep -q 'Security headers not applied' server.log; then
+            echo "::error::server.log reports security headers were skipped"; exit 1
+          fi
+      - name: Server log
+        if: always()
+        working-directory: ${{ runner.temp }}/app
+        run: cat server.log || true
+
+  vercel-config:
+    name: Vercel Routing Config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: vercel.json copies agree and target a real host
+        run: |
+          set -euo pipefail
+          cmp vercel.json frontend/vercel.json || { echo "::error::vercel.json and frontend/vercel.json differ — regenerate both with scripts/set-backend-domain.js"; exit 1; }
+          if grep -q REPLACE_WITH_RAILWAY_DOMAIN vercel.json; then
+            echo "::warning title=Production API routing not configured::vercel.json still has the REPLACE_WITH_RAILWAY_DOMAIN placeholder, so /api/* on the Vercel site cannot reach the backend. Run: node scripts/set-backend-domain.js <railway-host>"
+          fi
+
+  # Production dependencies only: devDependencies (nodemon, playwright,
+  # typescript) are never installed on Railway.
+  security-audit:
+    name: Security Audit (production deps)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm audit --audit-level=high
+      - name: Audit root lockfile
+        run: npm audit --omit=dev --audit-level=high
+      - name: Audit backend lockfile (what Railway installs)
+        working-directory: backend
+        run: npm audit --omit=dev --audit-level=high
