@@ -25,7 +25,8 @@
     return d;
   }
 
-  const STATUS_ICON = { pending: '○', running: '◌', succeeded: '✓', failed: '✕', skipped: '–', needs_approval: '⏸', rejected: '⊘' };
+  const STATUS_ICON = { pending: '○', running: '◌', succeeded: '✓', failed: '✕', skipped: '–', needs_approval: '⏸', rejected: '⊘', outcome_unknown: '⚠' };
+  const VERIFY_LABEL = { verified: 'Verified', partially_verified: 'Partially verified', executed_unverified: 'Executed, not verified', failed: 'Failed' };
   const RUN_LABEL = {
     queued: 'Queued', running: 'Working…', awaiting_approval: 'Waiting for your approval', cancelling: 'Cancelling…',
     succeeded: 'Completed and verified', failed: 'Failed', cancelled: 'Cancelled', stopped: 'Stopped (budget reached)', needs_input: 'Needs more information',
@@ -64,6 +65,7 @@
 .nxa-check{font-size:13px}.nxa-check.ok::before{content:'✓ ';color:#34d399}.nxa-check.bad::before{content:'✕ ';color:#f87171}
 .nxa-approve{border-color:#f59e0b88}
 .nxa-approve pre{font-size:12px;background:var(--bg3,#1c1c26);padding:8px;border-radius:6px;overflow:auto;max-height:160px}
+.nxa-privacy{display:flex;gap:6px;align-items:center;margin-top:6px}
 .nxa-inference{font-size:11.5px;color:var(--t3,#888)}`;
     document.head.appendChild(st);
   }
@@ -86,6 +88,7 @@
           <h3>Goal</h3>
           <label for="nxa-goal" class="nxa-meta">Describe what you want done. The agent plans, researches with sources, checks its work, and asks before changing anything outside NexusAI.</label>
           <textarea id="nxa-goal" class="nxa-goal" maxlength="2000" placeholder="e.g. Compare the latest pricing of three EU cloud providers and cite sources"></textarea>
+          <label class="nxa-meta nxa-privacy"><input type="checkbox" id="nxa-private"/> Keep this run on the local model only (fails rather than using a cloud model)</label>
           <div class="nxa-row"><button type="button" class="nxa-btn" id="nxa-run">Run agent</button>
             <button type="button" class="nxa-btn sec" id="nxa-cancel" hidden>Cancel run</button>
             <span class="nxa-status" id="nxa-status" role="status" aria-live="polite"></span></div>
@@ -124,7 +127,7 @@
     const btn = $('#nxa-run');
     btn.disabled = true; btn.textContent = 'Starting…';
     try {
-      const { run } = await call('POST', '/api/agent/runs', { goal });
+      const { run } = await call('POST', '/api/agent/runs', { goal, ...($('#nxa-private').checked ? { privacy: 'local' } : {}) });
       state = { runId: run.id, lastEvent: 0, timer: null, events: [] };
       render(run);
       poll();
@@ -139,8 +142,9 @@
     try { await call('POST', `/api/agent/runs/${state.runId}/cancel`, {}); } catch (e) { $('#nxa-status').textContent = e.message; }
   }
 
-  async function decide(decision) {
-    try { await call('POST', `/api/agent/runs/${state.runId}/decision`, { decision }); poll(); } catch (e) { $('#nxa-status').textContent = e.message; }
+  // step_id binds the decision to the exact request shown on screen.
+  async function decide(decision, stepId) {
+    try { await call('POST', `/api/agent/runs/${state.runId}/decision`, { decision, step_id: stepId }); poll(); } catch (e) { $('#nxa-status').textContent = e.message; poll(); }
   }
 
   async function reviewLesson(id, status) {
@@ -184,11 +188,16 @@
     const parts = [];
 
     if (run.plan) {
-      parts.push(`<div class="nxa-card"><h3>Plan</h3><div class="nxa-meta">${esc(run.plan.interpretation)}</div>
+      const stepNo = new Map(run.steps.map((s, i) => [s.id, i + 1]));
+      const done = run.steps.filter((s) => ['succeeded', 'failed', 'skipped', 'rejected', 'outcome_unknown'].includes(s.status)).length;
+      parts.push(`<div class="nxa-card"><h3>Plan${run.plan.source && run.plan.source !== 'model' ? ` <span class="nxa-meta">(${esc(run.plan.source.replace(/_/g, ' '))})</span>` : ''}</h3><div class="nxa-meta">${esc(run.plan.interpretation)}</div>
+        ${run.plan.success_criteria?.length ? `<div class="nxa-meta">Done when: ${esc(run.plan.success_criteria.join('; '))}</div>` : ''}
+        ${run.plan.assumptions?.length ? `<div class="nxa-meta">Assumes: ${esc(run.plan.assumptions.join('; '))}</div>` : ''}
         ${run.plan.unknowns?.length ? `<div class="nxa-meta">Uncertain: ${esc(run.plan.unknowns.join('; '))}</div>` : ''}
+        <div class="nxa-meta">Progress: ${done}/${run.steps.length} steps${run.options?.privacy === 'local' ? ' · local model only' : ''}</div>
         <ul class="nxa-steps">${run.steps.map((s) => `<li class="${esc(s.status)}"><span class="ic" aria-label="${esc(s.status)}">${STATUS_ICON[s.status] || '?'}</span>
-          <span>${esc(s.title)} <span class="nxa-meta">· ${esc(s.tool)}${s.evaluation?.reason && s.status !== 'succeeded' ? ` · ${esc(s.evaluation.reason)}` : ''}${s.error && !s.evaluation ? ` · ${esc(s.error)}` : ''}</span></span></li>`).join('')}</ul>
-        <div class="nxa-meta">Budget used: ${run.usage?.steps ?? 0}/${run.budget?.maxSteps} steps · ${run.usage?.tool_calls ?? 0}/${run.budget?.maxToolCalls} tool calls · ${run.usage?.llm_calls ?? 0}/${run.budget?.maxLlmCalls} model calls${run.usage?.models?.length ? ` · ${esc(run.usage.models.join(', '))}` : ''}</div></div>`);
+          <span>${esc(s.title)} <span class="nxa-meta">· ${esc(s.tool)}${s.risk && s.risk !== 'read' ? ` · ${esc(s.risk)}` : ''}${s.depends_on?.length ? ` · after ${s.depends_on.map((d) => stepNo.get(d)).filter(Boolean).join(', ')}` : ''}${s.failure ? ` · ${esc(s.failure.category.replace(/_/g, ' '))}` : ''}${s.evaluation?.reason && s.status !== 'succeeded' ? ` · ${esc(s.evaluation.reason)}` : ''}${s.error && !s.evaluation ? ` · ${esc(s.error)}` : ''}</span></span></li>`).join('')}</ul>
+        <div class="nxa-meta">Budget used: ${run.usage?.steps ?? 0}/${run.budget?.maxSteps} steps · ${run.usage?.tool_calls ?? 0}/${run.budget?.maxToolCalls} tool calls · ${run.usage?.llm_calls ?? 0}/${run.budget?.maxLlmCalls} model calls${run.usage?.retries ? ` · ${run.usage.retries} retr${run.usage.retries === 1 ? 'y' : 'ies'}` : ''}${run.usage?.fallbacks ? ` · ${run.usage.fallbacks} model fallback(s)` : ''}${run.usage?.models?.length ? ` · ${esc(run.usage.models.join(', '))}` : ''}</div></div>`);
     }
 
     if (run.status === 'awaiting_approval' && run.pending_action) {
@@ -196,8 +205,9 @@
       parts.push(`<div class="nxa-card nxa-approve"><h3>Approval needed</h3>
         <div>The agent wants to run <strong>${esc(a.tool)}</strong>, which changes something outside NexusAI:</div>
         <pre>${esc(JSON.stringify(a.args, null, 2))}</pre>
-        <div class="nxa-row"><button type="button" class="nxa-btn" data-decide="approve">Approve this action</button>
-        <button type="button" class="nxa-btn sec" data-decide="reject">Reject</button></div></div>`);
+        <div class="nxa-meta">This approval covers exactly this action, once${a.expires_at ? `, until ${esc(new Date(a.expires_at).toLocaleTimeString())}` : ''}.</div>
+        <div class="nxa-row"><button type="button" class="nxa-btn" data-decide="approve" data-step="${esc(a.step_id)}">Approve this action</button>
+        <button type="button" class="nxa-btn sec" data-decide="reject" data-step="${esc(a.step_id)}">Reject</button></div></div>`);
     }
 
     const sources = new Map();
@@ -214,9 +224,9 @@
       const v = run.result.verification;
       parts.push(`<div class="nxa-card"><h3>Result${run.result.mode === 'extractive' ? ' (extractive — no model summary)' : ''}</h3>
         <div class="nxa-answer">${linkCitations(run.result.answer, run.result.citations)}</div></div>`);
-      if (v) parts.push(`<div class="nxa-card"><h3>Verification</h3>${v.checks.map((c) => `<div class="nxa-check ${c.passed ? 'ok' : 'bad'}">${esc(c.check)}${c.detail ? ` <span class="nxa-meta">(${esc(c.detail)})</span>` : ''}</div>`).join('')}</div>`);
+      if (v) parts.push(`<div class="nxa-card"><h3>Verification${v.level ? `: ${esc(VERIFY_LABEL[v.level] || v.level)}` : ''}</h3>${v.checks.map((c) => `<div class="nxa-check ${c.passed ? 'ok' : 'bad'}">${esc(c.check)}${c.detail ? ` <span class="nxa-meta">(${esc(c.detail)})</span>` : ''}</div>`).join('')}</div>`);
       if (run.result.limitations?.length || run.result.failed_steps?.length) {
-        parts.push(`<div class="nxa-card"><h3>Limitations</h3><ul>${[...run.result.failed_steps.map((f) => `${f.step}: ${f.status}${f.error ? ` (${f.error})` : ''}`), ...run.result.limitations].map((l) => `<li class="nxa-meta">${esc(l)}</li>`).join('')}</ul></div>`);
+        parts.push(`<div class="nxa-card"><h3>Limitations</h3><ul>${[...run.result.failed_steps.map((f) => `${f.step}: ${f.status.replace(/_/g, ' ')}${f.error ? ` (${f.error})` : ''}`), ...run.result.limitations].map((l) => `<li class="nxa-meta">${esc(l)}</li>`).join('')}</ul></div>`);
       }
     }
 
@@ -228,10 +238,10 @@
         <button type="button" class="nxa-btn sec" data-lesson="${Number(lesson.data.id)}" data-status="rejected">Reject</button></div></div>`);
     }
 
-    parts.push(`<div class="nxa-card"><h3>Activity</h3><div class="nxa-log">${state.events.slice(-60).map((e) => esc(`${e.at.slice(11, 19)}  ${e.type}${e.data?.title ? ` — ${e.data.title}` : ''}${e.data?.tool && !e.data?.title ? ` — ${e.data.tool}` : ''}${e.data?.reason ? ` — ${e.data.reason}` : ''}`)).join('\n')}</div></div>`);
+    parts.push(`<div class="nxa-card"><h3>Activity</h3><div class="nxa-log">${state.events.slice(-60).map((e) => esc(`${e.at.slice(11, 19)}  ${e.type}${e.data?.title ? ` — ${e.data.title}` : ''}${e.data?.tool && !e.data?.title ? ` — ${e.data.tool}` : ''}${e.data?.reason ? ` — ${e.data.reason}` : ''}${e.data?.routing?.fallback ? ` — fell back${e.data.routing.fallback_from ? ` from ${e.data.routing.fallback_from}` : ''}` : ''}${e.data?.failure ? ` — ${e.data.failure.category}` : ''}${e.data?.code && e.type === 'model.call' ? ` — ${e.data.code}` : ''}`)).join('\n')}</div></div>`);
 
     $('#nxa-out').innerHTML = parts.join('');
-    $('#nxa-out').querySelectorAll('[data-decide]').forEach((b) => { b.onclick = () => decide(b.dataset.decide); });
+    $('#nxa-out').querySelectorAll('[data-decide]').forEach((b) => { b.onclick = () => decide(b.dataset.decide, b.dataset.step); });
     $('#nxa-out').querySelectorAll('[data-lesson]').forEach((b) => { b.onclick = () => reviewLesson(b.dataset.lesson, b.dataset.status); });
   }
 
