@@ -159,7 +159,7 @@ const guest = { id: 3, email: 'guest@guest.nexusai.invalid', plan: 'guest', gues
     run = env.runner.get(1, run.id);
     t.check(run.status === 'awaiting_approval' && env.posted.length === 0, 'the run paused before the external POST; nothing was sent');
     t.check(run.pending_action?.tool === 'http_post' && run.pending_action.args.url.includes('attacker'), 'the exact pending action is shown to the user for review');
-    await env.runner.decide(userA, run.id, 'reject');
+    await env.runner.decide(userA, run.id, 'reject', { stepId: run.pending_action.step_id });
     run = env.runner.get(1, run.id);
     t.check(env.posted.length === 0 && run.steps.find((s) => s.tool === 'http_post').status === 'rejected', 'rejecting it means it never runs');
     t.check(['succeeded', 'failed'].includes(run.status), `the run finished without the rejected action (${run.status})`);
@@ -168,7 +168,7 @@ const guest = { id: 3, email: 'guest@guest.nexusai.invalid', plan: 'guest', gues
     run = env.runner.create(userA, 'Notify my webhook that the report is done');
     await env.runner.start(userA, run.id);
     t.check(env.runner.get(1, run.id).status === 'awaiting_approval', 'a legitimate external action also waits for approval');
-    await env.runner.decide(userA, run.id, 'approve');
+    await env.runner.decide(userA, run.id, 'approve', { stepId: env.runner.get(1, run.id).pending_action.step_id });
     t.check(env.posted.length === 1 && env.posted[0].url === 'https://hooks.example.com/ok', 'after approval it runs exactly once with the approved arguments');
     let threw = null;
     try { await env.runner.tools.execute('http_post', { url: 'https://hooks.example.com/other', body: {} }, { user: userA, approvals: new Set() }); } catch (e) { threw = e; }

@@ -67,7 +67,7 @@ No new npm dependencies were added.
 ## 4. API and event contract changes (all backward compatible)
 
 - `POST /api/agent/runs` accepts optional `privacy: "default" | "local"`; any other value is a 400.
-- `POST /api/agent/runs/:id/decision` accepts optional `step_id`. A mismatch returns **409 `STALE_APPROVAL`**. An expired request returns **409 `APPROVAL_EXPIRED`** and is re-issued for review.
+- `POST /api/agent/runs/:id/decision` **requires** `step_id`, the id of the pending step being decided (changed after PR #6; see below). Missing or malformed → **400 `INVALID_STEP_ID`**; a different step → **409 `STALE_APPROVAL`**. An expired request returns **409 `APPROVAL_EXPIRED`** and is re-issued for review.
 - `POST /api/agent/runs` while the server is draining returns **503 `SHUTTING_DOWN`**.
 - New endpoints: `GET /api/agent/lessons/effectiveness`, `GET /api/agent/evidence`, `DELETE /api/agent/evidence/:id`, `GET /ready`, `GET /api/ready`. Guests cannot reach the agent memory endpoints (server allow-list).
 - Additions to existing responses:
@@ -83,6 +83,8 @@ No new npm dependencies were added.
 **Behaviour changes:**
 - A plan with an unknown tool or invalid arguments is now rejected as a whole and repaired, instead of having those steps silently dropped.
 - A run interrupted by a restart is resumed when it was doing read-only work, instead of always being failed.
+
+**Breaking change after PR #6 (security fix).** Before, `step_id` was optional: a decision without it applied to whatever step was pending when it arrived, so a stale or replayed decision could approve or reject a later action. Now `step_id` is required for both approve and reject. It is checked at the API (format) and in the runner (exact match with the pending step). The grant or rejection and the state change are committed in one transaction. The bundled UI always sent `step_id`; other clients must send it.
 
 ## 5. Security boundaries
 

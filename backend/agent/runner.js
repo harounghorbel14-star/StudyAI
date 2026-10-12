@@ -36,6 +36,9 @@ const { ToolError } = require('./tools');
 const { validatePlan, PLAN_FORMAT } = require('./plan');
 const { TERMINAL, ACTIVE, ALLOWED_FROM, classifyFailure, FAILURE } = require('./policy');
 
+// Step ids are generated as `${runId}_s<index>_<6 hex>` (see _insertSteps).
+const STEP_ID_RE = /^run_[0-9a-f]{18}_s\d{1,4}_[0-9a-f]{6}$/;
+
 const BUDGETS = {
   guest:   { maxSteps: 3, maxToolCalls: 3, maxLlmCalls: 10, maxReplans: 1, deadlineMs: 90_000,  researchPages: 3 },
   free:    { maxSteps: 5, maxToolCalls: 6, maxLlmCalls: 18, maxReplans: 2, deadlineMs: 150_000, researchPages: 5 },
@@ -313,11 +316,14 @@ class AgentRunner {
    * is itself valid for AGENT_APPROVAL_TTL_MS.
    */
   decide(user, runId, decision, { stepId } = {}) {
+    // The decision must name the exact step the user reviewed. Without it a
+    // stale or replayed decision could land on a different pending action.
+    if (typeof stepId !== 'string' || !STEP_ID_RE.test(stepId)) throw new ToolError('step_id of the pending action is required.', 'INVALID_STEP_ID');
     const row = this.db.prepare('SELECT * FROM agent_runs WHERE id = ? AND user_id = ?').get(runId, user.id);
     if (!row) return null;
     if (row.status !== 'awaiting_approval' || !row.pending_action) throw new ToolError('This run is not waiting for approval.', 'NOT_AWAITING');
     const pending = JSON.parse(row.pending_action);
-    if (stepId && stepId !== pending.step_id) throw new ToolError('That approval request is no longer current.', 'STALE_APPROVAL');
+    if (stepId !== pending.step_id) throw new ToolError('That approval request is no longer current.', 'STALE_APPROVAL');
     const step = this.db.prepare('SELECT * FROM agent_run_steps WHERE id = ? AND run_id = ?').get(pending.step_id, runId);
     if (!step || step.status !== 'needs_approval') throw new ToolError('That approval request is no longer current.', 'STALE_APPROVAL');
     const now = this.now();
@@ -333,13 +339,19 @@ class AgentRunner {
       // pending_action cannot approve something else.
       const prepared = this._prepareForApproval(step, user);
       if (!prepared || prepared.fingerprint !== pending.fingerprint) throw new ToolError('The pending action changed; it needs a new review.', 'STALE_APPROVAL');
-      this.db.prepare(`INSERT INTO agent_approvals (run_id, step_id, user_id, tool, fingerprint, created_at, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`).run(runId, step.id, user.id, step.tool, pending.fingerprint, now, now + APPROVAL_TTL_MS());
-      if (!this._transition(runId, 'queued', { pending_action: null })) throw new ToolError('This run is not waiting for approval.', 'NOT_AWAITING');
+      // Grant and state change commit together: a refused transition leaves no usable approval behind.
+      this.db.transaction(() => {
+        this.db.prepare(`INSERT INTO agent_approvals (run_id, step_id, user_id, tool, fingerprint, created_at, expires_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`).run(runId, step.id, user.id, step.tool, pending.fingerprint, now, now + APPROVAL_TTL_MS());
+        if (!this._transition(runId, 'queued', { pending_action: null })) throw new ToolError('This run is not waiting for approval.', 'NOT_AWAITING');
+      })();
       this._event(runId, 'approval.granted', { step_id: pending.step_id, tool: pending.tool, fingerprint: pending.fingerprint });
     } else {
-      this.db.prepare("UPDATE agent_run_steps SET status = 'rejected', error = 'Rejected by the user', finished_at = ? WHERE id = ?").run(now, pending.step_id);
-      if (!this._transition(runId, 'queued', { pending_action: null })) throw new ToolError('This run is not waiting for approval.', 'NOT_AWAITING');
+      this.db.transaction(() => {
+        const r = this.db.prepare("UPDATE agent_run_steps SET status = 'rejected', error = 'Rejected by the user', finished_at = ? WHERE id = ? AND status = 'needs_approval'").run(now, pending.step_id);
+        if (!r.changes) throw new ToolError('That approval request is no longer current.', 'STALE_APPROVAL');
+        if (!this._transition(runId, 'queued', { pending_action: null })) throw new ToolError('This run is not waiting for approval.', 'NOT_AWAITING');
+      })();
       this._event(runId, 'approval.rejected', { step_id: pending.step_id, tool: pending.tool });
     }
     return this.start(user, runId);
@@ -836,4 +848,4 @@ class AgentRunner {
   }
 }
 
-module.exports = { AgentRunner, resolveBudget, BUDGETS, TERMINAL };
+module.exports = { AgentRunner, resolveBudget, BUDGETS, TERMINAL, STEP_ID_RE };

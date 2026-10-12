@@ -5,12 +5,13 @@
 // lesson is answered with 404, exactly like one that does not exist.
 // ============================================================
 const express = require('express');
+const { STEP_ID_RE } = require('../agent/runner');
 
 module.exports = ({ runner, memory, requireAuth, requireQuota, aiLimiter, wrap }) => {
   const router = express.Router();
 
   const toError = (res, err) => {
-    const map = { INVALID_GOAL: 400, TOO_MANY_RUNS: 429, NOT_AWAITING: 409, STALE_APPROVAL: 409, APPROVAL_EXPIRED: 409, SHUTTING_DOWN: 503 };
+    const map = { INVALID_GOAL: 400, TOO_MANY_RUNS: 429, INVALID_STEP_ID: 400, NOT_AWAITING: 409, STALE_APPROVAL: 409, APPROVAL_EXPIRED: 409, SHUTTING_DOWN: 503 };
     if (map[err.code]) return res.status(map[err.code]).json({ error: err.message, code: err.code });
     throw err;
   };
@@ -84,9 +85,9 @@ module.exports = ({ runner, memory, requireAuth, requireQuota, aiLimiter, wrap }
     const decision = req.body?.decision;
     if (!['approve', 'reject'].includes(decision)) return res.status(400).json({ error: 'decision must be "approve" or "reject".' });
     const stepId = req.body?.step_id;
-    if (stepId !== undefined && typeof stepId !== 'string') return res.status(400).json({ error: 'step_id must be a string.' });
+    // Required: binds the decision to the exact pending action the user reviewed.
+    if (typeof stepId !== 'string' || !STEP_ID_RE.test(stepId)) return res.status(400).json({ error: 'step_id of the pending action is required.', code: 'INVALID_STEP_ID' });
     try {
-      // step_id (optional, recommended) binds the decision to the request the user saw.
       const p = runner.decide(req.user, req.params.id, decision, { stepId });
       if (p === null) return res.status(404).json({ error: 'Run not found.' });
       res.json({ ok: true, decision });
