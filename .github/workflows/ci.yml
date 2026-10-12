@@ -132,6 +132,10 @@ jobs:
         run: node tests/research.js
       - name: Agent runtime
         run: node tests/agent.js
+      - name: Agent hardening (approvals, state machine, plans, failures, parallelism, memory)
+        run: node tests/agent-hardening.js
+      - name: Agent evaluation suite
+        run: node tests/agent-eval.js
       - name: Schema consistency
         run: node tests/schema.js
 
@@ -157,6 +161,8 @@ jobs:
         run: node tests/inference.js
       - name: Agent HTTP API
         run: node tests/agent-api.js
+      - name: Agent operations (readiness, SIGTERM drain + recovery, privacy routing)
+        run: node tests/agent-ops.js
 
   browser-test:
     name: Browser E2E (login UI, agent panel)

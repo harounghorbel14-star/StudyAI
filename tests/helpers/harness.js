@@ -21,7 +21,7 @@ function startFakeLLM(rules = []) {
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
-    req.on('end', () => {
+    req.on('end', async () => {
       let parsed = {};
       try { parsed = JSON.parse(body || '{}'); } catch (_) { /* ignore */ }
       const text = (parsed.messages || []).map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
@@ -31,6 +31,7 @@ function startFakeLLM(rules = []) {
         return res.end(JSON.stringify({ data: [{ id: 'fake-model' }] }));
       }
       const rule = rules.find((r) => (typeof r.match === 'string' ? text.includes(r.match) : r.match.test(text)));
+      if (rule?.delayMs) await new Promise((r) => setTimeout(r, rule.delayMs));
       if (rule?.status) {
         res.writeHead(rule.status, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: { message: 'fake failure' } }));
@@ -49,8 +50,9 @@ function startFakeLLM(rules = []) {
   }));
 }
 
-async function startServer({ env = {}, llmRules = [], port: fixedPort } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nx-it-'));
+async function startServer({ env = {}, llmRules = [], port: fixedPort, dir: keepDir } = {}) {
+  // keepDir: reuse a directory (and its database) across restarts; it is not deleted on stop.
+  const dir = keepDir || fs.mkdtempSync(path.join(os.tmpdir(), 'nx-it-'));
   const outbox = path.join(dir, 'outbox');
   const llm = await startFakeLLM(llmRules);
   const port = fixedPort || 20000 + Math.floor(Math.random() * 20000);
@@ -112,14 +114,16 @@ async function startServer({ env = {}, llmRules = [], port: fixedPort } = {}) {
     return fs.readdirSync(outbox).sort().map((f) => JSON.parse(fs.readFileSync(path.join(outbox, f), 'utf8')));
   }
 
+  const exited = new Promise((r) => child.once('exit', (code, signal) => r({ code, signal })));
+
   async function stop() {
     child.kill();
     llm.close();
     await new Promise((r) => setTimeout(r, 100));
-    fs.rmSync(dir, { recursive: true, force: true });
+    if (!keepDir) fs.rmSync(dir, { recursive: true, force: true });
   }
 
-  return { base, call, readOutbox, stop, llm, dir, log: () => log, dbPath: path.join(dir, 'test.db') };
+  return { base, call, readOutbox, stop, llm, dir, log: () => log, dbPath: env.DB_PATH || path.join(dir, 'test.db'), child, exited };
 }
 
 // Tiny assertion runner shared by the integration suites.
