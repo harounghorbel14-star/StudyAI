@@ -10,7 +10,7 @@ module.exports = ({ runner, memory, requireAuth, requireQuota, aiLimiter, wrap }
   const router = express.Router();
 
   const toError = (res, err) => {
-    const map = { INVALID_GOAL: 400, TOO_MANY_RUNS: 429, NOT_AWAITING: 409 };
+    const map = { INVALID_GOAL: 400, TOO_MANY_RUNS: 429, NOT_AWAITING: 409, STALE_APPROVAL: 409, APPROVAL_EXPIRED: 409, SHUTTING_DOWN: 503 };
     if (map[err.code]) return res.status(map[err.code]).json({ error: err.message, code: err.code });
     throw err;
   };
@@ -19,7 +19,10 @@ module.exports = ({ runner, memory, requireAuth, requireQuota, aiLimiter, wrap }
   // model and tool calls it can make.
   router.post('/runs', requireAuth, requireQuota, aiLimiter, wrap(async (req, res) => {
     try {
-      const run = runner.create(req.user, req.body?.goal, req.body?.budget);
+      // privacy: "local" keeps every model call of this run on the local model.
+      const privacy = req.body?.privacy;
+      if (privacy !== undefined && !['default', 'local'].includes(privacy)) return res.status(400).json({ error: 'privacy must be "default" or "local".' });
+      const run = runner.create(req.user, req.body?.goal, req.body?.budget, { privacy });
       runner.start(req.user, run.id);   // background; progress via /events
       res.status(202).json({ run });
     } catch (err) { toError(res, err); }
@@ -80,8 +83,11 @@ module.exports = ({ runner, memory, requireAuth, requireQuota, aiLimiter, wrap }
   router.post('/runs/:id/decision', requireAuth, wrap(async (req, res) => {
     const decision = req.body?.decision;
     if (!['approve', 'reject'].includes(decision)) return res.status(400).json({ error: 'decision must be "approve" or "reject".' });
+    const stepId = req.body?.step_id;
+    if (stepId !== undefined && typeof stepId !== 'string') return res.status(400).json({ error: 'step_id must be a string.' });
     try {
-      const p = runner.decide(req.user, req.params.id, decision);
+      // step_id (optional, recommended) binds the decision to the request the user saw.
+      const p = runner.decide(req.user, req.params.id, decision, { stepId });
       if (p === null) return res.status(404).json({ error: 'Run not found.' });
       res.json({ ok: true, decision });
     } catch (err) { toError(res, err); }
@@ -108,6 +114,21 @@ module.exports = ({ runner, memory, requireAuth, requireQuota, aiLimiter, wrap }
     const lesson = memory.review(req.user.id, Number(req.params.id), req.body?.status);
     if (!lesson) return res.status(404).json({ error: 'Lesson not found (status must be approved or rejected).' });
     res.json({ lesson });
+  }));
+
+  // Measured effect of approved lessons on this user's run outcomes.
+  router.get('/lessons/effectiveness', requireAuth, wrap(async (req, res) => {
+    res.json(memory.lessonEffectiveness(req.user.id));
+  }));
+
+  // Stored research evidence (with provenance): review and delete.
+  router.get('/evidence', requireAuth, wrap(async (req, res) => {
+    res.json({ evidence: memory.listEvidence(req.user.id, Number(req.query.limit) || 100) });
+  }));
+
+  router.delete('/evidence/:id', requireAuth, wrap(async (req, res) => {
+    if (!memory.deleteEvidence(req.user.id, Number(req.params.id))) return res.status(404).json({ error: 'Evidence not found.' });
+    res.json({ ok: true });
   }));
 
   router.delete('/lessons/:id', requireAuth, wrap(async (req, res) => {

@@ -1,5 +1,7 @@
 # NexusAI agent runtime
 
+> Phase 2 hardening (approvals, state machine, validated plans, recovery, privacy routing, memory controls) is documented in [UNIVERSAL_AGENT_IMPLEMENTATION.md](UNIVERSAL_AGENT_IMPLEMENTATION.md).
+
 What the agent can actually do, how it is kept safe, and how to configure it.
 For the tests that back each claim, see the end of this file.
 

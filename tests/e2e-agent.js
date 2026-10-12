@@ -54,6 +54,9 @@ const PLANS = {
     t.check(await page.locator('.nxa-steps li.succeeded').count() === 1, 'the plan step is shown as succeeded');
     t.check((await page.textContent('.nxa-answer')).includes('The product is 42'), 'the deliverable is displayed');
     t.check(await page.locator('.nxa-check.ok').count() >= 2, 'verification checks are displayed');
+    t.check(/Verification: Verified/.test(await page.textContent('#nxa-out')), 'the verification level is stated ("Verified", not just "done")');
+    t.check(/Progress: 1\/1 steps/.test(await page.textContent('#nxa-out')), 'overall progress is shown');
+    t.check(await page.isVisible('#nxa-private'), 'a "local model only" privacy option is offered');
     t.check(/plan\.created/.test(await page.textContent('.nxa-log')) && /step\.succeeded/.test(await page.textContent('.nxa-log')), 'the activity log shows the execution events');
 
     t.section('Untrusted model output');
@@ -73,6 +76,8 @@ const PLANS = {
     await page.click('#nxa-run');
     await page.waitForSelector('.nxa-approve', { timeout: 30000 });
     t.check((await page.textContent('.nxa-approve')).includes('hooks.example.com'), 'the exact action awaiting approval is shown');
+    t.check(/exactly this action, once/.test(await page.textContent('.nxa-approve')), 'the approval scope (this action, once, with expiry) is explained');
+    t.check(/external/.test(await page.textContent('.nxa-steps')), 'the step is labelled with its risk class');
     await page.click('[data-decide="reject"]');
     await page.waitForFunction(() => /Completed|Failed|Stopped/.test(document.getElementById('nxa-status').textContent), null, { timeout: 30000 });
     t.check(await page.locator('.nxa-steps li.rejected').count() === 1, 'after rejecting, the step is shown as rejected and the run ends');
