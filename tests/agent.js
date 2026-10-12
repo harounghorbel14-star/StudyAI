@@ -29,7 +29,10 @@ function setup() {
     if (script.fail) throw new Error('model provider unavailable');
     if (script.delay) await sleep(script.delay);
     const sys = p.system;
-    if (sys.startsWith('You are the Planner of an autonomous agent')) return { output: script.plan, provider: 'fake', model: 'planner-1', usage: { total_tokens: 100 } };
+    if (sys.startsWith('You are the Planner of an autonomous agent')) {
+      const repair = /Your previous plan was rejected/.test(p.prompt) && script.repairPlan;
+      return { output: repair || script.plan, provider: 'fake', model: 'planner-1', usage: { total_tokens: 100 } };
+    }
     if (sys.startsWith('You are the Planner. A step failed')) return { output: script.replan || { steps: [] }, provider: 'fake', model: 'planner-1' };
     if (sys.startsWith('You are the Validator')) return { output: { satisfied: true, reason: 'meets criterion' } };
     if (sys.startsWith('You are the Analyst')) {
@@ -69,12 +72,23 @@ const guest = { id: 3, email: 'guest@guest.nexusai.invalid', plan: 'guest', gues
         { title: 'Compute the difference between reported lengths', tool: 'calculate', args: { expression: '1450-1200' }, success_criteria: 'A number' },
         { title: 'Use a tool that does not exist', tool: 'launch_rocket', args: {} },
       ],
+    },
+    // What the planner returns after being told why its plan was rejected.
+    repairPlan: {
+      interpretation: 'Find opening date and length, then compute the discrepancy.',
+      unknowns: ['which length figure is authoritative'],
+      steps: [
+        { title: 'Research the bridge', tool: 'web_research', args: { question: Q }, success_criteria: 'Opening date and length with sources' },
+        { title: 'Compute the difference between reported lengths', tool: 'calculate', args: { expression: '1450-1200' }, depends_on: [0], success_criteria: 'A number' },
+      ],
     } });
     let run = env.runner.create(userA, Q);
     await env.runner.start(userA, run.id);
     run = env.runner.get(userA.id, run.id);
     t.check(run.status === 'succeeded', `run succeeded (${run.status}${run.error ? ': ' + run.error : ''})`);
-    t.check(run.plan.steps.length === 2 && run.plan.dropped_invalid_steps === 1, 'the unknown tool in the plan was dropped, never executed');
+    const rejected = env.runner.events(1, run.id).find((e) => e.type === 'plan.rejected');
+    t.check(rejected && rejected.data.errors.some((x) => x.includes('launch_rocket')), 'a plan naming an unknown tool was rejected as a whole, with the reason');
+    t.check(run.plan.source === 'model_repaired' && run.plan.steps.length === 2 && !run.steps.some((x) => x.tool === 'launch_rocket'), 'the corrected plan ran; the unknown tool never executed');
     t.check(run.steps.every((s) => s.status === 'succeeded'), 'every planned step ran and was evaluated as satisfied');
     t.check(run.steps[1].output.value === 250, 'calculate produced 250 without eval()');
     t.check(run.plan.unknowns.length > 0, 'the plan records what is uncertain');
@@ -189,7 +203,7 @@ const guest = { id: 3, email: 'guest@guest.nexusai.invalid', plan: 'guest', gues
     env = setup();
     env.setScript({ delay: 150, plan: { steps: [
       { title: 'Research', tool: 'web_research', args: { question: Q } },
-      { title: 'Calc', tool: 'calculate', args: { expression: '2+2' } },
+      { title: 'Calc', tool: 'calculate', args: { expression: '2+2' }, depends_on: [0] },
     ] } });
     run = env.runner.create(userA, Q);
     const p = env.runner.start(userA, run.id);
@@ -213,10 +227,26 @@ const guest = { id: 3, email: 'guest@guest.nexusai.invalid', plan: 'guest', gues
     // ── H. Restart safety ──
     t.section('Restart safety');
     env = setup();
+    // r3: interrupted during read-only research → safe to resume.
     const r3 = env.runner.create(userA, Q);
     env.db.prepare("UPDATE agent_runs SET status = 'running' WHERE id = ?").run(r3.id);
+    env.runner._insertSteps(r3.id, 0, [{ title: 'Research', tool: 'web_research', args: { question: Q }, risk: 'read' }]);
+    env.db.prepare("UPDATE agent_run_steps SET status = 'running' WHERE run_id = ?").run(r3.id);
+    // r4: interrupted while an approved external POST was in flight.
+    const r4 = env.runner.create(userB, 'Notify my webhook after research');
+    env.db.prepare("UPDATE agent_runs SET status = 'running' WHERE id = ?").run(r4.id);
+    env.runner._insertSteps(r4.id, 0, [{ title: 'Notify', tool: 'http_post', args: { url: 'https://hooks.example.com/x', body: {} }, risk: 'external' }]);
+    env.db.prepare("UPDATE agent_run_steps SET status = 'running' WHERE run_id = ?").run(r4.id);
     const again = new AgentRunner({ db: env.db, memory: env.memory, llmFor: () => null, tools: env.runner.tools });
-    t.check(again.get(1, r3.id).status === 'failed' && /restart/.test(again.get(1, r3.id).error), 'runs interrupted by a restart are marked failed, not left "running"');
+    t.check(again.get(1, r3.id).status === 'queued' && again.recovered.includes(r3.id) && again.get(1, r3.id).steps[0].status === 'pending',
+      'a run interrupted during read-only work is recovered and queued to resume');
+    const r4row = again.get(2, r4.id);
+    t.check(r4row.status === 'failed' && r4row.steps[0].status === 'outcome_unknown' && /not repeated/.test(r4row.error),
+      'a run interrupted during an external action is not resumed; the action is marked outcome_unknown and never repeated');
+    const resumed = again.resumeRecovered((id) => (id === 1 ? userA : null));
+    t.check(resumed.includes(r3.id), 'recovered runs are restarted for their owner');
+    await Promise.all([...again.active.values()].map((a) => a.promise));
+    t.check(env.posted.length === 0, 'no external request was sent during recovery');
   } catch (e) {
     t.check(false, `suite crashed: ${e.stack}`);
   }

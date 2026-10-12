@@ -23,6 +23,11 @@
 const { INJECTION_RE, tokenize, relevance } = require('../research/engine');
 
 const MAX_LESSON = 300;
+const envInt = (name, dflt) => { const v = Number(process.env[name]); return Number.isFinite(v) && v > 0 ? v : dflt; };
+// Retention: oldest entries beyond these limits are removed on insert.
+const MAX_LESSONS_PER_USER = () => envInt('AGENT_MAX_LESSONS_PER_USER', 200);
+const MAX_EVIDENCE_PER_USER = () => envInt('AGENT_MAX_EVIDENCE_PER_USER', 2000);
+const LESSON_HALF_LIFE_DAYS = 180;
 
 function similarity(a, b) {
   const A = new Set(tokenize(a)); const B = new Set(tokenize(b));
@@ -60,6 +65,25 @@ class AgentMemory {
       retrieved_at INTEGER NOT NULL
     )`).run();
     db.prepare('CREATE INDEX IF NOT EXISTS idx_agent_evidence_run ON agent_evidence(run_id)').run();
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_agent_evidence_user ON agent_evidence(user_id, retrieved_at)').run();
+    // Evaluation records: which approved lessons a run used, and how it ended.
+    db.prepare(`CREATE TABLE IF NOT EXISTS agent_lesson_uses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      run_id TEXT NOT NULL,
+      lesson_id INTEGER,
+      outcome TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )`).run();
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_agent_lesson_uses_user ON agent_lesson_uses(user_id, lesson_id)').run();
+  }
+
+  _pruneLessons(userId) {
+    // Approved lessons are kept preferentially; rejected ones go first.
+    this.db.prepare(`DELETE FROM agent_lessons WHERE id IN (
+      SELECT id FROM agent_lessons WHERE user_id = ?
+      ORDER BY CASE status WHEN 'approved' THEN 2 WHEN 'proposed' THEN 1 ELSE 0 END DESC, created_at DESC
+      LIMIT -1 OFFSET ?)`).run(userId, MAX_LESSONS_PER_USER());
   }
 
   /** Validate lesson text. Returns an error message or null. */
@@ -81,6 +105,7 @@ class AgentMemory {
     if (this._duplicateOf(userId, text)) return null;
     const id = this.db.prepare(`INSERT INTO agent_lessons (user_id, text, applies_when, status, origin, source_run_id, created_at)
       VALUES (?, ?, ?, 'proposed', 'agent', ?, ?)`).run(userId, String(text).trim(), String(applies_when || '').slice(0, 200), run_id || null, this.now()).lastInsertRowid;
+    this._pruneLessons(userId);
     return this.get(userId, id);
   }
 
@@ -92,6 +117,7 @@ class AgentMemory {
     if (dup) return { error: 'A very similar lesson already exists.', duplicate_of: dup.id };
     const id = this.db.prepare(`INSERT INTO agent_lessons (user_id, text, applies_when, status, origin, created_at, reviewed_at)
       VALUES (?, ?, ?, 'approved', 'user', ?, ?)`).run(userId, String(text).trim(), String(applies_when).slice(0, 200), this.now(), this.now()).lastInsertRowid;
+    this._pruneLessons(userId);
     return { lesson: this.get(userId, id) };
   }
 
@@ -116,12 +142,18 @@ class AgentMemory {
       : this.db.prepare('SELECT * FROM agent_lessons WHERE user_id = ? ORDER BY created_at DESC LIMIT 100').all(userId);
   }
 
-  /** Approved lessons relevant to a goal, most relevant first. Marks them used. */
+  /** Approved lessons relevant to a goal, most relevant first (fresher wins ties). Marks them used. */
   relevantLessons(userId, goal, limit = 3) {
     const terms = tokenize(goal);
+    const now = this.now();
     const rows = this.db.prepare("SELECT * FROM agent_lessons WHERE user_id = ? AND status = 'approved'").all(userId)
-      .map((l) => ({ ...l, score: relevance(terms, `${l.text} ${l.applies_when || ''}`) }))
-      .filter((l) => l.score > 0.15)
+      .map((l) => {
+        const rel = relevance(terms, `${l.text} ${l.applies_when || ''}`);
+        const ageDays = (now - (l.reviewed_at || l.created_at)) / 86_400_000;
+        const freshness = Math.pow(0.5, Math.max(0, ageDays) / LESSON_HALF_LIFE_DAYS);
+        return { ...l, relevance: rel, score: rel * (0.75 + 0.25 * freshness) };
+      })
+      .filter((l) => l.relevance > 0.15)
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
     for (const l of rows) this.db.prepare('UPDATE agent_lessons SET uses = uses + 1 WHERE id = ?').run(l.id);
@@ -141,12 +173,56 @@ class AgentMemory {
       });
   }
 
+  /**
+   * Evaluation record: one row per recalled lesson (or one with lesson_id
+   * NULL when none was recalled), so outcomes with and without a lesson
+   * can be compared.
+   */
+  recordLessonOutcome(userId, runId, lessonIds, outcome) {
+    const ins = this.db.prepare('INSERT INTO agent_lesson_uses (user_id, run_id, lesson_id, outcome, created_at) VALUES (?, ?, ?, ?, ?)');
+    const ids = (lessonIds || []).length ? lessonIds : [null];
+    for (const id of ids) ins.run(userId, runId, id, outcome, this.now());
+  }
+
+  /**
+   * Measured effect of each approved lesson: success rate of runs that
+   * used it against this user's runs that used no lesson. Small samples
+   * are labelled as such rather than ranked.
+   */
+  lessonEffectiveness(userId) {
+    const rate = (rows) => (rows.n ? rows.ok / rows.n : null);
+    const baseline = this.db.prepare(`SELECT COUNT(*) AS n, SUM(outcome = 'succeeded') AS ok FROM agent_lesson_uses
+      WHERE user_id = ? AND lesson_id IS NULL`).get(userId);
+    const per = this.db.prepare(`SELECT lesson_id, COUNT(*) AS n, SUM(outcome = 'succeeded') AS ok FROM agent_lesson_uses
+      WHERE user_id = ? AND lesson_id IS NOT NULL GROUP BY lesson_id`).all(userId);
+    const base = rate(baseline);
+    return {
+      baseline: { runs: baseline.n, success_rate: base },
+      lessons: per.map((p) => ({
+        lesson_id: p.lesson_id, runs: p.n, success_rate: rate(p),
+        delta_vs_baseline: base === null ? null : Math.round((rate(p) - base) * 100) / 100,
+        sample: p.n < 5 ? 'too_small' : 'ok',
+      })),
+    };
+  }
+
+  listEvidence(userId, limit = 100) {
+    return this.db.prepare('SELECT id, run_id, url, title, quote, published_at, retrieved_at FROM agent_evidence WHERE user_id = ? ORDER BY retrieved_at DESC LIMIT ?')
+      .all(userId, Math.min(limit, 500));
+  }
+
+  deleteEvidence(userId, id) {
+    return this.db.prepare('DELETE FROM agent_evidence WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
+  }
+
   recordEvidence(userId, runId, citations) {
     const ins = this.db.prepare(`INSERT INTO agent_evidence (run_id, user_id, url, title, quote, claim, published_at, retrieved_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
     for (const c of citations || []) {
       for (const q of c.quotes || []) ins.run(runId, userId, c.url, c.title || null, q, null, c.published_at || null, this.now());
     }
+    this.db.prepare(`DELETE FROM agent_evidence WHERE id IN (
+      SELECT id FROM agent_evidence WHERE user_id = ? ORDER BY retrieved_at DESC, id DESC LIMIT -1 OFFSET ?)`).run(userId, MAX_EVIDENCE_PER_USER());
   }
 }
 

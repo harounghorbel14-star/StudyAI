@@ -2283,6 +2283,26 @@ app.post("/api/search", requireAuth, requireQuota, aiLimiter, wrap(async (req, r
 }));
 app.get("/api/tools", requireAuth, (_req,res) => res.json({ tools:listTools() }));
 app.get("/health", (_req,res) => res.json({ status:"ok", timestamp:new Date().toISOString() }));
+
+// Readiness: unlike /health (process is up), this checks what requests
+// need. 503 while the database or core services are unavailable or the
+// server is draining. Model availability is reported, not required: auth
+// and other features work without it.
+async function readiness(_req, res) {
+  const checks = {};
+  try { db.prepare("SELECT 1").get(); checks.database = "ok"; } catch (e) { checks.database = "error"; }
+  checks.services = services ? "ok" : "unavailable";
+  const runner = app.locals.agentRunner;
+  checks.agent_runtime = !runner ? "unavailable" : runner.draining ? "draining" : "ok";
+  try {
+    const inf = services?.inferenceStatus?.();
+    checks.inference = inf ? { mode: inf.mode, can_serve: inf.can_serve } : "unknown";
+  } catch (_) { checks.inference = "unknown"; }
+  const ready = checks.database === "ok" && checks.services === "ok" && checks.agent_runtime === "ok";
+  res.status(ready ? 200 : 503).json({ status: ready ? "ready" : "not_ready", checks, timestamp: new Date().toISOString() });
+}
+app.get("/ready", wrap(readiness));
+app.get("/api/ready", wrap(readiness));
 app.get("/api/health", (_req,res) => res.json({ status:"ok", timestamp:new Date().toISOString() }));
 
 // ─────────────────────────────────────────────
@@ -3464,15 +3484,29 @@ try{
     tools: null,
     // Every model call goes through smartCall: provider routing,
     // local-only enforcement, circuit breakers and cost tracking.
-    llmFor: (user) => services?.smartCall ? async (p) => {
-      const r = await services.smartCall({ ...p, user_id: user.id, tier: user.guest ? 'free' : user.plan, cacheable: false });
+    // opts.localOnly (a run created with privacy "local") keeps every
+    // model call for that run on the local server, whatever INFERENCE_MODE says.
+    llmFor: (user, opts = {}) => services?.smartCall ? async (p) => {
+      const r = await services.smartCall({ ...p, user_id: user.id, tier: user.guest ? 'free' : user.plan, cacheable: false, ...(opts.localOnly ? { localOnly: true } : {}) });
       if (p.json && typeof r.output === 'string') { try { r.output = JSON.parse(r.output.replace(/```json|```/g, '').trim()); } catch (_) {} }
       return r;
     } : null,
   });
   agentRunner.tools = buildDefaultTools({ db, memory: agentMemory, scoreSource: services?.knowledge?.scoreSource?.bind(services.knowledge) });
+  // Now that tool risks are known: recover runs interrupted by the last
+  // shutdown (read-only work resumes; unknown external outcomes are not repeated).
+  const recovered = agentRunner.recoverInterrupted();
+  if (recovered.length) {
+    setImmediate(() => agentRunner.resumeRecovered((userId) => {
+      const u = db.prepare("SELECT id, email, plan, is_guest, guest_expires_at FROM users WHERE id = ?").get(userId);
+      if (!u || (u.is_guest && u.guest_expires_at < Date.now())) return null;
+      return { id: u.id, email: u.email, plan: u.plan, guest: !!u.is_guest };
+    }));
+    console.log(`↻ Agent: resuming ${recovered.length} run(s) interrupted by the last shutdown`);
+  }
   const agentRoute = require('./routes/agent');
   app.use('/api/agent', agentRoute({ runner: agentRunner, memory: agentMemory, requireAuth, requireQuota, aiLimiter, wrap }));
+  app.locals.agentRunner = agentRunner;
   console.log('✅ Agent runtime loaded (tools: ' + agentRunner.tools.describe().map((t) => t.name).join(', ') + ')');
 }catch(e){console.warn('⚠️ Agent runtime:', e.message);}
 
@@ -4959,6 +4993,24 @@ try {
 } catch (e) {
   console.warn('⚠️ Realtime not attached:', e.message);
 }
+
+// Graceful shutdown: stop taking connections and new agent runs, give
+// active runs a bounded time to finish, then exit. Runs still in flight
+// are recovered at the next start (agent/runner.js recoverInterrupted).
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received: draining`);
+  httpServer.close();
+  try {
+    const r = await app.locals.agentRunner?.drain(Number(process.env.AGENT_SHUTDOWN_GRACE_MS) || 10_000);
+    if (r && !r.settled) console.log(`Shutdown: ${r.remaining} agent run(s) still active; they will be recovered on restart`);
+  } catch (_) { /* exit anyway */ }
+  process.exit(0);
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
 httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`💀 NexusAI running on port ${PORT}`);

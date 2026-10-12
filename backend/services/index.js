@@ -202,6 +202,7 @@ function initServices(db, openai, options = {}) {
     const taskType = modelRouter.detectTask(params.prompt, params.task);
     const mode = modelRouter.inferenceMode();
     const localOnly = mode === 'local-only' || params.localOnly === true;
+    let routedFallback = null;
     if (localOnly && (!localLLM || !localLLM.enabled)) {
       throw new modelRouter.ModelUnavailableError(
         'Local-only inference is selected but no local model server is enabled. '
@@ -263,20 +264,33 @@ function initServices(db, openai, options = {}) {
         });
 
         if (cacheable) await cache.set(cacheKey, standardizedLocal, params.cacheTTL || 3600);
-        return standardizedLocal;
+        return { ...standardizedLocal, routing: { mode, local_attempted: true, fallback: false } };
       } catch (localErr) {
         localTimer();
         if (localOnly) {
           throw new modelRouter.ModelUnavailableError(`Local model failed and local-only mode forbids cloud fallback: ${localErr.message}`);
         }
+        // INFERENCE_CLOUD_FALLBACK=deny: in hybrid mode, content routed to
+        // the local model stays local even when that model fails.
+        if (process.env.INFERENCE_CLOUD_FALLBACK === 'deny') {
+          throw new modelRouter.ModelUnavailableError(`Local model failed and INFERENCE_CLOUD_FALLBACK=deny forbids sending this request to a cloud provider: ${localErr.message}`);
+        }
         localLLM.stats.fallbacks++;
         logger.warn('Local LLM failed, falling back to cloud', { err: localErr.message });
+        routedFallback = { from: 'local', reason: String(localErr.message).slice(0, 200) };
         // Fall through to cloud providers below
       }
     }
     if (localOnly) {
       // shouldRouteLocal refused (e.g. too many consecutive failures).
       throw new modelRouter.ModelUnavailableError('Local model is unavailable and local-only mode forbids cloud fallback.');
+    }
+    // INFERENCE_CLOUD_FALLBACK=deny also covers tasks assigned to the local
+    // model when it is skipped (marked unhealthy after repeated failures,
+    // or unreachable): they must not quietly go to the cloud instead.
+    if (process.env.INFERENCE_CLOUD_FALLBACK === 'deny' && mode === 'hybrid' && !params.forceCloud
+        && localLLM?.enabled && (localLLM.localTasks || []).includes(taskType)) {
+      throw new modelRouter.ModelUnavailableError(`The local model is unavailable for "${taskType}" and INFERENCE_CLOUD_FALLBACK=deny forbids sending it to a cloud provider.`);
     }
 
     const choice = modelRouter.selectModel(taskType);
@@ -324,7 +338,15 @@ function initServices(db, openai, options = {}) {
       if (cacheable) {
         await cache.set(cacheKey, standardized, { ttl: params.cacheTTL || 1800 });
       }
-      return standardized;
+      return {
+        ...standardized,
+        routing: {
+          mode, local_attempted: !!routedFallback,
+          fallback: !!routedFallback || (result.attempts || []).some((a) => !a.ok),
+          ...(routedFallback ? { fallback_from: routedFallback.from, fallback_reason: routedFallback.reason } : {}),
+          attempts: (result.attempts || []).map((a) => ({ provider: a.provider, model: a.model, ok: a.ok })),
+        },
+      };
     } catch (err) {
       stopTimer();
       metrics.increment('ai_calls_failed', 1, { error: err.code || 'unknown' });
