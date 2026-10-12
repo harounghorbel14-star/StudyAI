@@ -7,6 +7,10 @@
 //   recall_memory  read       this user's approved lessons and evidence
 //   write_note     workspace  save a note in this run's own workspace
 //   http_post      external   POST JSON to a public URL — approval required
+//   consult_specialist read   delegate one sub-task to a specialist (agent/specialists.js)
+//   repo_*, propose_edit       read-only repository tools for the Coding
+//                              specialist, admin-only, when AGENT_REPO_ROOT
+//                              is set (agent/repo-tools.js)
 //
 // Code execution is deliberately not offered: Node's vm module is not a
 // security boundary, and running generated code safely needs an
@@ -17,6 +21,8 @@ const { ResearchEngine } = require('../research/engine');
 const { PageFetcher } = require('../research/fetcher');
 const { configuredProviders } = require('../research/search-providers');
 const { safeRequest } = require('../security/safe-http');
+const { registerConsultTool } = require('./specialists');
+const { registerRepoTools } = require('./repo-tools');
 
 function buildDefaultTools({ db, memory, scoreSource, providers, fetcher, env = process.env }) {
   const pageFetcher = fetcher || new PageFetcher({ db });
@@ -104,6 +110,8 @@ function buildDefaultTools({ db, memory, scoreSource, providers, fetcher, env = 
     },
   });
 
+  registerConsultTool(reg);
+  registerRepoTools(reg, { db, env });
   return reg;
 }
 

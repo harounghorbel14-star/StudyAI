@@ -76,10 +76,20 @@ class ToolRegistry {
 
   get(name) { return this.tools.get(name); }
 
-  /** What the planner may see: names, descriptions and argument shapes only. */
-  describe({ guest = false } = {}) {
+  /** Whether this user may use the tool at all (guest rule + the tool's own allow(user), e.g. admin-only). */
+  permits(tool, user) {
+    if (user?.guest && !tool.guest) return false;
+    return typeof tool.allow === 'function' ? !!tool.allow(user || {}) : true;
+  }
+
+  /**
+   * What the planner may see: names, descriptions and argument shapes only.
+   * @param {{ guest?: boolean, user?: object, only?: string[] }} opts  only: restrict to these tool names
+   */
+  describe({ guest = false, user, only } = {}) {
+    const who = user || { guest };
     return [...this.tools.values()]
-      .filter((t) => !guest || t.guest)
+      .filter((t) => this.permits(t, who) && (!only || only.includes(t.name)))
       .map((t) => ({
         name: t.name, risk: t.risk, description: t.description,
         args: Object.fromEntries(Object.entries(t.params).map(([k, r]) => [k, `${r.type}${r.required ? '' : '?'}${r.enum ? ` (${r.enum.join('|')})` : ''}`])),
@@ -95,6 +105,7 @@ class ToolRegistry {
     const tool = this.tools.get(name);
     if (!tool) throw new ToolError(`Unknown tool "${name}"`, 'UNKNOWN_TOOL');
     if (ctx.user?.guest && !tool.guest) throw new ToolError(`"${name}" is not available in guest mode`, 'FORBIDDEN');
+    if (!this.permits(tool, ctx.user)) throw new ToolError(`"${name}" is not available to this account`, 'FORBIDDEN');
     const v = validateArgs(tool.params, rawArgs);
     if (!v.ok) throw new ToolError(`Invalid arguments for ${name}: ${v.errors.join('; ')}`, 'INVALID_ARGS');
     const fingerprint = callFingerprint(name, v.args);

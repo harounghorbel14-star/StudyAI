@@ -34,6 +34,7 @@ const FAILURE = Object.freeze({
   PROVIDER_UNAVAILABLE: 'provider_unavailable',
   BUDGET_EXHAUSTED: 'budget_exhausted',
   VERIFICATION_FAILED: 'verification_failed',
+  INVALID_MODEL_OUTPUT: 'invalid_model_output',
   NON_RETRYABLE: 'non_retryable',
 });
 
@@ -54,13 +55,15 @@ function classifyFailure(res, { risk = 'read', evaluation } = {}) {
     else if (['FORBIDDEN', 'APPROVAL_REQUIRED', 'APPROVAL_EXPIRED', 'APPROVAL_USED'].includes(code)) category = FAILURE.PERMISSION_DENIED;
     else if (['MODEL_UNAVAILABLE', 'PROVIDERS_FAILED'].includes(code)) category = FAILURE.PROVIDER_UNAVAILABLE;
     else if (code === 'BUDGET') category = FAILURE.BUDGET_EXHAUSTED;
+    else if (code === 'INVALID_MODEL_OUTPUT') category = FAILURE.INVALID_MODEL_OUTPUT;
     else if (code === 'TOOL_ERROR' && TRANSIENT_RE.test(String(res?.error || ''))) category = FAILURE.TRANSIENT;
     else category = FAILURE.NON_RETRYABLE;
   }
   return {
     category,
     // Repeating anything but a read-only call could apply a side effect twice.
-    retryable: category === FAILURE.TRANSIENT && risk === 'read',
+    // A malformed model answer may be fine on a second try; only read-only steps get one.
+    retryable: [FAILURE.TRANSIENT, FAILURE.INVALID_MODEL_OUTPUT].includes(category) && risk === 'read',
     // Out of budget or not permitted: a new plan cannot fix that.
     replannable: ![FAILURE.BUDGET_EXHAUSTED, FAILURE.PERMISSION_DENIED].includes(category),
   };

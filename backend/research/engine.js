@@ -471,7 +471,7 @@ class ResearchEngine {
     const citationsFor = (ids) => ids.map((id) => {
       const s = state.sources.find((x) => x.id === id);
       return s && {
-        source_id: id, url: s.url, title: s.title, domain: s.domain, published_at: s.published_at,
+        source_id: id, url: s.url, title: s.title, domain: s.domain, published_at: s.published_at, retrieved_at: s.fetched_at || null, primary: !!s.primary,
         quotes: state.claims.filter((c) => c.source_id === id).map((c) => c.quote),
       };
     }).filter(Boolean);

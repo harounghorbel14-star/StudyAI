@@ -8,13 +8,17 @@
 //   • a step names an unregistered tool, or one the user may not use;
 //   • a step's arguments fail the tool's schema;
 //   • depends_on references a missing step, itself, or forms a cycle;
-//   • the deterministic resource estimate exceeds the run's budget.
+//   • the deterministic resource estimate exceeds the run's budget;
+//   • a step's specialist may not use its tool, consultations exceed
+//     limits.maxConsults, the same consultation is requested twice, or
+//     a review has nothing to review (no depends_on).
 // Step risk is taken from the tool registry, never from the model.
 // ============================================================
 const { validateArgs } = require('./tools');
+const { SPECIALISTS, ownerOf, mayUse } = require('./specialists');
 
 // Model calls a step costs on top of the tool call itself.
-const MODEL_CALLS_PER_TOOL = { web_research: 6 };
+const MODEL_CALLS_PER_TOOL = { web_research: 6, consult_specialist: 1 };
 // Planning + final synthesis + lesson review.
 const FIXED_MODEL_CALLS = 3;
 
@@ -59,11 +63,20 @@ function validatePlan(raw, { registry, user, limits }) {
     const tool = typeof s.tool === 'string' ? registry.get(s.tool) : null;
     if (!tool) { errors.push(`${where} uses unknown tool "${String(s.tool).slice(0, 40)}".`); return null; }
     if (user?.guest && !tool.guest) { errors.push(`${where}: tool "${s.tool}" is not available in guest mode.`); return null; }
+    if (registry.permits && !registry.permits(tool, user)) { errors.push(`${where}: tool "${s.tool}" is not available to this account.`); return null; }
     const v = validateArgs(tool.params, s.args);
     if (!v.ok) { errors.push(`${where} (${s.tool}): ${v.errors.join('; ')}.`); return null; }
     const deps = s.depends_on === undefined ? [] : s.depends_on;
     if (!Array.isArray(deps) || !deps.every((d) => Number.isInteger(d))) { errors.push(`${where}: depends_on must be a list of step numbers.`); return null; }
+    // Specialist: named by the plan, or the tool's owner. It must be allowed that tool.
+    const consult = s.tool === 'consult_specialist';
+    const named = s.specialist === undefined || s.specialist === null || s.specialist === '' ? null : s.specialist;
+    if (named !== null && !(typeof named === 'string' && SPECIALISTS[named])) { errors.push(`${where}: unknown specialist "${String(named).slice(0, 40)}".`); return null; }
+    if (consult && named && named !== v.args.specialist) { errors.push(`${where}: step specialist "${named}" does not match the consulted specialist "${v.args.specialist}".`); return null; }
+    if (!consult && named && !mayUse(named, s.tool)) { errors.push(`${where}: the ${named} specialist may not use "${s.tool}".`); return null; }
+    if (consult && SPECIALISTS[v.args.specialist]?.reviewer && !deps.length) { errors.push(`${where}: a ${v.args.specialist} review needs depends_on (the steps it reviews).`); return null; }
     return {
+      specialist: consult ? v.args.specialist : (named || ownerOf(s.tool)),
       title: str(s.title, 200) || s.tool,
       tool: s.tool,
       args: v.args,
@@ -87,6 +100,14 @@ function validatePlan(raw, { registry, user, limits }) {
   }
 
   const valid = steps.filter(Boolean);
+  const consults = valid.filter((s) => s.tool === 'consult_specialist');
+  if (limits.maxConsults !== undefined && consults.length > limits.maxConsults) errors.push(`Plan uses ${consults.length} specialist consultations; at most ${limits.maxConsults} are allowed for this task.`);
+  const seen = new Set();
+  for (const c of consults) {
+    const key = `${c.args.specialist}|${c.args.task.toLowerCase().replace(/\W+/g, ' ').trim()}`;
+    if (seen.has(key)) errors.push(`Duplicate consultation of the ${c.args.specialist} specialist for the same task.`);
+    seen.add(key);
+  }
   const estimates = {
     tool_calls: valid.length,
     model_calls: FIXED_MODEL_CALLS + valid.reduce((n, s) => n + (MODEL_CALLS_PER_TOOL[s.tool] || 0) + (s.success_criteria ? 1 : 0), 0),
@@ -115,7 +136,7 @@ function validatePlan(raw, { registry, user, limits }) {
 /** The plan format requested from the model, kept next to its validator. */
 const PLAN_FORMAT = '{"interpretation": "what the user wants", "success_criteria": ["how we will know the goal is met"], '
   + '"assumptions": [], "unknowns": [], "constraints": [], "needs_user_input": false, "question_for_user": "", '
-  + '"steps": [{"title": "", "tool": "", "args": {}, "depends_on": [0-based indices of earlier steps it needs], '
+  + '"steps": [{"title": "", "specialist": "optional: who does it", "tool": "", "args": {}, "depends_on": [0-based indices of earlier steps it needs], '
   + '"expected_output": "", "success_criteria": ""}]}';
 
 module.exports = { validatePlan, findCycle, PLAN_FORMAT, MODEL_CALLS_PER_TOOL };
