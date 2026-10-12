@@ -3,21 +3,36 @@
 // watch plan → steps → verification → result, approve/reject an
 // external action, and confirm model output cannot inject HTML/JS.
 // ============================================================
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { chromium } = require('@playwright/test');
 const { startServer, makeRunner } = require('./helpers/harness');
 
 let planMode = 'calc';
 const PLANS = {
   calc: { interpretation: 'Multiply two numbers', unknowns: [], steps: [{ title: 'Multiply', tool: 'calculate', args: { expression: '6*7' }, success_criteria: 'a number' }] },
+  review: { interpretation: 'Compute, then have it checked', steps: [
+    { title: 'Multiply', tool: 'calculate', args: { expression: '6*7' } },
+    { title: 'Check the result', tool: 'consult_specialist', args: { specialist: 'quality', task: 'Check the multiplication' }, depends_on: [0] },
+  ] },
+  code: { interpretation: 'Fix add()', steps: [
+    { title: 'Read math.js', specialist: 'coding', tool: 'repo_read', args: { path: 'src/math.js' } },
+    { title: 'Propose the fix', specialist: 'coding', tool: 'propose_edit', args: { path: 'src/math.js', find: 'return a - b;', replace: 'return a + b;', reason: 'add() subtracts' }, depends_on: [0] },
+  ] },
   post: { interpretation: 'Notify a webhook', steps: [{ title: 'Notify webhook', tool: 'http_post', args: { url: 'https://hooks.example.com/x', body: { done: true } } }] },
 };
 
 (async () => {
   const t = makeRunner('🖥️  Agent panel (Chromium against the real server)');
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'nx-ui-repo-'));
+  fs.mkdirSync(path.join(repo, 'src'));
+  fs.writeFileSync(path.join(repo, 'src/math.js'), 'function add(a, b) {\n  return a - b;\n}\n');
   const srv = await startServer({
     port: 3001,
-    env: { RESEARCH_WIKIPEDIA: 'off' },
+    env: { RESEARCH_WIKIPEDIA: 'off', AGENT_REPO_ROOT: repo, ADMIN_EMAILS: 'ui@example.com' },
     llmRules: [
+      { match: 'You are consulted by an orchestrator', reply: JSON.stringify({ answer: 'Checked.', confidence: 'high', blocking: false, concerns: ['<img src=x onerror="window.__xss=3">rounding not specified'] }) },
       { match: 'You are the Planner of an autonomous agent', reply: () => JSON.stringify(PLANS[planMode]) },
       { match: 'You are the Validator', reply: JSON.stringify({ satisfied: true, reason: 'ok' }) },
       { match: 'You are the Analyst', reply: 'The product is 42. <img src=x onerror="window.__xss=1"><script>window.__xss=2</script>' },
@@ -70,6 +85,24 @@ const PLANS = {
     const lessons = await srv.call('GET', '/api/agent/lessons?status=approved', { token });
     t.check(lessons.body.lessons.length === 1, 'approving the proposed lesson in the UI stores it as approved');
 
+    t.section('Specialists, review and proposed changes');
+    planMode = 'review';
+    await page.fill('#nxa-goal', 'Compute six times seven; then have the result checked; then report it');
+    await page.click('#nxa-run');
+    await page.waitForFunction(() => /Completed|Failed|Stopped/.test(document.getElementById('nxa-status').textContent) && /Independent review/.test(document.getElementById('nxa-out').textContent), null, { timeout: 30000 });
+    const out = await page.textContent('#nxa-out');
+    t.check(/Understood as: \w+ task \((simple|compound)\)/.test(out), 'the panel says how the request was understood');
+    t.check(await page.locator('.nxa-spec', { hasText: 'QA review' }).count() >= 1, 'each step shows which specialist handled it');
+    t.check(/Independent review — Testing & Quality Reviewer/.test(out) && /rounding not specified/.test(out), 'the independent review and its concerns are shown');
+    t.check(await page.evaluate(() => window.__xss === undefined), 'specialist output is rendered inert');
+    planMode = 'code';
+    await page.fill('#nxa-goal', 'Fix the bug in src/math.js where add() subtracts');
+    await page.click('#nxa-run');
+    await page.waitForFunction(() => /Completed|Failed|Stopped/.test(document.getElementById('nxa-status').textContent) && /Proposed changes/.test(document.getElementById('nxa-out').textContent), null, { timeout: 30000 });
+    t.check(/Proposed changes \(1\) — not applied/.test(await page.textContent('#nxa-out')) && /\+  return a \+ b;/.test(await page.textContent('.nxa-diff')), 'a proposed code change is shown as a diff, labelled not applied');
+    t.check(/Security review/.test(await page.textContent('.nxa-steps')), 'the automatic security review appears in the plan');
+    t.check(fs.readFileSync(path.join(repo, 'src/math.js'), 'utf8').includes('return a - b;'), 'the repository file was not modified');
+
     t.section('Approval for an external action');
     planMode = 'post';
     await page.fill('#nxa-goal', 'Tell my webhook the job is done');
@@ -88,6 +121,7 @@ const PLANS = {
   } finally {
     await browser?.close();
     await srv.stop();
+    fs.rmSync(repo, { recursive: true, force: true });
   }
   t.done();
 })();

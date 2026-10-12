@@ -5,6 +5,12 @@
 // ============================================================
 const { startServer, makeRunner, sleep } = require('./helpers/harness');
 
+// Two external steps on the reserved .invalid TLD: approving one attempts
+// the call, which cannot reach any real host.
+const POST_PLAN = JSON.stringify({ interpretation: 'notify', steps: [
+  { title: 'Notify A', tool: 'http_post', args: { url: 'https://hook-a.invalid/n', body: { n: 1 } } },
+  { title: 'Notify B', tool: 'http_post', args: { url: 'https://hook-b.invalid/n', body: { n: 2 } } },
+] });
 const PLAN = JSON.stringify({ interpretation: 'compute', steps: [{ title: 'Multiply', tool: 'calculate', args: { expression: '6*7' }, success_criteria: 'a number' }] });
 
 (async () => {
@@ -12,7 +18,11 @@ const PLAN = JSON.stringify({ interpretation: 'compute', steps: [{ title: 'Multi
   const srv = await startServer({
     env: { RESEARCH_WIKIPEDIA: 'off' },
     llmRules: [
+      { match: /You are the Planner of an autonomous agent[\s\S]*Notify-the-hooks/, reply: POST_PLAN },
       { match: 'You are the Planner of an autonomous agent', reply: PLAN },
+      { match: 'You are an autonomous agent. Decide the next action', reply: JSON.stringify({ thought: 't', action: 'keep going', achieved_goal: false }) },
+      { match: 'Execute this action and return the result', reply: 'pretend result' },
+      { match: /You are the Planner\. A step failed[\s\S]*Notify-the-hooks/, reply: JSON.stringify({ steps: [JSON.parse(POST_PLAN).steps[1]] }) },
       { match: 'You are the Validator', reply: JSON.stringify({ satisfied: true, reason: 'number produced' }) },
       { match: 'You are the Analyst', reply: 'The product is 42 (computed with the calculate tool).' },
       { match: 'You distil one reusable', reply: JSON.stringify({ lesson: 'Use the calculate tool for arithmetic instead of estimating.', applies_when: 'arithmetic' }) },
@@ -77,6 +87,67 @@ const PLAN = JSON.stringify({ interpretation: 'compute', steps: [{ title: 'Multi
     await sleep(500);
     const after = (await call('GET', `/api/agent/runs/${cid}`, { token: ann })).body.run;
     t.check(['cancelled', 'succeeded'].includes(after.status), `cancelled (or had already finished): ${after.status}`);
+
+    t.section('Approval decisions are bound to the pending step');
+    r = await call('POST', '/api/agent/runs', { token: ann, body: { goal: 'Notify-the-hooks A and B' } });
+    const aid = r.body.run.id;
+    const waitFor = async (pred) => {
+      for (let i = 0; i < 75; i++) {
+        const cur = (await call('GET', `/api/agent/runs/${aid}`, { token: ann })).body.run;
+        if (pred(cur)) return cur;
+        await sleep(200);
+      }
+      return (await call('GET', `/api/agent/runs/${aid}`, { token: ann })).body.run;
+    };
+    let ar = await waitFor((x) => x.status === 'awaiting_approval');
+    t.check(ar.status === 'awaiting_approval' && ar.pending_action?.step_id, `the run pauses on its first external step (${ar.status})`);
+    const stepA = ar.pending_action.step_id;
+    const stepB = ar.steps.find((s) => s.id !== stepA && s.tool === 'http_post')?.id;
+    const decide = (token, body) => call('POST', `/api/agent/runs/${aid}/decision`, { token, body });
+    const snapshot = async () => { const x = (await call('GET', `/api/agent/runs/${aid}`, { token: ann })).body.run; return JSON.stringify([x.status, x.pending_action, x.steps.map((s) => s.status)]); };
+    const before = await snapshot();
+    for (const [label, body] of [
+      ['missing step_id', { decision: 'approve' }],
+      ['missing step_id (reject)', { decision: 'reject' }],
+      ['empty step_id', { decision: 'approve', step_id: '' }],
+      ['malformed step_id', { decision: 'approve', step_id: '../../etc' }],
+      ['numeric step_id', { decision: 'approve', step_id: 7 }],
+      ['array step_id', { decision: 'reject', step_id: [stepA] }],
+    ]) {
+      r = await decide(ann, body);
+      t.check(r.status === 400 && r.body.code === 'INVALID_STEP_ID', `${label} → 400 INVALID_STEP_ID (${r.status})`);
+    }
+    r = await decide(ann, { decision: 'approve', step_id: stepB });
+    t.check(r.status === 409 && r.body.code === 'STALE_APPROVAL', `approving a different, not-yet-pending step → 409 STALE_APPROVAL (${r.status})`);
+    r = await decide(ben, { decision: 'approve', step_id: stepA });
+    t.check(r.status === 404, `another user approving with the correct step_id → 404 (${r.status})`);
+    t.check(await snapshot() === before, 'none of the refused decisions changed the run, the pending action or any step');
+    r = await decide(ann, { decision: 'approve', step_id: stepA });
+    t.check(r.status === 200 && r.body.ok === true, `the owner approving the exact pending step → 200 (${r.status})`);
+    // A's call fails (unresolvable host); the replan proposes B again as a NEW step.
+    ar = await waitFor((x) => x.status === 'awaiting_approval' && x.pending_action?.step_id !== stepA);
+    const stepB2 = ar.pending_action?.step_id;
+    const evA = (await call('GET', `/api/agent/runs/${aid}/events`, { token: ann })).body.events;
+    t.check(evA.filter((e) => e.type === 'approval.consumed').map((e) => e.data.step_id).join() === stepA, 'exactly one approval was consumed, by the approved step');
+    t.check(ar.status === 'awaiting_approval' && stepB2 && stepB2 !== stepB && ar.pending_action.tool === 'http_post', `the next external step waits for its own approval (${ar.status})`);
+    r = await decide(ann, { decision: 'approve', step_id: stepA });
+    t.check(r.status === 409 && r.body.code === 'STALE_APPROVAL', `replaying the first approval does not approve the new step → 409 (${r.status})`);
+    r = await decide(ann, { decision: 'approve', step_id: stepB });
+    t.check(r.status === 409 && r.body.code === 'STALE_APPROVAL', `a decision for a superseded (skipped) step → 409 (${r.status})`);
+    r = await decide(ann, { decision: 'reject', step_id: stepB2 });
+    t.check(r.status === 200, `rejecting the exact pending step → 200 (${r.status})`);
+    ar = await waitFor((x) => ['succeeded', 'failed', 'stopped'].includes(x.status));
+    t.check(ar.steps.find((s) => s.id === stepB2)?.status === 'rejected' && !evA.concat((await call('GET', `/api/agent/runs/${aid}/events`, { token: ann })).body.events).some((e) => e.type === 'approval.consumed' && e.data.step_id === stepB2), 'the rejected step never ran');
+    r = await decide(ann, { decision: 'reject', step_id: stepB2 });
+    t.check(r.status === 409 && r.body.code === 'NOT_AWAITING', `repeating the decision after the run moved on → 409 NOT_AWAITING (${r.status})`);
+
+    t.section('Legacy /api/agents/autonomous is bounded and labelled');
+    const before2 = srv.llm.calls.filter((c) => c.text.includes('Decide the next action')).length;
+    const leg = await fetch(`${srv.base}/api/agents/autonomous`, { method: 'POST', headers: { Authorization: `Bearer ${ann}`, 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 Chrome/120', 'Accept-Language': 'en' }, body: JSON.stringify({ goal: 'loop forever', max_iterations: 1000 }) });
+    const legText = await leg.text();
+    const iterations = srv.llm.calls.filter((c) => c.text.includes('Decide the next action')).length - before2;
+    t.check(leg.status === 200 && iterations === 5, `a client asking for 1000 iterations gets at most 5 (${iterations})`);
+    t.check(/"type":"executed"[^\n]*"simulated":true/.test(legText), 'its "executed" events say the result was simulated, not run');
 
     t.section('Guests');
     const g = (await call('POST', '/api/auth/guest', { body: {} })).body.token;

@@ -26,6 +26,7 @@
   }
 
   const STATUS_ICON = { pending: '○', running: '◌', succeeded: '✓', failed: '✕', skipped: '–', needs_approval: '⏸', rejected: '⊘', outcome_unknown: '⚠' };
+  const SPEC_LABEL = { research: 'Research', coding: 'Coding', analysis: 'Analysis', planning: 'Planning', business: 'Business', quality: 'QA review', security: 'Security review', orchestrator: 'Orchestrator' };
   const VERIFY_LABEL = { verified: 'Verified', partially_verified: 'Partially verified', executed_unverified: 'Executed, not verified', failed: 'Failed' };
   const RUN_LABEL = {
     queued: 'Queued', running: 'Working…', awaiting_approval: 'Waiting for your approval', cancelling: 'Cancelling…',
@@ -66,7 +67,10 @@
 .nxa-approve{border-color:#f59e0b88}
 .nxa-approve pre{font-size:12px;background:var(--bg3,#1c1c26);padding:8px;border-radius:6px;overflow:auto;max-height:160px}
 .nxa-privacy{display:flex;gap:6px;align-items:center;margin-top:6px}
-.nxa-inference{font-size:11.5px;color:var(--t3,#888)}`;
+.nxa-inference{font-size:11.5px;color:var(--t3,#888)}
+.nxa-spec{display:inline-block;font-size:10.5px;padding:1px 6px;border-radius:9px;border:1px solid var(--border2,#333);color:var(--t2,#bbb);margin-left:4px}
+.nxa-diff{font-size:12px;background:var(--bg3,#1c1c26);padding:8px;border-radius:6px;overflow:auto;max-height:260px;white-space:pre}
+.nxa-warn{color:#f59e0b}`;
     document.head.appendChild(st);
   }
 
@@ -194,9 +198,10 @@
         ${run.plan.success_criteria?.length ? `<div class="nxa-meta">Done when: ${esc(run.plan.success_criteria.join('; '))}</div>` : ''}
         ${run.plan.assumptions?.length ? `<div class="nxa-meta">Assumes: ${esc(run.plan.assumptions.join('; '))}</div>` : ''}
         ${run.plan.unknowns?.length ? `<div class="nxa-meta">Uncertain: ${esc(run.plan.unknowns.join('; '))}</div>` : ''}
+        ${run.plan.intent ? `<div class="nxa-meta">Understood as: ${esc(run.plan.intent.capability)} task (${esc(run.plan.intent.complexity)})${run.result?.specialists_used?.length ? ` · specialists: ${esc(run.result.specialists_used.map((k) => SPEC_LABEL[k] || k).join(', '))}` : ''}</div>` : ''}
         <div class="nxa-meta">Progress: ${done}/${run.steps.length} steps${run.options?.privacy === 'local' ? ' · local model only' : ''}</div>
         <ul class="nxa-steps">${run.steps.map((s) => `<li class="${esc(s.status)}"><span class="ic" aria-label="${esc(s.status)}">${STATUS_ICON[s.status] || '?'}</span>
-          <span>${esc(s.title)} <span class="nxa-meta">· ${esc(s.tool)}${s.risk && s.risk !== 'read' ? ` · ${esc(s.risk)}` : ''}${s.depends_on?.length ? ` · after ${s.depends_on.map((d) => stepNo.get(d)).filter(Boolean).join(', ')}` : ''}${s.failure ? ` · ${esc(s.failure.category.replace(/_/g, ' '))}` : ''}${s.evaluation?.reason && s.status !== 'succeeded' ? ` · ${esc(s.evaluation.reason)}` : ''}${s.error && !s.evaluation ? ` · ${esc(s.error)}` : ''}</span></span></li>`).join('')}</ul>
+          <span>${esc(s.title)}${s.specialist && s.specialist !== 'orchestrator' ? `<span class="nxa-spec">${esc(SPEC_LABEL[s.specialist] || s.specialist)}</span>` : ''} <span class="nxa-meta">· ${esc(s.tool)}${s.risk && s.risk !== 'read' ? ` · ${esc(s.risk)}` : ''}${s.depends_on?.length ? ` · after ${s.depends_on.map((d) => stepNo.get(d)).filter(Boolean).join(', ')}` : ''}${s.failure ? ` · ${esc(s.failure.category.replace(/_/g, ' '))}` : ''}${s.evaluation?.reason && s.status !== 'succeeded' ? ` · ${esc(s.evaluation.reason)}` : ''}${s.error && !s.evaluation ? ` · ${esc(s.error)}` : ''}</span></span></li>`).join('')}</ul>
         <div class="nxa-meta">Budget used: ${run.usage?.steps ?? 0}/${run.budget?.maxSteps} steps · ${run.usage?.tool_calls ?? 0}/${run.budget?.maxToolCalls} tool calls · ${run.usage?.llm_calls ?? 0}/${run.budget?.maxLlmCalls} model calls${run.usage?.retries ? ` · ${run.usage.retries} retr${run.usage.retries === 1 ? 'y' : 'ies'}` : ''}${run.usage?.fallbacks ? ` · ${run.usage.fallbacks} model fallback(s)` : ''}${run.usage?.models?.length ? ` · ${esc(run.usage.models.join(', '))}` : ''}</div></div>`);
     }
 
@@ -213,17 +218,31 @@
     const sources = new Map();
     for (const e of state.events) for (const s of (e.type === 'step.succeeded' ? e.data.sources || [] : [])) sources.set(s.url, s);
     for (const c of run.result?.citations || []) sources.set(c.url, c);
+    for (const r of run.result?.report?.references || []) sources.set(r.url, { ...sources.get(r.url), ...r });
     if (sources.size) {
-      parts.push(`<div class="nxa-card nxa-src"><h3>Sources (${sources.size})</h3><ol>${[...sources.values()].map((s) => {
+      const m = run.result?.report?.methodology;
+      parts.push(`<div class="nxa-card nxa-src"><h3>Sources (${sources.size})</h3>
+        ${m ? `<div class="nxa-meta">Method: ${esc(m.providers.join(', ') || 'no provider returned results')} · ${Number(m.pages_used) || 0} pages read · ${Number(m.independent_domains) || 0} independent domains · quotes checked verbatim against each page${m.providers_failed?.length ? ` · failed: ${esc(m.providers_failed.join(', '))}` : ''}</div>` : ''}
+        <ol>${[...sources.values()].map((s) => {
         const u = safeUrl(s.url);
-        return `<li>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(s.title || u)}</a>` : esc(s.title)}${s.published_at ? ` <span class="nxa-meta">${esc(String(s.published_at).slice(0, 10))}</span>` : ''}</li>`;
-      }).join('')}</ol></div>`);
+        return `<li>${s.id ? `<span class="nxa-meta">${esc(s.id)}</span> ` : ''}${u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(s.title || u)}</a>` : esc(s.title)}${s.primary ? '<span class="nxa-spec">primary</span>' : ''}${s.published_at ? ` <span class="nxa-meta">published ${esc(String(s.published_at).slice(0, 10))}</span>` : ''}${s.retrieved_at ? ` <span class="nxa-meta">· retrieved ${esc(new Date(s.retrieved_at).toISOString().slice(0, 10))}</span>` : ''}</li>`;
+      }).join('')}</ol>
+        ${run.result?.report?.conflicts?.length ? `<div class="nxa-meta nxa-warn">Sources disagree: ${esc(run.result.report.conflicts.map((c) => c.explanation).slice(0, 3).join(' | '))}</div>` : ''}</div>`);
     }
 
     if (run.result) {
       const v = run.result.verification;
       parts.push(`<div class="nxa-card"><h3>Result${run.result.mode === 'extractive' ? ' (extractive — no model summary)' : ''}</h3>
         <div class="nxa-answer">${linkCitations(run.result.answer, run.result.citations)}</div></div>`);
+      for (const r of run.result.reviews || []) {
+        parts.push(`<div class="nxa-card"><h3>Independent review — ${esc(r.label || r.specialist)}${r.blocking ? ' <span class="nxa-warn">(blocking)</span>' : ''}</h3>
+          ${r.concerns.length ? `<ul>${r.concerns.map((c) => `<li class="nxa-meta">${esc(c)}</li>`).join('')}</ul>` : '<div class="nxa-meta">No concerns raised.</div>'}</div>`);
+      }
+      if (run.result.proposed_changes?.length) {
+        parts.push(`<div class="nxa-card"><h3>Proposed changes (${run.result.proposed_changes.length}) — not applied</h3>
+          <div class="nxa-meta">Nothing in the repository was modified, run or tested. Review the diff, apply it in a branch, run the tests, then open a pull request.</div>
+          ${run.result.proposed_changes.map((c) => `<div class="nxa-meta">${esc(c.path)}</div><pre class="nxa-diff">${esc(c.diff)}</pre>`).join('')}</div>`);
+      }
       if (v) parts.push(`<div class="nxa-card"><h3>Verification${v.level ? `: ${esc(VERIFY_LABEL[v.level] || v.level)}` : ''}</h3>${v.checks.map((c) => `<div class="nxa-check ${c.passed ? 'ok' : 'bad'}">${esc(c.check)}${c.detail ? ` <span class="nxa-meta">(${esc(c.detail)})</span>` : ''}</div>`).join('')}</div>`);
       if (run.result.limitations?.length || run.result.failed_steps?.length) {
         parts.push(`<div class="nxa-card"><h3>Limitations</h3><ul>${[...run.result.failed_steps.map((f) => `${f.step}: ${f.status.replace(/_/g, ' ')}${f.error ? ` (${f.error})` : ''}`), ...run.result.limitations].map((l) => `<li class="nxa-meta">${esc(l)}</li>`).join('')}</ul></div>`);

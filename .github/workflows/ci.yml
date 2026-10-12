@@ -134,6 +134,8 @@ jobs:
         run: node tests/agent.js
       - name: Agent hardening (approvals, state machine, plans, failures, parallelism, memory)
         run: node tests/agent-hardening.js
+      - name: Agent orchestration (intent, specialists, coding tools, research report)
+        run: node tests/agent-orchestration.js
       - name: Agent evaluation suite
         run: node tests/agent-eval.js
       - name: Schema consistency

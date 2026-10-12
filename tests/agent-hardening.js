@@ -104,9 +104,26 @@ const POST = (url = 'https://hooks.example.com/a', body = { ok: true }) => ({ ti
     run = env.runner.get(1, run.id);
     t.check(run.status === 'awaiting_approval' && env.posted.length === 0, 'external step pauses for approval; nothing sent');
     const firstStep = run.pending_action.step_id;
-    t.check(env.runner.decide(userB, run.id, 'approve') === null, 'another user cannot approve (looks like a missing run)');
-    let err = null; try { env.runner.decide(userA, run.id, 'approve', { stepId: 'some-other-step' }); } catch (e) { err = e; }
-    t.check(err?.code === 'STALE_APPROVAL' && env.posted.length === 0, 'an approval for a step other than the pending one is refused');
+    t.check(env.runner.decide(userB, run.id, 'approve', { stepId: firstStep }) === null, 'another user cannot approve (looks like a missing run)');
+    const pendingBefore = env.db.prepare('SELECT status, pending_action FROM agent_runs WHERE id = ?').get(run.id);
+    const unchanged = () => {
+      const now = env.db.prepare('SELECT status, pending_action FROM agent_runs WHERE id = ?').get(run.id);
+      return now.status === pendingBefore.status && now.pending_action === pendingBefore.pending_action
+        && env.db.prepare('SELECT COUNT(*) n FROM agent_approvals WHERE run_id = ?').get(run.id).n === 0
+        && env.db.prepare('SELECT status FROM agent_run_steps WHERE id = ?').get(firstStep).status === 'needs_approval';
+    };
+    let err = null;
+    for (const [label, sid] of [['missing', undefined], ['empty', ''], ['malformed', 'some-other-step'], ['non-string', 42], ['SQL-ish', "x' OR '1'='1"]]) {
+      for (const decision of ['approve', 'reject']) {
+        err = null; try { env.runner.decide(userA, run.id, decision, sid === undefined ? {} : { stepId: sid }); } catch (e) { err = e; }
+        t.check(err?.code === 'INVALID_STEP_ID' && env.posted.length === 0 && unchanged(), `${decision} with a ${label} step_id is refused and changes nothing`);
+      }
+    }
+    const otherStep = firstStep.replace(/_s(\d+)_/, (_, n) => `_s${Number(n) + 1}_`);
+    for (const decision of ['approve', 'reject']) {
+      err = null; try { env.runner.decide(userA, run.id, decision, { stepId: otherStep }); } catch (e) { err = e; }
+      t.check(err?.code === 'STALE_APPROVAL' && env.posted.length === 0 && unchanged(), `${decision} naming a different (well-formed) step is refused and changes nothing`);
+    }
     await env.runner.decide(userA, run.id, 'approve', { stepId: firstStep });
     run = env.runner.get(1, run.id);
     t.check(env.posted.length === 1, 'the approved step ran exactly once');
@@ -125,16 +142,19 @@ const POST = (url = 'https://hooks.example.com/a', body = { ok: true }) => ({ ti
     // Tampering with the stored pending action is detected.
     const pend = JSON.parse(env.db.prepare('SELECT pending_action FROM agent_runs WHERE id = ?').get(run.id).pending_action);
     env.db.prepare('UPDATE agent_runs SET pending_action = ? WHERE id = ?').run(JSON.stringify({ ...pend, fingerprint: 'f'.repeat(32) }), run.id);
-    err = null; try { env.runner.decide(userA, run.id, 'approve'); } catch (e) { err = e; }
+    const second = pend.step_id;
+    err = null; try { env.runner.decide(userA, run.id, 'approve', { stepId: firstStep }); } catch (e) { err = e; }
+    t.check(err?.code === 'STALE_APPROVAL' && env.posted.length === 1, 'replaying the decision for the already-consumed first step is refused');
+    err = null; try { env.runner.decide(userA, run.id, 'approve', { stepId: second }); } catch (e) { err = e; }
     t.check(err?.code === 'STALE_APPROVAL' && env.posted.length === 1, 'a forged/tampered fingerprint cannot be approved');
     env.db.prepare('UPDATE agent_runs SET pending_action = ? WHERE id = ?').run(JSON.stringify({ ...pend, expires_at: Date.now() - 1 }), run.id);
-    err = null; try { env.runner.decide(userA, run.id, 'approve'); } catch (e) { err = e; }
+    err = null; try { env.runner.decide(userA, run.id, 'approve', { stepId: second }); } catch (e) { err = e; }
     t.check(err?.code === 'APPROVAL_EXPIRED' && env.posted.length === 1, 'an expired approval request is refused');
     const renewed = JSON.parse(env.db.prepare('SELECT pending_action FROM agent_runs WHERE id = ?').get(run.id).pending_action);
     t.check(renewed.expires_at > Date.now(), 'and is re-issued for a fresh review');
-    await env.runner.decide(userA, run.id, 'approve');
+    await env.runner.decide(userA, run.id, 'approve', { stepId: second });
     t.check(env.posted.length === 2 && env.runner.get(1, run.id).status === 'succeeded', 'after its own approval the second step runs once; the run completes');
-    err = null; try { env.runner.decide(userA, run.id, 'approve'); } catch (e) { err = e; }
+    err = null; try { env.runner.decide(userA, run.id, 'approve', { stepId: second }); } catch (e) { err = e; }
     t.check(err?.code === 'NOT_AWAITING', 'approving a finished run is refused');
 
     // Changed arguments need a new approval.
@@ -143,7 +163,7 @@ const POST = (url = 'https://hooks.example.com/a', body = { ok: true }) => ({ ti
     run = env.runner.create(userA, 'Notify the original webhook');
     await env.runner.start(userA, run.id);
     const sid = env.runner.get(1, run.id).pending_action.step_id;
-    await env.runner.decide(userA, run.id, 'approve').catch(() => {});
+    await env.runner.decide(userA, run.id, 'approve', { stepId: sid }).catch(() => {});
     t.check(env.posted.length === 1 && env.posted[0].url.endsWith('/original'), 'approved arguments are exactly the ones executed');
     env.script.plan = { steps: [POST('https://hooks.example.com/original')] };
     run = env.runner.create(userA, 'Notify the original webhook again');
@@ -189,7 +209,7 @@ const POST = (url = 'https://hooks.example.com/a', body = { ok: true }) => ({ ti
     env.script.plan = { steps: [POST()] };
     run = env.runner.create(userA, 'Notify the webhook once');
     await env.runner.start(userA, run.id);
-    await env.runner.decide(userA, run.id, 'approve');
+    await env.runner.decide(userA, run.id, 'approve', { stepId: env.runner.get(1, run.id).pending_action.step_id });
     run = env.runner.get(1, run.id);
     const failure = run.steps[0].failure;
     t.check(env.posted.length === 1 && failure?.category === FAILURE.TRANSIENT && failure.retryable === false, 'a failing external call is attempted once and never retried');
