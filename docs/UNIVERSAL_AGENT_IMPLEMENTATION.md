@@ -86,6 +86,16 @@ No new npm dependencies were added.
 
 **Breaking change after PR #6 (security fix).** Before, `step_id` was optional: a decision without it applied to whatever step was pending when it arrived, so a stale or replayed decision could approve or reject a later action. Now `step_id` is required for both approve and reject. It is checked at the API (format) and in the runner (exact match with the pending step). The grant or rejection and the state change are committed in one transaction. The bundled UI always sent `step_id`; other clients must send it.
 
+**Additions after PR #6 (phase 3, all additive):**
+- step: `specialist`;
+- plan: `intent` (`capability`, `secondary`, `complexity`, `signals`), `review_added` / `review_skipped`;
+- result: `specialists_used`, `reviews`, `proposed_changes`, and `report` (`methodology`, `conflicts`, `confidence`, `references`); citations carry `retrieved_at` and `primary`;
+- new events: `intent.classified`, `review.added`, `review.skipped`;
+- new failure class: `invalid_model_output`;
+- new tools: `consult_specialist`, and admin-only `repo_list`, `repo_read`, `repo_search`, `propose_edit`.
+
+See [AGENT.md](AGENT.md#orchestration-phase-3).
+
 ## 5. Security boundaries
 
 - The **tool registry is the only path to side effects.** No shell, no unrestricted filesystem access, no eval, no code execution.

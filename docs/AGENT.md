@@ -1,6 +1,7 @@
 # NexusAI agent runtime
 
 > Phase 2 hardening (approvals, state machine, validated plans, recovery, privacy routing, memory controls) is documented in [UNIVERSAL_AGENT_IMPLEMENTATION.md](UNIVERSAL_AGENT_IMPLEMENTATION.md).
+> Phase 3 (intent classification, specialists and bounded delegation, read-only coding tools, research reports) is described below. The audit behind it is [UNIVERSAL_SYSTEM_AUDIT.md](UNIVERSAL_SYSTEM_AUDIT.md).
 
 What the agent can actually do, how it is kept safe, and how to configure it.
 For the tests that back each claim, see the end of this file.
@@ -49,12 +50,55 @@ The UI (rail → **Agent**) shows the plan, each step's status, the sources, any
 pending approvals, the verification checks, the result with linked citations,
 and the activity log.
 
+### Orchestration (phase 3)
+
+```
+Goal ─► intent.js        capability (research | coding | analysis | planning | business | general)
+                         and complexity (simple | compound): deterministic, no model call
+     ─► Planner          told the task type and the available specialists; every step names a specialist
+     ─► validatePlan     a step may use only its specialist's tools; consultations ≤ 1 (simple) or
+                         AGENT_MAX_CONSULTS (compound); no duplicate consultations; a review must depend on something
+     ─► code changes proposed? → an independent security review is appended
+     ─► execute          consult_specialist = ONE model call, no tools, sees only its dependencies' outputs;
+                         citations outside those inputs are removed and reported
+     ─► synthesize       specialists_used, reviews (a blocking review fails verification),
+                         proposed_changes (diffs, never applied), research report with references
+```
+
+| Specialist | Tools | Model task |
+| --- | --- | --- |
+| research | web_research, fetch_page, recall_memory | reasoning-deep |
+| coding | repo_list, repo_read, repo_search, propose_edit (admins, `AGENT_REPO_ROOT` set) | coding-strong |
+| analysis | calculate, recall_memory | reasoning-deep |
+| planning, business | consult only | reasoning-deep |
+| quality, security (reviewers) | consult only | reasoning-fast |
+| orchestrator | write_note, http_post (approval), calculate, any unowned tool | — |
+
+The roles reuse the prompts in `agents/registry.js`. They are roles inside one runner, with one budget, one cancellation signal and one approval gate. They are not separate services.
+
+**The coding specialist is read-only:**
+- It can list, read and search the repository, and propose a find/replace change. The change is stored as a unified diff with the run.
+- It cannot write files, run code or tests, commit, push, merge or deploy. No such tool exists, and plans naming one are rejected.
+- Paths are confined to `AGENT_REPO_ROOT` after resolving symlinks.
+- `.env*`, keys, `*secret*` and `*credentials*` paths, databases, `.git` and `node_modules` are refused, and credential-shaped strings are redacted.
+- Only accounts in `ADMIN_EMAILS` see or can use these tools, because the repository describes the server itself.
+- The `*secret*` rule also hides harmless files such as `backend/security/secret-rotation.js`; this is deliberate, since it fails closed.
+
+**Research reports:**
+- When a run does web research, `result.report` adds:
+  - the methodology (providers that answered and failed, pages read, independent domains, and the verbatim-quote rule);
+  - conflicts between sources;
+  - references (title, URL, published and retrieval time, primary-source flag).
+- All of it is built from tool output, not written by a model.
+- The Analyst is asked for an executive summary, findings with `[E#]`, conflicting evidence, implications and limitations.
+
 ## Safety model
 
 | Concern | Control |
 | --- | --- |
-| Acting on the outside world | Tools are classed `read`, `workspace` or `external`. An `external` tool (currently `http_post`) never runs without an approval for that exact tool and those exact arguments. The run pauses as `awaiting_approval` and shows the action. An approval does not carry over to different arguments. External and workspace actions are never retried automatically. |
-| Unknown or invented tools | A plan step naming an unregistered tool is dropped and never executed. |
+| Acting on the outside world | Tools are classed `read`, `workspace` or `external`. An `external` tool (currently `http_post`) never runs without an approval for that exact step, tool and arguments. The run pauses as `awaiting_approval` and shows the action. The decision must name the pending `step_id`; it is single-use and expires. An approval does not carry over to different arguments. External and workspace actions are never retried automatically. |
+| Unknown or invented tools | A plan naming an unregistered tool (or one the account may not use) is rejected as a whole and repaired once; the tool never runs. |
+| Delegation | Specialists cannot call tools, create steps or delegate further. Each specialist may use only its own tools. |
 | Prompt injection in web pages | Page text reaches the model only inside `<source>` / `<tool_output>` blocks that the text cannot close, with instructions to treat it as data. Pages that address the AI are flagged and ranked down, and quotes containing injection text are rejected. Even if a manipulated plan asks for an external action, it still needs approval. |
 | Hallucinated sources | A claim counts only if its quote appears verbatim in the fetched page. Citations to sources that were not retrieved are stripped and reported. |
 | SSRF | All fetching goes through `security/safe-http.js`: public addresses only, re-checked on every redirect, 2 MB cap. |
@@ -63,12 +107,20 @@ and the activity log.
 | Tenant isolation | Every run, event, lesson and evidence query is scoped to the requesting user. Another user's run returns 404. |
 | Memory poisoning | The agent can only **propose** lessons. A lesson is used only after the user approves it. Lessons are length-limited, refused if they read like injected instructions, de-duplicated, and given to the planner as advisory notes. |
 | Guests | Read-only tools, smaller budgets, one active run, and no lesson memory. Enforced on the server. |
-| Restarts | Runs interrupted by a restart are marked `failed` (not left "running"). |
+| Restarts | Read-only runs interrupted by a restart are resumed. An external action whose outcome is unknown is never repeated (`outcome_unknown`). |
 
 Nothing in this system trains or fine-tunes a model. "Learning" means stored,
 reviewed lessons and episodic records that are retrieved into later runs.
 
 ## Configuration
+
+### Orchestration and coding tools
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `AGENT_MAX_CONSULTS` | 4 (max 8) | Specialist consultations per compound task (simple tasks: 1) |
+| `AGENT_REPO_ROOT` | unset | Directory the coding specialist may read. Unset means no repository tools exist. On Railway only the `backend/` directory is deployed (Root Directory `backend`), so the most it can expose there is the backend source. Check the container's working directory before setting it. |
+| `ADMIN_EMAILS` | see `security/privileged.js` | Accounts allowed to use the repository tools |
 
 ### Models
 
@@ -135,10 +187,12 @@ which of these happened.
   headless browser would need per-request SSRF interception and a resource
   budget; it is not enabled. Pages with no readable server-rendered text are
   reported as `no_readable_content`.
-- **Parallel specialist agents.** Planner, Validator, Analyst and Reviewer are
-  roles inside one bounded loop, not independently spawning agents. Steps run
-  sequentially; independent research steps could be parallelised later within
-  the same budgets.
+- **Independent agent processes.** Specialists are roles inside one bounded
+  runner (see Orchestration), not agents that spawn agents. Independent
+  read-only steps run in parallel (`AGENT_MAX_PARALLEL`).
+- **Applying and testing code changes.** The coding specialist proposes diffs
+  only. Running tests on a change needs the isolated sandbox described under
+  code execution.
 - **Model training.** None. Lessons and evidence are retrieval-time context.
 
 ## Tests
@@ -146,10 +200,12 @@ which of these happened.
 | Suite | What it proves |
 | --- | --- |
 | `tests/research.js` (34 checks) | On a fictional fixture web: multi-round research, dedupe, provider failure, verbatim-quote verification, injection handling, contradiction detection, citations that resolve, budgets, cancellation, time limit, no-model and failing-model modes, robots.txt, CAPTCHA, cache, SSRF. |
-| `tests/agent.js` (43) | Real runner, registry, memory and engine: bounded multi-step task, dropped unknown tools, verification, observability, usage tracking, proposed vs approved lessons, isolation, replan after an SSRF-refused step, approval/rejection of external actions, guest limits, budgets, cancellation, model outage, restart safety. |
-| `tests/agent-api.js` (25) | Same over HTTP against the real server: lifecycle, SSE, ownership 404s, lesson review, validation, budget clamping, guests. |
+| `tests/agent.js` (47) | Real runner, registry, memory and engine: bounded multi-step task, dropped unknown tools, verification, observability, usage tracking, proposed vs approved lessons, isolation, replan after an SSRF-refused step, approval/rejection of external actions, guest limits, budgets, cancellation, model outage, restart safety. |
+| `tests/agent-api.js` (45) | Same over HTTP against the real server: lifecycle, SSE, ownership 404s, lesson review, validation, budget clamping, guests. |
 | `tests/inference.js` (13) | Router fallback, registry integrity, local-only end to end: the fake cloud server receives zero requests, even when the local server is down. |
-| `tests/e2e-agent.js` (13) | Chromium: the panel runs a goal, shows plan, verification and result, keeps model HTML inert, approves a lesson, and rejects an external action. |
+| `tests/agent-hardening.js` (69) | Approvals bound to step and fingerprint (missing, malformed, mismatched and replayed `step_id` refused without state change), state machine, plan validation, failure classes, deadlines, parallelism, memory. |
+| `tests/agent-orchestration.js` (79) | Intent classification, delegation and context minimisation, citation checks, reviewer disagreement, failed specialists, recursion and consultation limits, least privilege, coding tools (confinement, secrets, admin-only, diffs not applied, auto review), research report provenance. |
+| `tests/e2e-agent.js` (25) | Chromium: the panel runs a goal, shows plan, verification and result, keeps model HTML inert, approves a lesson, shows specialists, reviews and proposed diffs, and rejects an external action. |
 
 All CI tests use deterministic fakes for models and search. Live-web and
 live-model behaviour has not been tested in CI, because CI has no provider

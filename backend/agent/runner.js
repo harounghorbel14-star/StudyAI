@@ -928,7 +928,9 @@ class AgentRunner {
           providers_failed: [...new Set(research.flatMap((s) => Object.entries(s.output?.stats?.providers || {}).filter(([, st]) => st.failed > 0 && !st.ok).map(([n]) => n)))],
           verification: 'A claim is used only if its quote appears verbatim in the fetched page.',
         },
-        conflicts: research.flatMap((s) => s.output?.contradictions || []).slice(0, 10),
+        // [S#] ids are local to each research step; strip them for the run-level report.
+        conflicts: research.flatMap((s) => s.output?.contradictions || []).slice(0, 10)
+          .map((c) => ({ kind: c.kind, explanation: String(c.explanation || '').replace(/\s*\[S\d+\]/g, '').slice(0, 300) })),
         confidence: research.map((s) => s.output?.confidence).filter(Boolean),
         references: evidence.map((e) => ({ id: e.id, title: e.title, url: e.url, published_at: e.published_at, retrieved_at: e.retrieved_at, primary: e.primary })),
       } } : {}),
