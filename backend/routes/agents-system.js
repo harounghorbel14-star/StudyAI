@@ -646,8 +646,12 @@ router.post('/revenue-prediction', requireAuth, requireQuota, aiLimiter, wrap(as
 // 🤖 AUTONOMOUS MODE — AI runs by itself
 // ─────────────────────────────────────────────
 router.post('/autonomous', requireAuth, requireQuota, aiLimiter, wrap(async (req, res) => {
-  const { goal, max_iterations = 5 } = req.body;
+  const { goal } = req.body;
   if (!goal) return res.status(400).json({ error: 'Missing goal' });
+  // Each iteration is two gpt-4o calls for one quota unit: never let the client choose an unbounded count.
+  const max_iterations = Math.min(Math.max(1, Number(req.body.max_iterations) || 5), 5);
+  let clientGone = false;
+  req.on('close', () => { clientGone = true; });
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -663,7 +667,7 @@ router.post('/autonomous', requireAuth, requireQuota, aiLimiter, wrap(async (req
   let achieved = false;
 
   try {
-    while (iteration < max_iterations && !achieved) {
+    while (iteration < max_iterations && !achieved && !clientGone) {
       iteration++;
 
       send({ type: 'iteration', iteration, max_iterations });
@@ -723,6 +727,8 @@ router.post('/autonomous', requireAuth, requireQuota, aiLimiter, wrap(async (req
         iteration,
         action: plan.action,
         result: result.slice(0, 1500),
+        // Nothing was run: the model wrote what the result might be. Real tool use is /api/agent/runs.
+        simulated: true,
       });
 
       // Update context

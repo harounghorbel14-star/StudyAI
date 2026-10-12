@@ -20,6 +20,8 @@ const PLAN = JSON.stringify({ interpretation: 'compute', steps: [{ title: 'Multi
     llmRules: [
       { match: /You are the Planner of an autonomous agent[\s\S]*Notify-the-hooks/, reply: POST_PLAN },
       { match: 'You are the Planner of an autonomous agent', reply: PLAN },
+      { match: 'You are an autonomous agent. Decide the next action', reply: JSON.stringify({ thought: 't', action: 'keep going', achieved_goal: false }) },
+      { match: 'Execute this action and return the result', reply: 'pretend result' },
       { match: /You are the Planner\. A step failed[\s\S]*Notify-the-hooks/, reply: JSON.stringify({ steps: [JSON.parse(POST_PLAN).steps[1]] }) },
       { match: 'You are the Validator', reply: JSON.stringify({ satisfied: true, reason: 'number produced' }) },
       { match: 'You are the Analyst', reply: 'The product is 42 (computed with the calculate tool).' },
@@ -138,6 +140,14 @@ const PLAN = JSON.stringify({ interpretation: 'compute', steps: [{ title: 'Multi
     t.check(ar.steps.find((s) => s.id === stepB2)?.status === 'rejected' && !evA.concat((await call('GET', `/api/agent/runs/${aid}/events`, { token: ann })).body.events).some((e) => e.type === 'approval.consumed' && e.data.step_id === stepB2), 'the rejected step never ran');
     r = await decide(ann, { decision: 'reject', step_id: stepB2 });
     t.check(r.status === 409 && r.body.code === 'NOT_AWAITING', `repeating the decision after the run moved on → 409 NOT_AWAITING (${r.status})`);
+
+    t.section('Legacy /api/agents/autonomous is bounded and labelled');
+    const before2 = srv.llm.calls.filter((c) => c.text.includes('Decide the next action')).length;
+    const leg = await fetch(`${srv.base}/api/agents/autonomous`, { method: 'POST', headers: { Authorization: `Bearer ${ann}`, 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 Chrome/120', 'Accept-Language': 'en' }, body: JSON.stringify({ goal: 'loop forever', max_iterations: 1000 }) });
+    const legText = await leg.text();
+    const iterations = srv.llm.calls.filter((c) => c.text.includes('Decide the next action')).length - before2;
+    t.check(leg.status === 200 && iterations === 5, `a client asking for 1000 iterations gets at most 5 (${iterations})`);
+    t.check(/"type":"executed"[^\n]*"simulated":true/.test(legText), 'its "executed" events say the result was simulated, not run');
 
     t.section('Guests');
     const g = (await call('POST', '/api/auth/guest', { body: {} })).body.token;
